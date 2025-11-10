@@ -7,5 +7,5 @@ package dev.droppinganvil.v3.network.nodemesh;
 
 public class CXNode {
     public String cxID;
-    public
+    //TODO: Complete CXNode implementation
 }

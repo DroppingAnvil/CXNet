@@ -10,24 +10,27 @@ import dev.droppinganvil.v3.ConnectX;
 import dev.droppinganvil.v3.State;
 import dev.droppinganvil.v3.edge.NetworkRecord;
 import dev.droppinganvil.v3.network.events.NetworkEvent;
-import us.anvildevelopment.v1.util1.permissions.BasicPermissionContainer;
+import us.anvildevelopment.util.tools.permissions.BasicPermissionContainer;
 
 public class CXNetwork {
     public State networkState = State.ConnectNetworks;
     public Configuration configuration;
     public NetworkDictionary networkDictionary;
     /**
-     * Administrative
+     * Administrative chain
      */
     public NetworkRecord c1;
     /**
-     * Resources
+     * Resources chain
      */
     public NetworkRecord c2;
     /**
-     * Standard Events
+     * Standard Events chain
      */
     public NetworkRecord c3;
+    /**
+     * Network permissions
+     */
     public BasicPermissionContainer networkPermissions;
 
     public boolean checkChainPermission(String deviceID, String permission, Long chainID) {

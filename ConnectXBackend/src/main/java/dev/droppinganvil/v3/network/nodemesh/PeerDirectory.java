@@ -23,34 +23,57 @@ public class PeerDirectory implements Serializable {
     //TODO
     //Writing node lookup and create account implementation, next up create peer finding event
     public static Node lookup(String cxID, boolean tryImport, boolean sync) throws UnsafeKeywordException {
+        return lookup(cxID, tryImport, sync, null, null);
+    }
+
+    public static Node lookup(String cxID, boolean tryImport, boolean sync, File cxRoot, ConnectX cx) throws UnsafeKeywordException {
         ConnectX.checkSafety(cxID);
         if (hv.containsKey(cxID)) return hv.get(cxID);
         if (seen.containsKey(cxID)) return seen.get(cxID);
-        if (peerCache.contains(cxID)) return peerCache.get(cxID);
+        if (peerCache.containsKey(cxID)) return peerCache.get(cxID);
             char s = cxID.charAt(0);
-            if (peers == null) peers = new File(ConnectX.cxRoot, "nodemesh");
+            if (peers == null && cxRoot != null) peers = new File(cxRoot, "nodemesh");
+            if (peers == null) return null;
             File peerGroup = new File(peers, String.valueOf(s));
             if (peerGroup.exists()) {
                 File peer = new File(peerGroup, cxID+".cxi");
                 if (peer.exists()) {
                     //if (sync) {
-                        Node node = ConnectX.getSignedObject(cxID, peer.toURL().openStream(), Node.class, "cxJSON1");
-                        peerCache.put(cxID, node);
-                        ConnectX.encryptionProvider.cacheCert(cxID, false, false);
-                        return node;
+                        try {
+                            Node node = null;
+                            if (cx != null) {
+                                node = (Node) cx.getSignedObject(cxID, peer.toURL().openStream(), Node.class, "cxJSON1");
+                                cx.encryptionProvider.cacheCert(cxID, false, false);
+                            }
+                            if (node != null) {
+                                peerCache.put(cxID, node);
+                                return node;
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
                    // } else {
                         //TODO async
                   //  }
                 }
             } else if (tryImport & sync) {
-
+                //TODO implement peer import
             }
+        return null;
+    }
 
+    public static void addNode(Node n) {
+        if (Node.validate(n)) {
+            //TODO implement node addition to cache/persistence
+            seen.put(n.cxID, n);
+        } else {
+            throw new IllegalStateException();
+        }
     }
 
     public static void addNode(Node n, byte[] signed) {
         if (Node.validate(n)) {
-
+            //TODO implement node persistence with signed bytes
         } else {
             throw new IllegalStateException();
         }

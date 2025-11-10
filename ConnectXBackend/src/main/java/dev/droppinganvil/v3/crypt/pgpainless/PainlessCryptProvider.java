@@ -31,7 +31,7 @@ public class PainlessCryptProvider extends CryptProvider {
     /**
      * On board secret key
      */
-    private static PGPSecretKeyRing secretKey;
+    private PGPSecretKeyRing secretKey;
     /**
      * Network public key cache
      */
@@ -44,7 +44,21 @@ public class PainlessCryptProvider extends CryptProvider {
      * NMI Public key
      */
     public PGPPublicKeyRing nmipubkey;
-    private final SecretKeyRingProtector protector = SecretKeyRingProtector.unprotectedKeys();
+    private SecretKeyRingProtector protector;
+
+    @Override
+    public String getPublicKey() {
+        if (publicKey == null) return null;
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            publicKey.encode(baos);
+            return java.util.Base64.getEncoder().encodeToString(baos.toByteArray());
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
     @Override
     public boolean verifyAndStrip(InputStream is, OutputStream os, String cxID) throws DecryptionFailureException {
         if (cacheCert(cxID, false, true)) {
@@ -70,6 +84,9 @@ public class PainlessCryptProvider extends CryptProvider {
     @Override
     public void encrypt(InputStream is, OutputStream os, String cxID) throws EncryptionFailureException {
         if (!cacheCert(cxID, false, true)) throw new EncryptionFailureException();
+        if (is == null) {
+            throw new EncryptionFailureException("InputStream cannot be null - no data to encrypt");
+        }
         try {
             EncryptionStream encryptor = PGPainless.encryptAndOrSign()
                     .onOutputStream(os)
@@ -81,6 +98,9 @@ public class PainlessCryptProvider extends CryptProvider {
                                     .addInlineSignature(protector, secretKey, DocumentSignatureType.CANONICAL_TEXT_DOCUMENT)
                             ).setAsciiArmor(false)
                     );
+            // CRITICAL: Must pipe data and close stream to finalize encryption
+            Streams.pipeAll(is, encryptor);
+            encryptor.close();
         } catch (Exception e) {
             EncryptionFailureException efe = new EncryptionFailureException();
             efe.initCause(e);
@@ -89,12 +109,21 @@ public class PainlessCryptProvider extends CryptProvider {
     }
     @Override
     public void sign(InputStream is, OutputStream os) throws EncryptionFailureException {
+        if (!ready) {
+            throw new EncryptionFailureException("Encryption provider not initialized - call setup() first");
+        }
+        if (is == null) {
+            throw new EncryptionFailureException("InputStream cannot be null - no data to sign");
+        }
         try {
             EncryptionStream encryptor = PGPainless.encryptAndOrSign()
                     .onOutputStream(os)
                     .withOptions(ProducerOptions.sign(new SigningOptions().addInlineSignature(protector, secretKey, DocumentSignatureType.CANONICAL_TEXT_DOCUMENT)
                             ).setAsciiArmor(false)
                     );
+            // CRITICAL: Must pipe data and close stream to finalize signature
+            Streams.pipeAll(is, encryptor);
+            encryptor.close();
         } catch (Exception e) {
             EncryptionFailureException efe = new EncryptionFailureException();
             efe.initCause(e);
@@ -157,7 +186,13 @@ public class PainlessCryptProvider extends CryptProvider {
             EncryptionStream es = PGPainless.encryptAndOrSign().onOutputStream(fos).withOptions(ProducerOptions.encrypt(new EncryptionOptions()
             .addPassphrase(Passphrase.fromPassword(s))));
             Streams.pipeAll(new ByteArrayInputStream(baos.toByteArray()), es);
+            es.close();  // CRITICAL: Must close EncryptionStream to finalize the encrypted file
+            fos.close(); // Close the file output stream
         }
+
+        // Initialize protector with the passphrase AFTER loading secretKey
+        protector = SecretKeyRingProtector.unlockAllKeysWith(Passphrase.fromPassword(s), secretKey);
+
         publicKey = KeyRingUtils.publicKeyRingFrom(secretKey);
         File nmipublicKeyFile = new File(dir, "cx.asc");
         if (nmipublicKeyFile.exists()) {

@@ -5,7 +5,7 @@
 
 package dev.droppinganvil.v3.edge;
 
-import us.anvildevelopment.v1.util1.database.annotations.MemoryOnly;
+import us.anvildevelopment.util.tools.database.annotations.MemoryOnly;
 
 import java.io.Serializable;
 import java.util.Map;

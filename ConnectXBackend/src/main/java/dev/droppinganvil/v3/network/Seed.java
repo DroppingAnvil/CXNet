@@ -8,5 +8,5 @@ package dev.droppinganvil.v3.network;
 import java.io.Serializable;
 
 public class Seed implements Serializable {
-    public
+    //TODO: Complete Seed implementation
 }

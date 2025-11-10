@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.VBox?>
+<BorderPane xmlns="http://javafx.com/javafx"
+            xmlns:fx="http://javafx.com/fxml"
+            fx:controller="dev.droppinganvil.v3.control.panel.Panel"
+            stylesheets="Panel.css"
+            prefHeight="1300.0" prefWidth="1000.0">
+    <top>
+        <BorderPane styleClass="header-section">
+            <left>
+                <Label text="Home" fx:id="viewName"/>
+            </left>
+            <right>
+                <Label fx:id="User"/>
+            </right>
+        </BorderPane>
+    </top>
+    <left>
+        <VBox alignment="TOP_CENTER" styleClass="content-bar" fx:id="menu">
+            <children>
+                <Button text="Create Account" fx:id="userManagement"/>
+                <Button text="Process Management" fx:id="serverManagement"/>
+                <Button text="Module Management" fx:id="moduleManagement"/>
+            </children>
+        </VBox>
+    </left>
+    <center>
+        <VBox alignment="TOP_CENTER" styleClass="content" fx:id="content">
+            <children>
+                <Label text="test"></Label>
+            </children>
+        </VBox>
+    </center>
+
+</BorderPane>

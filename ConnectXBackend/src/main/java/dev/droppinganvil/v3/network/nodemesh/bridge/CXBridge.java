@@ -14,7 +14,7 @@ public interface CXBridge {
     String getProtocol();
     Integer getVersion();
     void setup();
-    Socket connect(CXPath path, byte);
+    Socket connect(CXPath path, byte[] data);
     boolean getDirectSocket();
     boolean transmitEvent(CXPath path, byte[] data);
 }

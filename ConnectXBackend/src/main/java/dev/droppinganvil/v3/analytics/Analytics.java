@@ -21,10 +21,10 @@ public class Analytics {
             }
         }
         if (analyticData.containsKey(ad)) {
-            analyticData.replace(ad, analyticData.get(ad), analyticData.get(ad) +1);
+            analyticData.replace(ad, analyticData.get(ad), analyticData.get(ad) + "1");
             //todo Analytics
             } else {
-            analyticData.put(ad, 1);
+            analyticData.put(ad, "1");
         }
         }
 }

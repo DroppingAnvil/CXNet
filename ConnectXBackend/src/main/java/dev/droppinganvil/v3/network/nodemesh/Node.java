@@ -1,6 +1,7 @@
 package dev.droppinganvil.v3.network.nodemesh;
 
 import dev.droppinganvil.v3.network.CXPath;
+import us.anvildevelopment.util.tools.database.annotations.MemoryOnly;
 
 import java.io.Serializable;
 
@@ -17,6 +18,12 @@ public class Node implements Serializable {
      * Node public key
      */
     public String publicKey;
+    /**
+     * TCP/IP address in format host:port for direct P2P connections
+     * Stored locally only - NOT serialized to blockchain
+     */
+    @MemoryOnly
+    public String addr;
     /**
      * For future use RESERVED
      */

@@ -51,7 +51,7 @@ public class ContainerUnlock {
         instance.continue_button.setOnAction(new EventHandler<ActionEvent>() {
             @Override public void handle(ActionEvent e) {
                 instance.login_response.setText("Decrypting...");
-                app.attemptLogin(instance.id_entry.getText(), instance.password_entry.getText())
+                app.attemptLogin(instance.id_entry.getText(), instance.password_entry.getText());
             }
         });
     }

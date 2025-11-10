@@ -2,8 +2,8 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/ConnectX.iml" filepath="$PROJECT_DIR$/.idea/ConnectX.iml" />
-      <module fileurl="file://$PROJECT_DIR$/ConnectXBackend/ConnectXBackend.iml" filepath="$PROJECT_DIR$/ConnectXBackend/ConnectXBackend.iml" />
+      <module fileurl="file://$PROJECT_DIR$/ConnectXBackend/ConnectX.iml" filepath="$PROJECT_DIR$/ConnectXBackend/ConnectX.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/Open-Connect.iml" filepath="$PROJECT_DIR$/.idea/Open-Connect.iml" />
     </modules>
   </component>
 </project>

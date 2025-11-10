@@ -20,21 +20,65 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 
 public class NodeMesh {
-    public static ServerSocket serverSocket;
-    public static ConcurrentHashMap<String, ArrayList<String>> transmissionIDMap = new ConcurrentHashMap<>();
+    // Global static fields for security (shared across all peers)
     public static ConcurrentHashMap<String, Integer> timeout = new ConcurrentHashMap<>();
     public static ConcurrentHashMap<String, String> blacklist = new ConcurrentHashMap<>();
-    public static PeerDirectory peers;
-    public static InConnectionManager in;
-    public static Connections connections = new Connections();
     public static ThreadPoolExecutor threadPool = (ThreadPoolExecutor) Executors.newFixedThreadPool(NodeConfig.pThreads);
+
+    // Instance fields (per-peer)
+    public ServerSocket serverSocket;
+    public ConcurrentHashMap<String, ArrayList<String>> transmissionIDMap = new ConcurrentHashMap<>();
+    public PeerDirectory peers;
+    public InConnectionManager in;
+    public Connections connections = new Connections();
+    public ConnectX connectX;
+
     //Initial object must be signed by initiator
     //If it is a global resource encrypting for only the next recipient node is acceptable
     //If it is not a global resource it must be encrypted using only the end recipients key then re encrypted for transport
-    public NodeMesh(ServerSocket serverSocket) {
-
+    public NodeMesh(ConnectX connectX) {
+        this.connectX = connectX;
     }
-    public static void processNetworkInput(InputStream is, Socket socket) throws IOException, DecryptionFailureException, ClassNotFoundException, UnauthorizedNetworkConnectivityException {
+
+    /**
+     * Initialize and start all network processing threads
+     * @param connectX ConnectX instance for thread context
+     * @param port Port number for ServerSocket
+     * @param outController Outbound connection controller
+     * @return NodeMesh instance
+     */
+    public static NodeMesh initializeNetwork(dev.droppinganvil.v3.ConnectX connectX, int port, OutConnectionController outController) throws IOException {
+        // Create NodeMesh instance
+        NodeMesh nodeMesh = new NodeMesh(connectX);
+
+        // Initialize InConnectionManager with ServerSocket
+        nodeMesh.in = new InConnectionManager(port, nodeMesh);
+
+        // Start IO worker threads for job queue processing
+        for (int i = 0; i < NodeConfig.ioThreads; i++) {
+            Thread ioThread = new Thread(new dev.droppinganvil.v3.io.IOThread(NodeConfig.IO_THREAD_SLEEP, connectX, nodeMesh));
+            ioThread.setName("IOThread-" + i);
+            ioThread.start();
+        }
+
+        // Start SocketWatcher for incoming connections
+        Thread socketWatcher = new Thread(new dev.droppinganvil.v3.network.threads.SocketWatcher(connectX, nodeMesh));
+        socketWatcher.setName("SocketWatcher");
+        socketWatcher.start();
+
+        // Start EventProcessor for processing eventQueue
+        Thread eventProcessor = new Thread(new dev.droppinganvil.v3.network.threads.EventProcessor(nodeMesh));
+        eventProcessor.setName("EventProcessor");
+        eventProcessor.start();
+
+        // Start OutputProcessor for processing outputQueue
+        Thread outputProcessor = new Thread(new dev.droppinganvil.v3.network.threads.OutputProcessor(outController));
+        outputProcessor.setName("OutputProcessor");
+        outputProcessor.start();
+
+        return nodeMesh;
+    }
+    public void processNetworkInput(InputStream is, Socket socket) throws IOException, DecryptionFailureException, ClassNotFoundException, UnauthorizedNetworkConnectivityException {
         //TODO optimize streams
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         //TODO max size
@@ -44,7 +88,7 @@ public class NodeMesh {
         ByteArrayInputStream bais;
         String networkEvent = "";
 
-        Object o = ConnectX.encryptionProvider.decrypt(is, baos);
+        Object o = connectX.encryptionProvider.decrypt(is, baos);
         String networkContainer = baos.toString("UTF-8");
         try {
             nc = (NetworkContainer) ConnectX.deserialize("cxJSON1", networkContainer, NetworkContainer.class);
@@ -62,9 +106,9 @@ public class NodeMesh {
             if (nc.s) {
                 //TODO verification of full encrypt
                 throw new DecryptionFailureException();
-                //o1 = ConnectX.encryptionProvider.decrypt(bais, baoss);
+                //o1 = connectX.encryptionProvider.decrypt(bais, baoss);
             } else {
-                o1 = ConnectX.encryptionProvider.verifyAndStrip(bais, baoss, nc.iD);
+                o1 = connectX.encryptionProvider.verifyAndStrip(bais, baoss, nc.iD);
             }
             networkEvent = baos.toString("UTF-8");
             ne = (NetworkEvent) ConnectX.deserialize(nc.se, networkEvent, NetworkEvent.class);
@@ -87,9 +131,10 @@ public class NodeMesh {
         }
     }
 
-    public static void processEvent() throws IOException, DecryptionFailureException {
+    public void processEvent() throws IOException, DecryptionFailureException {
         synchronized (ConnectX.eventQueue) {
             InputBundle ib = ConnectX.eventQueue.poll();
+            if (ib == null) return; // Queue is empty
             EventType et = null;
             try {
                 et = EventType.valueOf(ib.ne.eT);
@@ -104,34 +149,42 @@ public class NodeMesh {
             }
             if (ib!=null) {
                 //TODO non constant handling
-                switch (et) {
-                    case NewNode:
-                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                        ByteArrayInputStream bais = new ByteArrayInputStream(ib.nc.e);
-                        Object o = ConnectX.encryptionProvider.decrypt(bais, baos);
-                        Node node = ConnectX.deserialize("cxJSON1", baos.toString("UTF-8"), Node.class);
-                        Node node1 = PeerDirectory.lookup(node.cxID, true, true);
-                        if (node1 != null) {
-                            ConnectX.encryptionProvider.cacheCert(node1.cxID, true, false);
-                            return;
-                        }
-                        PeerDirectory.addNode(node);
-                        break;
+                try {
+                    switch (et) {
+                        case NewNode:
+                            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                            ByteArrayInputStream bais = new ByteArrayInputStream(ib.nc.e);
+                            Object o = connectX.encryptionProvider.decrypt(bais, baos);
+                            Node node = (Node) ConnectX.deserialize("cxJSON1", baos.toString("UTF-8"), Node.class);
+                            Node node1 = PeerDirectory.lookup(node.cxID, true, true, connectX.cxRoot, connectX);
+                            if (node1 != null) {
+                                connectX.encryptionProvider.cacheCert(node1.cxID, true, false);
+                                return;
+                            }
+                            PeerDirectory.addNode(node);
+                            break;
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    throw new DecryptionFailureException();
                 }
             }
         }
     }
-    public static boolean fireEvent(NetworkEvent ne) {
-        if (ne.target.equalsIgnoreCase("CXN")) {
+    public boolean fireEvent(NetworkEvent ne) {
+        if (ne.p != null && ne.p.scope != null && ne.p.scope.equalsIgnoreCase("CXN")) {
             for (Node n : PeerDirectory.hv.values()) {
-                if
+                //TODO implement network backend event distribution
             }
         }
         if (ne.eT.equalsIgnoreCase(EventType.PeerFinding.name())) {
-
+            //TODO implement peer finding
         }
+        //TODO implement event firing logic
+        return false;
     }
     public boolean connectNetwork(CXNetwork cxnet) {
-        if (cxnet.)
+        //TODO implement network connection
+        return false;
     }
 }

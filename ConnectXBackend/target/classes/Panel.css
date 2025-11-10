@@ -1,0 +1,22 @@
+.content-bar .button {
+    -fx-background-color: TRANSPARENT;
+    -fx-text-fill: WHITE;
+    -fx-padding: 2px;
+    -fx-background-color: TRANSPARENT;
+}
+
+.content-bar {
+    -fx-background-color: purple;
+    -fx-stroke: 10px;
+    -fx-border-color: BLACK;
+}
+
+.content {
+    -fx-background-color: PURPLE;
+}
+.content .button {
+    -fx-background-color: TRANSPARENT;
+    -fx-text-fill: WHITE;
+    -fx-padding: 2px;
+    -fx-background-color: TRANSPARENT;
+}

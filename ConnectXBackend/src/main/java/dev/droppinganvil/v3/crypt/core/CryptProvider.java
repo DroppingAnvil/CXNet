@@ -27,9 +27,21 @@ public abstract class CryptProvider {
     /**
      * @param is Signed input
      * @param os Output stripped of all encryption meta
+     * @param cxID The cxID to lookup the public key for verification
      * @return Verification status (True being successful)
      */
     public boolean verifyAndStrip(InputStream is, OutputStream os, String cxID) throws DecryptionFailureException {
+        return false;
+    }
+
+    /**
+     * Verify and strip signature using a public key directly
+     * @param is Signed input
+     * @param os Output stripped of all encryption meta
+     * @param publicKeyBase64 Base64-encoded PGP public key
+     * @return Verification status (True being successful)
+     */
+    public boolean verifyAndStripWithKey(InputStream is, OutputStream os, String publicKeyBase64) throws DecryptionFailureException {
         return false;
     }
     public void encrypt(InputStream is, OutputStream os, String cxID) throws EncryptionFailureException {

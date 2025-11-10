@@ -25,14 +25,14 @@ public class OutConnectionController {
                 assert out.n != null;
                 //TODO
             } else {
-                nc.iD = ConnectX.getOwnID();
+                nc.iD = connectXAPI.getOwnID();
                 if (NodeConfig.revealVersion) nc.v = NodeConfig.cxV;
-                cryptEvent = ConnectX.signObject(out.ne, NetworkEvent.class, nc.se).toByteArray();
+                cryptEvent = connectXAPI.signObject(out.ne, NetworkEvent.class, nc.se).toByteArray();
             }
         }
         nc.e = cryptEvent;
-        byte[] cryptNetworkContainer = ConnectX.signObject(nc, NetworkContainer.class, nc.se).toByteArray();
-        if (out.ne.target.equalsIgnoreCase("CXNET")) {
+        byte[] cryptNetworkContainer = connectXAPI.signObject(nc, NetworkContainer.class, nc.se).toByteArray();
+        if (out.ne.p != null && out.ne.p.scope != null && out.ne.p.scope.equalsIgnoreCase("CXNET")) {
             for (Node n : PeerDirectory.hv.values()) {
                 try {
                     if (n.addr != null) {
@@ -48,14 +48,14 @@ public class OutConnectionController {
                     continue;
                 }
             }
-        } else {
-            String[] path = out.ne.target.split(":");
-            if (path[0].equalsIgnoreCase("CXS")) {
+        } else if (out.ne.p != null && out.ne.p.scope != null) {
+            if (out.ne.p.scope.equalsIgnoreCase("CXS")) {
+                // Single peer transmission using CXPath.cxID
                 Node n;
-                if (PeerDirectory.lan.containsKey(path[1])) {
-                    n = PeerDirectory.lan.get(path[1]);
+                if (PeerDirectory.lan.containsKey(out.ne.p.cxID)) {
+                    n = PeerDirectory.lan.get(out.ne.p.cxID);
                 } else {
-                    n = PeerDirectory.lookup(path[1], true, true);
+                    n = PeerDirectory.lookup(out.ne.p.cxID, true, true);
                 }
                 String[] addr = n.addr.split(":");
                 Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
@@ -63,8 +63,9 @@ public class OutConnectionController {
                 s.close();
                 return;
             }
-            if (path[0].equalsIgnoreCase("CXN")) {
-                CXNetwork cxn = ConnectX.getNetwork(path[1]);
+            if (out.ne.p.scope.equalsIgnoreCase("CXN")) {
+                // Network backend transmission using CXPath.network
+                CXNetwork cxn = ConnectX.getNetwork(out.ne.p.network);
                 if (cxn != null) {
                     for (String s : cxn.configuration.backendSet) {
                         Node n = PeerDirectory.lookup(s, true, true);

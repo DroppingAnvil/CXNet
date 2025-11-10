@@ -56,20 +56,29 @@ public class Resource implements Serializable {
      * Resource data if contained
      */
     public byte[] rD;
-    public Object getObject(Class<?> clazz, Boolean sync, boolean tryImports) {
+    /**
+     * ConnectX instance for crypto and file operations
+     */
+    private transient ConnectX cx;
+
+    public void setConnectX(ConnectX cx) {
+        this.cx = cx;
+    }
+
+    public Object getObject(Class<?> clazz, Boolean sync, boolean tryImports) throws Exception {
         if (o != null) return o;
-        Node owner = PeerDirectory.lookup(oID, tryImports, true);
+        Node owner = PeerDirectory.lookup(oID, tryImports, true, cx.cxRoot, cx);
         if (rD != null & !ref) {
             ByteArrayInputStream bais = new ByteArrayInputStream(rD);
-            o = ConnectX.getSignedObject(oID, bais, clazz, m);
+            o = cx.getSignedObject(oID, bais, clazz, m);
             return o;
         }
         File f = null;
         //TODO futureproof
         switch (p.getScope()) {
-            case CXN: f = new File(ConnectX.resources, p.network);
+            case CXN: f = new File(cx.resources, p.network);
             break;
-            case CXS: f = new File(ConnectX.resources, p.cxID);
+            case CXS: f = new File(cx.resources, p.cxID);
             break;
         }
         if (f!=null & !f.exists()) f.mkdir();
@@ -78,20 +87,39 @@ public class Resource implements Serializable {
             if (ref) {
                 File signedObject = new File(resource, "cobj.cx");
                 if (signedObject.exists()) {
-                    o = ConnectX.getSignedObject(oID, signedObject.toURL().openStream(), clazz, "cxJSON1");
+                    o = cx.getSignedObject(oID, signedObject.toURL().openStream(), clazz, "cxJSON1");
                     return o;
                 } else if (tryImports) {
-
+                    //TODO implement resource import from network
                 }
             } else {
                 return null;
             }
         }
-
+        return null;
     }
 
-    public static void importResource(Resource r) {
-        File
+    public static void importResource(Resource r, ConnectX cx) {
+        // Determine resource directory based on CXPath scope
+        File resourceDir = cx.locateResourceDIR(r);
+        if (resourceDir == null) return;
+
+        File resourceFile = new File(resourceDir, r.p.resourceID);
+
+        // If resource already exists locally, no need to add reference (avoid network slowdown)
+        if (resourceFile.exists()) {
+            return;
+        }
+
+        // Create directory structure if needed
+        if (!resourceDir.exists()) {
+            resourceDir.mkdirs();
+        }
+
+        //TODO: Fetch resource data from network if not local
+        //TODO: Verify network permissions will accept this resource before adding to c2
+        //TODO: Write resource to local storage
+        //TODO: Add reference to blockchain c2 (resources chain) only if new
     }
 
     public Resource publish(CXNetwork cxnet, ResourceType type, Availability availability, String hash, String resourceLocation, Object o) throws IllegalAccessException {
@@ -102,16 +130,19 @@ public class Resource implements Serializable {
         switch (availability) {
             case PRIVATE_SYSTEM:
                 if (!cxnet.configuration.unlimitedUpload) {
-                    Integer w = cxnet.getVariableNetworkPermission(ConnectX.getOwnID(), Permission.AddResource.name());
+                    Integer w = cxnet.getVariableNetworkPermission(cx.getOwnID(), Permission.AddResource.name());
                     if (w!=null && w!=0) {
-                        if (ConnectX.locateResourceDIR(this).listFiles().length < w) {
-
+                        if (cx.locateResourceDIR(this).listFiles().length < w) {
+                            //TODO implement resource publishing
+                        } else {
+                            throw new IllegalAccessException();
                         }
-                    }
+                    } else {
                         throw new IllegalAccessException();
-                        break;
+                    }
                 }
         }
+        return null;
     }
     //TODO resourceID validate
 }

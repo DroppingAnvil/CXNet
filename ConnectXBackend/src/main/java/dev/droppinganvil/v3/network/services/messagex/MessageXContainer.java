@@ -13,6 +13,7 @@ public class MessageXContainer implements Serializable {
     public Map<String, Chat> chats = new HashMap<>();
 
     public Boolean transmitMessage(Message m) {
-
+        //TODO implement message transmission
+        return false;
     }
 }

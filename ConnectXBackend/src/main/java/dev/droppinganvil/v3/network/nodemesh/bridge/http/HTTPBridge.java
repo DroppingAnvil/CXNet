@@ -38,7 +38,7 @@ public class HTTPBridge implements CXBridge {
     }
 
     @Override
-    public Socket connect(CXPath path) {
+    public Socket connect(CXPath path, byte[] data) {
         return null;
     }
 
@@ -49,10 +49,16 @@ public class HTTPBridge implements CXBridge {
 
     @Override
     public boolean transmitEvent(CXPath path, byte[] data) {
-        RequestBody rb = RequestBody.create(data, jsonType);
-        Request r = new Request.Builder().url(path.bridgeArg).post(rb).build();
-        Response rr = httpClient.newCall(r).execute();
-        rr.
-        return false;
+        try {
+            RequestBody rb = RequestBody.create(data, jsonType);
+            Request r = new Request.Builder().url(path.bridgeArg).post(rb).build();
+            Response rr = httpClient.newCall(r).execute();
+            //TODO handle response
+            rr.close();
+            return rr.isSuccessful();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
     }
 }

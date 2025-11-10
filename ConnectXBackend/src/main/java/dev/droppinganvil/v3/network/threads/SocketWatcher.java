@@ -18,9 +18,11 @@ import java.net.Socket;
 public class SocketWatcher implements Runnable {
     public static boolean active = true;
     public ConnectX cx;
+    private NodeMesh nodeMesh;
 
-    public SocketWatcher(ConnectX cx) {
+    public SocketWatcher(ConnectX cx, NodeMesh nodeMesh) {
         this.cx = cx;
+        this.nodeMesh = nodeMesh;
     }
     @Override
     public void run() {

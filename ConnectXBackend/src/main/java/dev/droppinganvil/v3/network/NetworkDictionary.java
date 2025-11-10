@@ -5,7 +5,7 @@
 
 package dev.droppinganvil.v3.network;
 
-import us.anvildevelopment.v1.util1.permissions.BasicPermissionContainer;
+import us.anvildevelopment.util.tools.permissions.BasicPermissionContainer;
 
 import java.io.Serializable;
 import java.util.ArrayList;

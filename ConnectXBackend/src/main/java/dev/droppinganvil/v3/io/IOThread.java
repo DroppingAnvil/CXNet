@@ -21,15 +21,18 @@ public class IOThread implements Runnable {
     public Long sleep;
     public BaseStatus status;
     public ConnectX cx;
+    private NodeMesh nodeMesh;
 
-    public IOThread(Long sleep, ConnectX cx) {
+    public IOThread(Long sleep, ConnectX cx, NodeMesh nodeMesh) {
         this.cx = cx;
+        this.nodeMesh = nodeMesh;
         assert sleep != null;
         this.sleep = sleep;
     }
 
-    public IOThread(Long sleep, BaseStatus bs, ConnectX cx) {
+    public IOThread(Long sleep, BaseStatus bs, ConnectX cx, NodeMesh nodeMesh) {
         this.cx = cx;
+        this.nodeMesh = nodeMesh;
         assert sleep != null;
         this.sleep = sleep;
         status = bs;
@@ -100,7 +103,7 @@ public class IOThread implements Runnable {
                     break;
                 case NETWORK_READ:
                     NetworkInputIOJob ioj = (NetworkInputIOJob) ioJob;
-                    NodeMesh.processNetworkInput(ioJob.is, ioj.s);
+                    nodeMesh.processNetworkInput(ioJob.is, ioj.s);
                     break;
                 case SIGN_OBJECT:
             }

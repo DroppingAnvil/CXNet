@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+  ~ Copyright (c) 2021. Christopher (DroppingAnvil) Willett.
+  ~ All Rights Reserved.
+  -->
+
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.VBox?>
+<BorderPane xmlns="http://javafx.com/javafx"
+            xmlns:fx="http://javafx.com/fxml"
+            fx:controller="dev.droppinganvil.v3.login.Login" stylesheets="Login.css">
+    <top>
+        <BorderPane styleClass="header-section">
+            <center>
+                <Label id="header-text" text="Login"/>
+            </center>
+        </BorderPane>
+    </top>
+    <center>
+        <VBox alignment="center" styleClass="content-section" id="content_view" fx:id="content">
+            <children>
+                <TextField promptText="Email" fx:id="email_entry"/>
+                <PasswordField promptText="Password" fx:id="password_entry"/>
+                <Button text="Continue" fx:id="continue_button"/>
+                <Label styleClass="login-response" fx:id="login_response"/>
+            </children>
+        </VBox>
+    </center>
+    <Label styleClass="copyright" text="Copyright (c) 2021 Christopher Willett"/>
+
+
+</BorderPane>

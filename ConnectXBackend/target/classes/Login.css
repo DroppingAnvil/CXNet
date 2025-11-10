@@ -1,0 +1,30 @@
+.root {
+    -fx-background-color: linear-gradient(#ffafbd, #ffc3a0);;
+}
+.button {
+    -fx-alignment: center;
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-text-fill: purple;
+}
+.text-field {
+    -fx-padding: 20px;
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-alignment: center;
+}
+
+.header-section {
+    -fx-padding: 10px;
+    -fx-font-family: Futura;
+    -fx-font-style: italic;
+    -fx-font-size: 20px;
+}
+
+.login-response {
+    -fx-alignment: center;
+    -fx-text-fill: red;
+}
+.copyright {
+    -fx-alignment: center;
+}

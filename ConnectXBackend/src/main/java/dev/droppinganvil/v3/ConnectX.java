@@ -8,6 +8,7 @@ package dev.droppinganvil.v3;
 import dev.droppinganvil.v3.api.CXPlugin;
 import dev.droppinganvil.v3.crypt.core.CryptProvider;
 import dev.droppinganvil.v3.crypt.pgpainless.PainlessCryptProvider;
+import dev.droppinganvil.v3.edge.NetworkRecord;
 import dev.droppinganvil.v3.exceptions.UnsafeKeywordException;
 import dev.droppinganvil.v3.io.IOJob;
 import dev.droppinganvil.v3.io.strings.JacksonProvider;
@@ -455,11 +456,83 @@ public class ConnectX {
         if (!plugins.containsKey(eventType)) return false;
         return plugins.get(eventType).handleEvent(ne);
     }
-    public static boolean recordEvent(NetworkEvent ne) {
-        if (ne.p != null && ne.p.scope != null && ne.p.scope.equalsIgnoreCase("cx")) {
-            //TODO implement CX network event recording
+    /**
+     * Record a NetworkEvent to the blockchain
+     * @param ne NetworkEvent to record
+     * @param senderID cxID of the node attempting to record (for permission check)
+     * @return true if successfully recorded, false otherwise
+     */
+    public boolean recordEvent(NetworkEvent ne, String senderID) {
+        if (ne == null || ne.p == null) {
+            return false;
         }
-        //TODO implement general event recording
+
+        // Get network ID from CXPath
+        String networkID = ne.p.network;
+        if (networkID == null || networkID.isEmpty()) {
+            return false;
+        }
+
+        // Get the network
+        CXNetwork network = networkMap.get(networkID);
+        if (network == null) {
+            return false;
+        }
+
+        // Determine which chain to use based on event type
+        // Default to c3 (Events chain) for most events
+        NetworkRecord targetChain = network.c3;
+        Long chainID = network.networkDictionary.c3;
+
+        // TODO: Add logic to route specific event types to c1 (Admin) or c2 (Resources)
+        // For now, all events go to c3
+
+        // Check if sender has permission to record to this chain
+        if (!network.checkChainPermission(senderID, Permission.Record.name(), chainID)) {
+            // Permission denied
+            return false;
+        }
+
+        // Synchronize on the chain to prevent concurrent modification
+        synchronized (targetChain) {
+            // Get current block
+            dev.droppinganvil.v3.edge.NetworkBlock currentBlock = targetChain.current;
+            if (currentBlock == null) {
+                // Create genesis block if none exists
+                currentBlock = new dev.droppinganvil.v3.edge.NetworkBlock(0L);
+                targetChain.current = currentBlock;
+                targetChain.blockMap.put(0L, currentBlock);
+            }
+
+            // Check if current block is full
+            if (currentBlock.networkEvents.size() >= targetChain.blockLength) {
+                // Create new block
+                Long newBlockID = currentBlock.block + 1;
+                dev.droppinganvil.v3.edge.NetworkBlock newBlock = new dev.droppinganvil.v3.edge.NetworkBlock(newBlockID);
+
+                // Add to block map
+                targetChain.blockMap.put(newBlockID, newBlock);
+
+                // Update current block reference
+                targetChain.current = newBlock;
+                currentBlock = newBlock;
+            }
+
+            // Add event to current block
+            int eventIndex = currentBlock.networkEvents.size();
+            currentBlock.networkEvents.put(eventIndex, ne);
+        }
+
+        return true;
+    }
+
+    /**
+     * @deprecated Use instance method recordEvent(NetworkEvent, String) instead
+     */
+    @Deprecated
+    public static boolean recordEvent(NetworkEvent ne) {
+        // Legacy static method - cannot determine sender or instance
+        // Return false to indicate recording not performed
         return false;
     }
 

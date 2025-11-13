@@ -5,6 +5,7 @@
 
 package dev.droppinganvil.v3.io.strings;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import com.fasterxml.jackson.databind.jsontype.PolymorphicTypeValidator;
@@ -18,6 +19,8 @@ public class JacksonProvider implements SerializationProvider {
 
     public JacksonProvider() {
         mapper = new ObjectMapper();
+        // Ignore unknown properties during deserialization to handle schema evolution
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         // Enable polymorphic type handling for abstract classes like Entry
         PolymorphicTypeValidator ptv = BasicPolymorphicTypeValidator.builder()
                 .allowIfSubType("us.anvildevelopment.util.tools.permissions.")

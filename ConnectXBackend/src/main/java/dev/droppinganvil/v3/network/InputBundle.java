@@ -13,8 +13,15 @@ public class InputBundle {
     public InputBundle(NetworkEvent ne, NetworkContainer nc) {
         this.ne = ne;
         this.nc = nc;
+        // Preserve the signed NetworkEvent bytes from nc.e for relaying
+        this.signedEventBytes = (nc != null) ? nc.e : null;
     }
 
     public NetworkEvent ne;
     public NetworkContainer nc;
+    /**
+     * Signed NetworkEvent bytes (nc.e) - preserved for relay
+     * Must NOT be re-signed during relay to maintain original sender's signature
+     */
+    public byte[] signedEventBytes;
 }

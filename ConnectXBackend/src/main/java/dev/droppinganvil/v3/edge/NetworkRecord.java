@@ -23,9 +23,13 @@ public class NetworkRecord implements Serializable {
      */
     public Map<Long, NetworkBlock> blockMap = new ConcurrentHashMap<>();
 
+    // Default constructor for Jackson deserialization
+    public NetworkRecord() {
+    }
 
     public NetworkRecord(String networkID, Long chainID) {
-
+        this.networkID = networkID;
+        this.chainID = chainID;
     }
 
 

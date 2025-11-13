@@ -14,6 +14,11 @@ public class NetworkBlock implements Serializable {
     public Long block;
     public Map<Integer, NetworkEvent> networkEvents;
 
+    // Default constructor for Jackson deserialization
+    public NetworkBlock() {
+        networkEvents = new ConcurrentHashMap<>();
+    }
+
     public NetworkBlock(Long block) {
         this.block = block;
         networkEvents = new ConcurrentHashMap<>();

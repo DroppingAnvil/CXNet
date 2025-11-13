@@ -56,7 +56,9 @@ public class NodeMesh {
 
         // Start IO worker threads for job queue processing
         for (int i = 0; i < NodeConfig.ioThreads; i++) {
-            Thread ioThread = new Thread(new dev.droppinganvil.v3.io.IOThread(NodeConfig.IO_THREAD_SLEEP, connectX, nodeMesh));
+            dev.droppinganvil.v3.io.IOThread ioWorker = new dev.droppinganvil.v3.io.IOThread(NodeConfig.IO_THREAD_SLEEP, connectX, nodeMesh);
+            ioWorker.run = true; // Enable the worker
+            Thread ioThread = new Thread(ioWorker);
             ioThread.setName("IOThread-" + i);
             ioThread.start();
         }
@@ -110,10 +112,36 @@ public class NodeMesh {
             } else {
                 o1 = connectX.encryptionProvider.verifyAndStrip(bais, baoss, nc.iD);
             }
-            networkEvent = baos.toString("UTF-8");
+            networkEvent = baoss.toString("UTF-8");  // Use baoss (output from verifyAndStrip)
             ne = (NetworkEvent) ConnectX.deserialize(nc.se, networkEvent, NetworkEvent.class);
             bais.close();
             baoss.close();
+
+            // SECURITY: Validate CXNET and CX scope messages
+            // Only CXNET backendSet or NMI can send CXNET or CX-scoped messages
+            if (ne.p != null && ne.p.scope != null &&
+                (ne.p.scope.equalsIgnoreCase("CXNET") || ne.p.scope.equalsIgnoreCase("CX"))) {
+                CXNetwork cxnet = ConnectX.getNetwork("CXNET");
+                boolean authorized = false;
+
+                if (cxnet != null && nc.iD != null) {
+                    // Check if transmitter is in CXNET backendSet
+                    if (cxnet.configuration != null && cxnet.configuration.backendSet != null) {
+                        authorized = cxnet.configuration.backendSet.contains(nc.iD);
+                    }
+                    // Or check if transmitter is CXNET NMI
+                    if (!authorized && cxnet.configuration != null) {
+                        // NMI public key matches transmitter
+                        authorized = nc.iD.equals(cxnet.configuration.nmiPub);
+                    }
+                }
+
+                if (!authorized) {
+                    socket.close();
+                    Analytics.addData(AnalyticData.Tear, "Unauthorized " + ne.p.scope + " message from " + nc.iD);
+                    return;
+                }
+            }
         } catch (Exception e) {
             e.printStackTrace();
             if (!NodeConfig.devMode) {
@@ -142,7 +170,10 @@ public class NodeMesh {
             if (et == null & !ConnectX.sendPluginEvent(ib.ne, ib.ne.eT)) {
                 Analytics.addData(AnalyticData.Tear, "Unsupported event - "+ib.ne.eT);
                 if (NodeConfig.supportUnavailableServices) {
-                    ConnectX.recordEvent(ib.ne);
+                    // Record unsupported events using the transmitter's ID from NetworkContainer
+                    if (ib.nc != null && ib.nc.iD != null) {
+                        connectX.recordEvent(ib.ne, ib.nc.iD);
+                    }
                     //todo relay
                 }
                 return;
@@ -168,20 +199,206 @@ public class NodeMesh {
                     e.printStackTrace();
                     throw new DecryptionFailureException();
                 }
+
+                // After infrastructure handling, fire event to application layer
+                fireEvent(ib.ne, ib.nc, ib.signedEventBytes);
             }
         }
     }
-    public boolean fireEvent(NetworkEvent ne) {
-        if (ne.p != null && ne.p.scope != null && ne.p.scope.equalsIgnoreCase("CXN")) {
-            for (Node n : PeerDirectory.hv.values()) {
-                //TODO implement network backend event distribution
+    public boolean fireEvent(NetworkEvent ne, NetworkContainer nc, byte[] signedEventBytes) {
+        boolean handledLocally = false;
+
+        // Step 1: Try plugin system for application-level handling
+        if (ConnectX.sendPluginEvent(ne, ne.eT)) {
+            handledLocally = true;
+        }
+
+        // Step 2: Handle known EventTypes locally if not already handled
+        if (!handledLocally && ne.eT != null) {
+            try {
+                EventType et = EventType.valueOf(ne.eT);
+                switch (et) {
+                    case MESSAGE:
+                        // Display received message
+                        String message = new String(ne.d, "UTF-8");
+                        System.out.println("\n[" + connectX.getOwnID() + "] RECEIVED MESSAGE: " + message);
+                        if (ne.p != null) {
+                            System.out.println("  From network: " + ne.p.network);
+                            System.out.println("  Scope: " + ne.p.scope);
+                        }
+                        handledLocally = true;
+                        break;
+                    case PeerFinding:
+                        System.out.println("[" + connectX.getOwnID() + "] Peer finding request received");
+                        //TODO implement peer discovery response logic
+                        handledLocally = true;
+                        break;
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Not a known EventType constant, already tried plugins above
+            } catch (Exception e) {
+                e.printStackTrace();
             }
         }
-        if (ne.eT.equalsIgnoreCase(EventType.PeerFinding.name())) {
-            //TODO implement peer finding
+
+        // Step 3: Check if event needs relaying to specific target (like isLocal() pattern)
+        if (ne.p != null && ne.p.cxID != null && !ne.p.cxID.isEmpty()) {
+            // Event has specific target - check if it's for us
+            if (!ne.p.cxID.equals(connectX.getOwnID())) {
+                // Not for us - relay to target node if we know them
+                try {
+                    Node targetNode = PeerDirectory.lookup(ne.p.cxID, true, true);
+                    if (targetNode != null) {
+                        // Create OutputBundle for relay - preserve original sender's signature
+                        NetworkContainer relayContainer = new NetworkContainer();
+                        relayContainer.se = "cxJSON1";
+                        relayContainer.s = false;
+                        // Use signedEventBytes to preserve original NetworkEvent signature
+                        OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
+                        synchronized (ConnectX.outputQueue) {
+                            ConnectX.outputQueue.add(relayBundle);
+                        }
+                        System.out.println("[" + connectX.getOwnID() + "] Relaying event to: " + ne.p.cxID);
+                        return true;
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
         }
-        //TODO implement event firing logic
-        return false;
+
+        // Step 4: Handle relay logic based on TransmitPref
+        // Only relay if we didn't transmit this container (prevent relay loops)
+        if (nc != null && nc.iD != null && nc.iD.equals(connectX.getOwnID())) {
+            return handledLocally; // We transmitted this, don't relay
+        }
+
+        // Get TransmitPref (defaults if null)
+        TransmitPref tP = (nc != null && nc.tP != null) ? nc.tP : new TransmitPref();
+        String transmitterID = (nc != null && nc.iD != null) ? nc.iD : "";
+
+        // Step 4a: Handle directOnly mode - no relay
+        if (tP.directOnly) {
+            return handledLocally; // Direct-only, no relaying
+        }
+
+        // Step 4b: Handle peerProxy mode - record to blockchain + distribute to all peers
+        if (tP.peerProxy) {
+            // Try to record to blockchain if we have permissions
+            // Use our own ID when recording (we're accepting responsibility for this event)
+            try {
+                connectX.recordEvent(ne, connectX.getOwnID());
+            } catch (Exception ignored) {
+                // Permission denied or other error - continue with distribution
+            }
+
+            // Distribute to all peers for eventual delivery
+            for (Node peer : PeerDirectory.hv.values()) {
+                if (!peer.cxID.equals(connectX.getOwnID()) && !peer.cxID.equals(transmitterID)) {
+                    try {
+                        NetworkContainer relayContainer = new NetworkContainer();
+                        relayContainer.se = "cxJSON1";
+                        relayContainer.s = false;
+                        relayContainer.tP = tP; // Preserve TransmitPref
+                        // Use signedEventBytes to preserve original NetworkEvent signature
+                        OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
+                        synchronized (ConnectX.outputQueue) {
+                            ConnectX.outputQueue.add(relayBundle);
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+            return handledLocally;
+        }
+
+        // Step 4c: Handle peerBroad mode - global cross-network transmission
+        if (tP.peerBroad) {
+            // Broadcast to all peers across all networks
+            for (Node peer : PeerDirectory.hv.values()) {
+                if (!peer.cxID.equals(connectX.getOwnID()) && !peer.cxID.equals(transmitterID)) {
+                    try {
+                        NetworkContainer relayContainer = new NetworkContainer();
+                        relayContainer.se = "cxJSON1";
+                        relayContainer.s = false;
+                        relayContainer.tP = tP; // Preserve TransmitPref
+                        // Use signedEventBytes to preserve original NetworkEvent signature
+                        OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
+                        synchronized (ConnectX.outputQueue) {
+                            ConnectX.outputQueue.add(relayBundle);
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+            return handledLocally;
+        }
+
+        // Step 4d: Default behavior for CXN scope - priority routing through backend + all peers
+        // This is the standard mode when TransmitPref flags are all false
+        if (ne.p != null && ne.p.scope != null && ne.p.scope.equalsIgnoreCase("CXN") && ne.p.network != null) {
+            CXNetwork cxn = ConnectX.getNetwork(ne.p.network);
+            if (cxn != null && cxn.configuration != null && cxn.configuration.backendSet != null) {
+                // Send to all peers, with backend getting priority (sent first)
+                java.util.Set<String> sentTo = new java.util.HashSet<>();
+
+                // Priority: Send to backend infrastructure first
+                for (String backendID : cxn.configuration.backendSet) {
+                    if (!backendID.equals(connectX.getOwnID()) && !backendID.equals(transmitterID)) {
+                        try {
+                            Node backendNode = PeerDirectory.lookup(backendID, true, true);
+                            if (backendNode != null) {
+                                NetworkContainer relayContainer = new NetworkContainer();
+                                relayContainer.se = "cxJSON1";
+                                relayContainer.s = false;
+                                relayContainer.tP = tP; // Preserve TransmitPref
+                                // Use signedEventBytes to preserve original NetworkEvent signature
+                                OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
+                                synchronized (ConnectX.outputQueue) {
+                                    ConnectX.outputQueue.add(relayBundle);
+                                }
+                                sentTo.add(backendID);
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+
+                // Then send to all other peers (not already sent to)
+                for (Node peer : PeerDirectory.hv.values()) {
+                    if (!peer.cxID.equals(connectX.getOwnID()) &&
+                        !peer.cxID.equals(transmitterID) &&
+                        !sentTo.contains(peer.cxID)) {
+                        try {
+                            NetworkContainer relayContainer = new NetworkContainer();
+                            relayContainer.se = "cxJSON1";
+                            relayContainer.s = false;
+                            relayContainer.tP = tP; // Preserve TransmitPref
+                            // Use signedEventBytes to preserve original NetworkEvent signature
+                            OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
+                            synchronized (ConnectX.outputQueue) {
+                                ConnectX.outputQueue.add(relayBundle);
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 5: Record to blockchain if scope is CX (must be from authorized sender)
+        if (ne.p != null && ne.p.scope != null && ne.p.scope.equalsIgnoreCase("CX")) {
+            // CX scope requires authorization from CXNET backendSet or NMI
+            if (nc != null && nc.iD != null) {
+                connectX.recordEvent(ne, nc.iD);
+            }
+        }
+
+        return handledLocally;
     }
     public boolean connectNetwork(CXNetwork cxnet) {
         //TODO implement network connection

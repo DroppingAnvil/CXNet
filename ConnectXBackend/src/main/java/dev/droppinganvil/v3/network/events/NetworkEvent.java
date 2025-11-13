@@ -7,10 +7,13 @@ import java.io.Serializable;
 
 public class NetworkEvent implements Serializable {
 
+    // Default constructor for Jackson deserialization
+    public NetworkEvent() {
+    }
+
     public NetworkEvent(EventType type, byte[] d) {
         this.eT = type.name();
         this.d = d;
-
     }
 
     public String eT;

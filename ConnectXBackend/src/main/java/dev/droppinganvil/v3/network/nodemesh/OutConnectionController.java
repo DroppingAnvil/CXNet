@@ -31,6 +31,12 @@ public class OutConnectionController {
             }
         }
         nc.e = cryptEvent;
+
+        // Initialize TransmitPref if not set (defaults to peerBroad = true)
+        if (nc.tP == null) {
+            nc.tP = new TransmitPref();
+        }
+
         byte[] cryptNetworkContainer = connectXAPI.signObject(nc, NetworkContainer.class, nc.se).toByteArray();
         if (out.ne.p != null && out.ne.p.scope != null && out.ne.p.scope.equalsIgnoreCase("CXNET")) {
             for (Node n : PeerDirectory.hv.values()) {

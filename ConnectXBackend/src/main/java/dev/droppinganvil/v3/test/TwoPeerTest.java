@@ -155,6 +155,21 @@ public class TwoPeerTest {
             PeerDirectory.hv.put(peer2Node.cxID, peer2Node);
             System.out.println("Peer 2 added to peer directory");
 
+            // Verify network backend set configuration
+            // Note: backendSet is automatically populated during createNetwork() with the NMI
+            // backendSet contains infrastructure/trusted servers (e.g., authentication, user rights platforms)
+            // Peer1 is the NMI (Network Master Identity) - already added to backendSet by createNetwork()
+            // Peer2 is a regular peer participant - NOT in backendSet
+            System.out.println("\n=== Network Backend Nodes (Infrastructure) ===");
+            System.out.println("Backend nodes: " + testNetwork.configuration.backendSet);
+            System.out.println("Note: NMI automatically added during network creation");
+
+            // Update network on peer2 as well
+            dev.droppinganvil.v3.network.CXNetwork peer2Network = peer2.getNetwork("TESTNET");
+            if (peer2Network != null && peer2Network.configuration != null) {
+                peer2Network.configuration.backendSet = testNetwork.configuration.backendSet;
+            }
+
             // Create a test event using CXN scope (network backend routing)
             System.out.println("\n=== Creating Test Event ===");
             NetworkEvent testEvent = new NetworkEvent(EventType.MESSAGE, "Hello from Peer 1 via TESTNET blockchain!".getBytes());

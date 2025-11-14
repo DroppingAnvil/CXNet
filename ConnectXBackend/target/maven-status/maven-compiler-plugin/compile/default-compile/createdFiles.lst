@@ -1,8 +1,10 @@
 dev\droppinganvil\v3\ConnectX.class
+dev\droppinganvil\v3\test\HTTPBridgeTest.class
 dev\droppinganvil\v3\utils\IPXFileUtils.class
 dev\droppinganvil\v3\utils\obj\IPXLock.class
 dev\droppinganvil\v3\crypt\pgpainless\PainlessCryptProvider.class
 dev\droppinganvil\v3\edge\NetworkBlock.class
+dev\droppinganvil\v3\network\nodemesh\bridge\http\HTTPBridgeProvider.class
 dev\droppinganvil\v3\network\remotedirectory\ReadOnlyException.class
 dev\droppinganvil\v3\utils\obj\InstanceOnly.class
 dev\droppinganvil\v3\crypt\core\exceptions\EncryptionFailureException.class
@@ -11,6 +13,7 @@ dev\droppinganvil\v3\network\nodemesh\Connections.class
 dev\droppinganvil\v3\crypt\core\exceptions\CryptException.class
 dev\droppinganvil\v3\edge\ProductPackage.class
 dev\droppinganvil\v3\crypt\core\exceptions\DecryptionFailureException.class
+dev\droppinganvil\v3\network\nodemesh\bridge\http\HTTPBridgeProvider$CXMessageHandler.class
 dev\droppinganvil\v3\network\events\NetworkContainer.class
 dev\droppinganvil\v3\utils\obj\AuditableLong.class
 dev\droppinganvil\v3\Configuration.class
@@ -71,6 +74,8 @@ dev\droppinganvil\v3\utils\obj\RequiresLogin.class
 dev\droppinganvil\v3\crypt\core\exceptions\TempDirectorySolidified.class
 dev\droppinganvil\v3\utils\obj\Dualean.class
 dev\droppinganvil\v3\network\CXPath.class
+dev\droppinganvil\v3\network\nodemesh\bridge\BridgeProvider.class
+dev\droppinganvil\v3\network\nodemesh\bridge\http\HTTPBridgeProvider$HealthCheckHandler.class
 dev\droppinganvil\v3\network\nodemesh\InConnectionManager.class
 dev\droppinganvil\v3\network\nodemesh\OutConnectionController.class
 dev\droppinganvil\v3\network\nodemesh\Node.class

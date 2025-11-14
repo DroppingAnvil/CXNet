@@ -46,6 +46,13 @@ public class PainlessCryptProvider extends CryptProvider {
     public PGPPublicKeyRing nmipubkey;
     private SecretKeyRingProtector protector;
 
+    // TODO: Remove after HTTP bridge seed download is implemented
+    private boolean epochMode = false; // Set true when this node IS the NMI (EPOCH)
+
+    public void setEpochMode(boolean epochMode) {
+        this.epochMode = epochMode;
+    }
+
     @Override
     public String getPublicKey() {
         if (publicKey == null) return null;
@@ -61,7 +68,8 @@ public class PainlessCryptProvider extends CryptProvider {
 
     @Override
     public boolean verifyAndStrip(InputStream is, OutputStream os, String cxID) throws DecryptionFailureException {
-        if (cacheCert(cxID, false, true)) {
+        //TODO verify tryimport is best case
+        if (cacheCert(cxID, true, true)) {
             try {
                 DecryptionStream decryptionStream = PGPainless.decryptAndOrVerify()
                         .onInputStream(is)
@@ -171,12 +179,18 @@ public class PainlessCryptProvider extends CryptProvider {
     public void setup(String cxID, String s, File dir) throws Exception {
         File privateKeyFile = new File(dir, "key.cx");
         if (privateKeyFile.exists()) {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            DecryptionStream ds = PGPainless.decryptAndOrVerify().onInputStream(privateKeyFile.toURL().openStream()).withOptions(new ConsumerOptions()
-            .addDecryptionPassphrase(Passphrase.fromPassword(s)));
-            Streams.pipeAll(ds, baos);
-            ds.close();
-            secretKey = PGPainless.readKeyRing().secretKeyRing(baos.toByteArray());
+            // Try loading as unencrypted .asc file first (exported from Kleopatra)
+            try {
+                secretKey = PGPainless.readKeyRing().secretKeyRing(privateKeyFile.toURL().openStream());
+            } catch (Exception e) {
+                // If that fails, try decrypting it (old format with password-protected file)
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                DecryptionStream ds = PGPainless.decryptAndOrVerify().onInputStream(privateKeyFile.toURL().openStream()).withOptions(new ConsumerOptions()
+                .addDecryptionPassphrase(Passphrase.fromPassword(s)));
+                Streams.pipeAll(ds, baos);
+                ds.close();
+                secretKey = PGPainless.readKeyRing().secretKeyRing(baos.toByteArray());
+            }
         } else {
             secretKey = PGPainless.generateKeyRing()
                     .modernKeyRing(cxID, s);
@@ -191,21 +205,37 @@ public class PainlessCryptProvider extends CryptProvider {
         }
 
         // Initialize protector with the passphrase AFTER loading secretKey
-        protector = SecretKeyRingProtector.unlockAllKeysWith(Passphrase.fromPassword(s), secretKey);
+        // For keys exported from Kleopatra, try empty passphrase first, then unprotected
+        if (s == null || s.isEmpty()) {
+            // If no password provided, key is either unprotected or has empty passphrase
+            // Try empty passphrase first (most common for Kleopatra exported keys)
+            protector = SecretKeyRingProtector.unlockAllKeysWith(Passphrase.emptyPassphrase(), secretKey);
+        } else {
+            // Use provided passphrase
+            protector = SecretKeyRingProtector.unlockAllKeysWith(Passphrase.fromPassword(s), secretKey);
+        }
 
         publicKey = KeyRingUtils.publicKeyRingFrom(secretKey);
         File nmipublicKeyFile = new File(dir, "cx.asc");
         if (nmipublicKeyFile.exists()) {
             nmipubkey = PGPainless.readKeyRing().publicKeyRing(nmipublicKeyFile.toURL().openStream());
+        } else if (epochMode) {
+            // EPOCH mode: This node IS the NMI, use own key as network master key
+            nmipubkey = publicKey;
         } else {
-            throw new IOException();
+            // TODO: Implement HTTP bridge seed download to get cx.asc (NMI public key)
+            throw new IOException("NMI public key (cx.asc) not found and node is not in EPOCH mode");
         }
         //load keys
         ready = true;
     }
     @Override
     public boolean cacheCert(String cxID, boolean tryImport, boolean sync) {
-        if (certCache.containsKey(cxID)) return true;
+        try {
+            if (certCache.containsKey(cxID)) return true;
+        } catch (Exception ignored) {
+
+        }
         try {
             Node n = PeerDirectory.lookup(cxID, tryImport, sync);
             if (n != null) {

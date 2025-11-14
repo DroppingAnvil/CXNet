@@ -42,7 +42,8 @@ public class ConnectX {
     private static ConcurrentHashMap<String, CXNetwork> networkMap = new ConcurrentHashMap<>();
     public final CryptProvider encryptionProvider = new PainlessCryptProvider();
     private static final transient ConcurrentHashMap<String, SerializationProvider> serializationProviders = new ConcurrentHashMap<>();
-    public static final ConcurrentHashMap<String, CXBridge> bridgeMap = new ConcurrentHashMap<>();
+    public static final ConcurrentHashMap<String, CXBridge> bridgeMap = new ConcurrentHashMap<>(); // Legacy - deprecated
+    private static final ConcurrentHashMap<String, dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider> bridgeProviders = new ConcurrentHashMap<>();
     public final Queue<IOJob> jobQueue = new ConcurrentLinkedQueue<>();
     public static final Queue<InputBundle> eventQueue = new ConcurrentLinkedQueue<>();
     public static final Queue<OutputBundle> outputQueue = new ConcurrentLinkedQueue<>();
@@ -52,7 +53,7 @@ public class ConnectX {
     private transient static CXNetwork cx;
     private transient Node self;
     private static ConcurrentHashMap<String, CXPlugin> plugins = new ConcurrentHashMap<>();
-    private static transient List<String> reserved = Arrays.asList("SYSTEM", "CX", "cxJSON1");
+    private static transient List<String> reserved = Arrays.asList("SYSTEM", "CX", "cxJSON1", "CXNET");
     public NodeMesh nodeMesh;
 
 
@@ -121,6 +122,25 @@ public class ConnectX {
         if (serializationProviders.containsKey(name)) throw new IllegalAccessException();
         serializationProviders.put(name, provider);
     }
+
+    // Bridge Provider Management (similar to SerializationProvider)
+    public static void addBridgeProvider(dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider provider, ConnectX instance) throws UnsafeKeywordException, IllegalAccessException {
+        String protocol = provider.getBridgeProtocol();
+        checkSafety(protocol);
+        if (bridgeProviders.containsKey(protocol)) {
+            throw new IllegalAccessException("Bridge provider " + protocol + " already registered");
+        }
+        provider.initialize(instance);
+        bridgeProviders.put(protocol, provider);
+    }
+
+    public static dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider getBridgeProvider(String protocol) {
+        return bridgeProviders.get(protocol);
+    }
+
+    public static boolean isBridgeProviderPresent(String protocol) {
+        return bridgeProviders.containsKey(protocol);
+    }
     // Instance methods for signing (use these for proper per-instance crypto)
     public Object getSignedObject(String cxID, InputStream is, Class<?> clazz, String method) throws Exception {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -160,8 +180,150 @@ public class ConnectX {
     public Node getSelf() {
         return self;
     }
+
+    /**
+     * Attempt to bootstrap into CXNET if not already loaded
+     * This method:
+     * 1. Checks if CXNET network already exists
+     * 2. If not, tries to load from local seeds/ directory
+     * 3. If no local seed, queues SEED_REQUEST to known bootstrap nodes (EPOCH)
+     */
+    private void attemptCXNETBootstrap() {
+        try {
+            // Check if CXNET already exists
+            if (networkMap.containsKey("CXNET")) {
+                System.out.println("[Bootstrap] CXNET already loaded");
+                return;
+            }
+
+            System.out.println("[Bootstrap] CXNET not found, attempting bootstrap...");
+
+            // Check for local seeds directory
+            File seedsDir = new File(cxRoot, "seeds");
+            if (!seedsDir.exists()) {
+                seedsDir.mkdirs();
+                System.out.println("[Bootstrap] Created seeds/ directory");
+            }
+
+            // Look for existing seed files
+            File[] seedFiles = seedsDir.listFiles((dir, name) -> name.endsWith(".cxn"));
+            if (seedFiles != null && seedFiles.length > 0) {
+                // Load the most recently modified seed
+                File latestSeed = seedFiles[0];
+                for (File f : seedFiles) {
+                    if (f.lastModified() > latestSeed.lastModified()) {
+                        latestSeed = f;
+                    }
+                }
+
+                System.out.println("[Bootstrap] Loading local seed: " + latestSeed.getName());
+                dev.droppinganvil.v3.network.Seed seed = dev.droppinganvil.v3.network.Seed.load(latestSeed);
+
+                // Apply seed (loads networks, peers, certificates)
+                applySeed(seed);
+
+                System.out.println("[Bootstrap] Successfully bootstrapped from local seed");
+                return;
+            }
+
+            // No local seed found - request from EPOCH (if we're not EPOCH)
+            if (self != null && "00000000-0000-0000-0000-000000000001".equals(self.cxID)) {
+                System.out.println("[Bootstrap] This is EPOCH - no bootstrap needed");
+                return;
+            }
+
+            System.out.println("[Bootstrap] No local seed found, requesting from EPOCH...");
+            requestSeedFromEpoch();
+
+        } catch (Exception e) {
+            System.err.println("[Bootstrap] Bootstrap attempt failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Apply a seed to this ConnectX instance
+     * Loads networks, adds peers to directory, and caches certificates
+     * @param seed Seed to apply
+     * @throws Exception if application fails
+     */
+    private void applySeed(dev.droppinganvil.v3.network.Seed seed) throws Exception {
+        System.out.println("[Seed] Applying seed " + seed.seedID);
+        System.out.println("[Seed]   Networks: " + seed.networks.size());
+        System.out.println("[Seed]   HV Peers: " + seed.hvPeers.size());
+        System.out.println("[Seed]   Certificates: " + seed.certificates.size());
+
+        // Add hv peers to directory
+        for (dev.droppinganvil.v3.network.nodemesh.Node peer : seed.hvPeers) {
+            PeerDirectory.addNode(peer);
+            System.out.println("[Seed] Added peer: " + peer.cxID);
+        }
+
+        // Import networks
+        for (dev.droppinganvil.v3.network.CXNetwork network : seed.networks) {
+            String networkID = network.configuration.netID;
+            networkMap.put(networkID, network);
+            System.out.println("[Seed] Loaded network: " + networkID);
+        }
+
+        // Cache certificates
+        for (java.util.Map.Entry<String, String> cert : seed.certificates.entrySet()) {
+            try {
+                encryptionProvider.cacheCert(cert.getKey(), false, false);
+                System.out.println("[Seed] Cached certificate: " + cert.getKey());
+            } catch (Exception e) {
+                System.err.println("[Seed] Failed to cache certificate for " + cert.getKey() + ": " + e.getMessage());
+            }
+        }
+
+        System.out.println("[Seed] Seed application complete");
+    }
+
+    /**
+     * Request CXNET seed from EPOCH NMI via SEED_REQUEST event
+     * Queues a SEED_REQUEST to be sent to EPOCH
+     */
+    private void requestSeedFromEpoch() {
+        try {
+            // Create SEED_REQUEST event
+            dev.droppinganvil.v3.network.events.NetworkEvent seedRequest =
+                new dev.droppinganvil.v3.network.events.NetworkEvent(
+                    dev.droppinganvil.v3.network.events.EventType.SEED_REQUEST,
+                    "CXNET".getBytes("UTF-8"));
+            seedRequest.eT = dev.droppinganvil.v3.network.events.EventType.SEED_REQUEST.name();
+            seedRequest.iD = java.util.UUID.randomUUID().toString();
+
+            // Set path to EPOCH NMI
+            dev.droppinganvil.v3.network.CXPath epochPath = new dev.droppinganvil.v3.network.CXPath();
+            epochPath.cxID = "00000000-0000-0000-0000-000000000001"; // EPOCH UUID
+            epochPath.scope = "CXN";
+            epochPath.network = "CXNET";
+            seedRequest.p = epochPath;
+
+            // Create container
+            dev.droppinganvil.v3.network.events.NetworkContainer seedRequestContainer =
+                new dev.droppinganvil.v3.network.events.NetworkContainer();
+            seedRequestContainer.se = "cxJSON1";
+            seedRequestContainer.s = false;
+
+            // Queue the request (will be transmitted by OutConnectionController)
+            OutputBundle seedRequestBundle = new OutputBundle(seedRequest, null, null, null, seedRequestContainer);
+            synchronized (outputQueue) {
+                outputQueue.add(seedRequestBundle);
+            }
+
+            System.out.println("[Bootstrap] SEED_REQUEST queued for EPOCH");
+            System.out.println("[Bootstrap] Waiting for SEED_RESPONSE...");
+
+        } catch (Exception e) {
+            System.err.println("[Bootstrap] Failed to request seed from EPOCH: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
     /**
      * Initialize and start the P2P network layer
+     * Automatically attempts to bootstrap CXNET if not already loaded
      * @param port Port number for incoming connections
      * @throws IOException if network initialization fails
      */
@@ -169,6 +331,9 @@ public class ConnectX {
         dev.droppinganvil.v3.network.nodemesh.OutConnectionController outController =
             new dev.droppinganvil.v3.network.nodemesh.OutConnectionController(this);
         nodeMesh = dev.droppinganvil.v3.network.nodemesh.NodeMesh.initializeNetwork(this, port, outController);
+
+        // Attempt automatic CXNET bootstrap after network layer is ready
+        attemptCXNETBootstrap();
     }
 
     public void connect() throws IOException {
@@ -182,9 +347,10 @@ public class ConnectX {
      * @throws IllegalAccessException if networkID is reserved or node is not initialized
      */
     public CXNetwork createNetwork(String networkID) throws IllegalAccessException {
-        if (networkID.equalsIgnoreCase("CXNET")) {
-            throw new IllegalAccessException("CXNET is reserved for the global network");
-        }
+        // TODO: Re-enable CXNET reservation after EPOCH NMI initialization
+        // if (networkID.equalsIgnoreCase("CXNET")) {
+        //     throw new IllegalAccessException("CXNET is reserved for the global network");
+        // }
         if (self == null || self.cxID == null) {
             throw new IllegalAccessException("Node must be initialized before creating network");
         }

@@ -16,4 +16,17 @@ public class Configuration implements Serializable {
     public Boolean active = true;
     public Boolean unlimitedUpload = false;
 
+    /**
+     * ID of the current official seed for this network
+     * Seeds are stored in c2 (Resources chain) and locally in seeds/ directory
+     * System automatically loads all resources from c2 when joining network
+     * Used for versioned seed distribution and resource lookup
+     */
+    public String currentSeedID;
+
+    /**
+     * ID of the previous official seed (for rollback/version tracking)
+     */
+    public String lastSeedID;
+
 }

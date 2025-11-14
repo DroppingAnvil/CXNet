@@ -6,6 +6,8 @@
 package dev.droppinganvil.v3.network.nodemesh;
 
 import dev.droppinganvil.v3.ConnectX;
+import dev.droppinganvil.v3.analytics.AnalyticData;
+import dev.droppinganvil.v3.analytics.Analytics;
 import dev.droppinganvil.v3.exceptions.UnsafeKeywordException;
 
 import java.io.File;
@@ -28,9 +30,19 @@ public class PeerDirectory implements Serializable {
 
     public static Node lookup(String cxID, boolean tryImport, boolean sync, File cxRoot, ConnectX cx) throws UnsafeKeywordException {
         ConnectX.checkSafety(cxID);
-        if (hv.containsKey(cxID)) return hv.get(cxID);
-        if (seen.containsKey(cxID)) return seen.get(cxID);
-        if (peerCache.containsKey(cxID)) return peerCache.get(cxID);
+        try {
+            if (hv.containsKey(cxID)) return hv.get(cxID);
+        } catch (Exception e) {
+            //
+        }
+        try {
+            if (seen.containsKey(cxID)) return seen.get(cxID);
+        } catch (Exception exception) {}
+        try {
+            if (peerCache.containsKey(cxID)) return peerCache.get(cxID);
+        } catch (Exception e) {
+//            throw new RuntimeException(e);
+        }
             char s = cxID.charAt(0);
             if (peers == null && cxRoot != null) peers = new File(cxRoot, "nodemesh");
             if (peers == null) return null;
@@ -64,6 +76,34 @@ public class PeerDirectory implements Serializable {
 
     public static void addNode(Node n) {
         if (Node.validate(n)) {
+            // SECURITY: UUID Collision/Spoofing Protection
+            // If we already have a node with this cxID, verify the public key matches
+            Node existing = null;
+
+            // Check all peer directories for existing node with same cxID
+            if (hv != null && hv.containsKey(n.cxID)) {
+                existing = hv.get(n.cxID);
+            } else if (seen != null && seen.containsKey(n.cxID)) {
+                existing = seen.get(n.cxID);
+            } else if (peerCache != null && peerCache.containsKey(n.cxID)) {
+                existing = peerCache.get(n.cxID);
+            }
+
+            // If node with this cxID exists, verify public key matches
+            if (existing != null && existing.publicKey != null && n.publicKey != null) {
+                if (!existing.publicKey.equals(n.publicKey)) {
+                    // SECURITY VIOLATION: Same cxID but different public key = spoofing attempt
+                    Analytics.addData(AnalyticData.Tear, "UUID spoofing attempt - cxID:" + n.cxID +
+                        " existing_key:" + existing.publicKey.substring(0, Math.min(50, existing.publicKey.length())) +
+                        " attacker_key:" + n.publicKey.substring(0, Math.min(50, n.publicKey.length())));
+
+                    // Drop the spoofed node - do not add to any directory
+                    // Connection will be terminated by caller
+                    throw new SecurityException("UUID spoofing: cxID " + n.cxID + " exists with different public key");
+                }
+                // Keys match - this is the same node, update the entry
+            }
+
             //TODO implement node addition to cache/persistence
             seen.put(n.cxID, n);
         } else {

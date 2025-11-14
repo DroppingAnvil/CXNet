@@ -24,5 +24,15 @@ public enum EventType {
      */
     MESSAGE,
     PeerFinding,
+    /**
+     * Request official network seed from NMI
+     * Used for bootstrapping new nodes into CXNET
+     */
+    SEED_REQUEST,
+    /**
+     * Response to SEED_REQUEST containing seed data
+     * Payload contains serialized Seed object
+     */
+    SEED_RESPONSE,
     ;
 }

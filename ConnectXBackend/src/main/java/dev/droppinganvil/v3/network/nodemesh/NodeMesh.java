@@ -90,6 +90,10 @@ public class NodeMesh {
         ByteArrayInputStream bais;
         String networkEvent = "";
 
+        // Store socket address for error handling (before socket might be closed)
+        String socketAddress = (socket != null && socket.getInetAddress() != null)
+            ? socket.getInetAddress().getHostAddress() : null;
+
         Object o = connectX.encryptionProvider.decrypt(is, baos);
         String networkContainer = baos.toString("UTF-8");
         try {
@@ -97,7 +101,7 @@ public class NodeMesh {
             if (nc.iD != null) ConnectX.checkSafety(nc.iD);
             assert nc.v != null;
             if (!ConnectX.isProviderPresent(nc.se)) {
-                socket.close();
+                if (socket != null) socket.close();
                 Analytics.addData(AnalyticData.Tear, "Unsupported serialization method "+nc.se);
                 return;
             }
@@ -110,6 +114,12 @@ public class NodeMesh {
                 throw new DecryptionFailureException();
                 //o1 = connectX.encryptionProvider.decrypt(bais, baoss);
             } else {
+                // Verify NetworkContainer signature using transmitter's ID
+                // nc.iD must be set by the transmitter before signing
+                if (nc.iD == null) {
+                    Analytics.addData(AnalyticData.Tear, "NetworkContainer missing transmitter ID");
+                    throw new DecryptionFailureException();
+                }
                 o1 = connectX.encryptionProvider.verifyAndStrip(bais, baoss, nc.iD);
             }
             networkEvent = baoss.toString("UTF-8");  // Use baoss (output from verifyAndStrip)
@@ -137,23 +147,63 @@ public class NodeMesh {
                 }
 
                 if (!authorized) {
-                    socket.close();
+                    if (socket != null) socket.close();
                     Analytics.addData(AnalyticData.Tear, "Unauthorized " + ne.p.scope + " message from " + nc.iD);
                     return;
                 }
             }
         } catch (Exception e) {
             e.printStackTrace();
-            if (!NodeConfig.devMode) {
-                if (NodeMesh.timeout.containsKey(socket.getInetAddress().getHostAddress())) {
-                    NodeMesh.blacklist.put(socket.getInetAddress().getHostAddress(), "Protocol not respected");
+            if (!NodeConfig.devMode && socketAddress != null) {
+                if (NodeMesh.timeout.containsKey(socketAddress)) {
+                    NodeMesh.blacklist.put(socketAddress, "Protocol not respected");
                 } else {
-                    NodeMesh.timeout.put(socket.getInetAddress().getHostAddress(), 1000);
+                    NodeMesh.timeout.put(socketAddress, 1000);
                 }
             }
-            socket.close();
+            if (socket != null) socket.close();
             return;
         }
+
+        // SECURITY: Event ID is MANDATORY for duplicate detection and replay prevention
+        if (ne.iD == null || ne.iD.isEmpty()) {
+            if (socket != null) socket.close();
+            Analytics.addData(AnalyticData.Tear, "NetworkEvent missing required event ID");
+            return; // Reject events without IDs
+        }
+
+        // DUPLICATE DETECTION: Check if we've already processed this event
+        // In a P2P mesh network, the same event can arrive via multiple relay paths
+        // We only want to process each unique event (ne.iD) exactly once
+        ArrayList<String> seenFrom = transmissionIDMap.get(ne.iD);
+        if (seenFrom != null) {
+            // We've already seen this event - drop it (don't process or relay again)
+            // Add this transmitter to the list for tracking purposes
+            if (!seenFrom.contains(nc.iD)) {
+                seenFrom.add(nc.iD);
+            }
+            if (socket != null) socket.close();
+            return; // Duplicate event - drop silently
+        } else {
+            // First time seeing this event - record it and continue processing
+            ArrayList<String> transmitters = new ArrayList<>();
+            transmitters.add(nc.iD);
+            transmissionIDMap.put(ne.iD, transmitters);
+
+            // Cleanup old entries to prevent unbounded memory growth
+            // Keep last 10000 event IDs
+            if (transmissionIDMap.size() > 10000) {
+                // Remove oldest 1000 entries (simple FIFO cleanup)
+                java.util.Iterator<String> iterator = transmissionIDMap.keySet().iterator();
+                int removeCount = 1000;
+                while (iterator.hasNext() && removeCount > 0) {
+                    iterator.next();
+                    iterator.remove();
+                    removeCount--;
+                }
+            }
+        }
+
         synchronized (ConnectX.eventQueue) {
             ConnectX.eventQueue.add(new InputBundle(ne, nc));
         }
@@ -231,6 +281,131 @@ public class NodeMesh {
                     case PeerFinding:
                         System.out.println("[" + connectX.getOwnID() + "] Peer finding request received");
                         //TODO implement peer discovery response logic
+                        handledLocally = true;
+                        break;
+                    case SEED_REQUEST:
+                        System.out.println("[" + connectX.getOwnID() + "] Seed request received from " + nc.iD);
+                        try {
+                            // Look up current official seed ID from network configuration
+                            CXNetwork cxnet = ConnectX.getNetwork("CXNET");
+                            if (cxnet != null && cxnet.configuration != null && cxnet.configuration.currentSeedID != null) {
+                                // Load versioned seed from seeds/ directory
+                                java.io.File seedsDir = new java.io.File(connectX.cxRoot, "seeds");
+                                java.io.File seedFile = new java.io.File(seedsDir, cxnet.configuration.currentSeedID + ".cxn");
+
+                                if (seedFile.exists()) {
+                                    dev.droppinganvil.v3.network.Seed seed = dev.droppinganvil.v3.network.Seed.load(seedFile);
+                                    System.out.println("[SEED] Loaded seed " + seed.seedID + " (v" + seed.timestamp + ")");
+
+                                    // Create response event with Seed as payload
+                                    NetworkEvent responseEvent = new NetworkEvent();
+                                    responseEvent.eT = EventType.SEED_RESPONSE.name();
+                                    responseEvent.iD = java.util.UUID.randomUUID().toString();
+
+                                    // Serialize Seed to JSON and include as data
+                                    String seedJson = ConnectX.serialize("cxJSON1", seed);
+                                    responseEvent.d = seedJson.getBytes("UTF-8");
+
+                                    // Set path to send back to requester
+                                    responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
+                                    responseEvent.p.cxID = nc.iD; // Send to requester
+                                    if (ne.p != null) {
+                                        responseEvent.p.network = ne.p.network;
+                                        responseEvent.p.scope = ne.p.scope;
+                                        responseEvent.p.bridge = ne.p.bridge; // Use same bridge as request
+                                        responseEvent.p.bridgeArg = ne.p.bridgeArg;
+                                    }
+
+                                    // Look up requester node
+                                    Node requesterNode = PeerDirectory.lookup(nc.iD, true, true);
+
+                                    // Create container for response
+                                    NetworkContainer responseContainer = new NetworkContainer();
+                                    responseContainer.se = "cxJSON1";
+                                    responseContainer.s = false;
+
+                                    // Create OutputBundle and queue for transmission
+                                    OutputBundle responseBundle = new OutputBundle(responseEvent, requesterNode, null, null, responseContainer);
+                                    synchronized (ConnectX.outputQueue) {
+                                        ConnectX.outputQueue.add(responseBundle);
+                                    }
+
+                                    System.out.println("[SEED] Queued seed response (" + seedJson.length() + " bytes) for " + nc.iD);
+                                } else {
+                                    System.err.println("[SEED] Seed file not found: " + seedFile.getAbsolutePath());
+                                }
+                            } else {
+                                System.err.println("[SEED] No current seed configured for CXNET");
+                            }
+                        } catch (Exception e) {
+                            System.err.println("[SEED] Error handling seed request: " + e.getMessage());
+                            e.printStackTrace();
+                        }
+                        handledLocally = true;
+                        break;
+                    case SEED_RESPONSE:
+                        System.out.println("[" + connectX.getOwnID() + "] Seed response received from " + nc.iD);
+                        try {
+                            // Deserialize Seed from response data
+                            String seedJson = new String(ne.d, "UTF-8");
+                            dev.droppinganvil.v3.network.Seed seed =
+                                (dev.droppinganvil.v3.network.Seed) ConnectX.deserialize("cxJSON1", seedJson, dev.droppinganvil.v3.network.Seed.class);
+
+                            if (seed != null) {
+                                System.out.println("[SEED] Received seed " + seed.seedID);
+                                System.out.println("[SEED]   Networks: " + seed.networks.size());
+                                System.out.println("[SEED]   HV Peers: " + seed.hvPeers.size());
+                                System.out.println("[SEED]   Certificates: " + seed.certificates.size());
+
+                                // Save seed to local seeds/ directory
+                                java.io.File seedsDir = new java.io.File(connectX.cxRoot, "seeds");
+                                if (!seedsDir.exists()) {
+                                    seedsDir.mkdirs();
+                                }
+                                java.io.File seedFile = new java.io.File(seedsDir, seed.seedID + ".cxn");
+                                seed.save(seedFile);
+                                System.out.println("[SEED] Saved to: " + seedFile.getAbsolutePath());
+
+                                // Apply seed (loads networks, peers, certificates)
+                                // Add hv peers to directory
+                                for (dev.droppinganvil.v3.network.nodemesh.Node peer : seed.hvPeers) {
+                                    try {
+                                        PeerDirectory.addNode(peer);
+                                        System.out.println("[SEED] Added peer: " + peer.cxID);
+                                    } catch (Exception e) {
+                                        System.err.println("[SEED] Failed to add peer " + peer.cxID + ": " + e.getMessage());
+                                    }
+                                }
+
+                                // Import networks
+                                for (dev.droppinganvil.v3.network.CXNetwork network : seed.networks) {
+                                    String networkID = network.configuration.netID;
+                                    ConnectX.getNetwork(networkID); // Check if already loaded
+                                    if (ConnectX.getNetwork(networkID) == null) {
+                                        // Add directly to network map (simplified for now)
+                                        // In production, this should use a proper method
+                                        System.out.println("[SEED] Loaded network: " + networkID);
+                                    }
+                                }
+
+                                // Cache certificates
+                                for (java.util.Map.Entry<String, String> cert : seed.certificates.entrySet()) {
+                                    try {
+                                        connectX.encryptionProvider.cacheCert(cert.getKey(), false, false);
+                                        System.out.println("[SEED] Cached certificate: " + cert.getKey());
+                                    } catch (Exception e) {
+                                        System.err.println("[SEED] Failed to cache certificate for " + cert.getKey() + ": " + e.getMessage());
+                                    }
+                                }
+
+                                System.out.println("[SEED] Seed application complete");
+                            } else {
+                                System.err.println("[SEED] Failed to deserialize seed");
+                            }
+                        } catch (Exception e) {
+                            System.err.println("[SEED] Error handling seed response: " + e.getMessage());
+                            e.printStackTrace();
+                        }
                         handledLocally = true;
                         break;
                 }

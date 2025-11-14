@@ -23,8 +23,27 @@ import java.util.Map;
  * - Network configurations to import
  * - Public key certificates for peer verification
  * - Ability to fetch official seeds from CXNET
+ *
+ * Seeds are versioned and stored both locally (seeds/ directory) and on-chain (c2 Resources chain)
  */
 public class Seed {
+    /**
+     * Unique identifier for this seed version
+     * Used for tracking, versioning, and on-chain storage
+     * Format: UUID
+     */
+    public String seedID;
+
+    /**
+     * Timestamp when this seed was created (epoch milliseconds)
+     */
+    public long timestamp;
+
+    /**
+     * Network ID this seed is for (e.g., "CXNET")
+     */
+    public String networkID;
+
     /**
      * High-value peers for initial connection
      * Contains Node objects with cxID, addr, and publicKey

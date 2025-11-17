@@ -37,6 +37,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class ConnectX {
+    // EPOCH NMI Bootstrap Constants
+    public static final String EPOCH_UUID = "00000000-0000-0000-0000-000000000001";
+    // For testing: use localhost. For production: use public URL
+    public static final String EPOCH_BRIDGE_ADDRESS = "cxHTTP1:http://localhost:8080/cx";
+    // public static final String EPOCH_BRIDGE_ADDRESS = "cxHTTP1:https://CXNET.AnvilDevelopment.US/cx";
+
     public static Platform platform;
     public State state = State.CXConnecting;
     private static ConcurrentHashMap<String, CXNetwork> networkMap = new ConcurrentHashMap<>();
@@ -183,22 +189,54 @@ public class ConnectX {
 
     /**
      * Attempt to bootstrap into CXNET if not already loaded
-     * This method:
-     * 1. Checks if CXNET network already exists
-     * 2. If not, tries to load from local seeds/ directory
-     * 3. If no local seed, queues SEED_REQUEST to known bootstrap nodes (EPOCH)
+     * Bootstrap sequence:
+     * 1. Check if CXNET network already exists
+     * 2. If not, check for distribution bootstrap seed (cxnet-bootstrap.cxn)
+     * 3. If found, apply bootstrap seed to get initial configuration
+     * 4. If not found, check local seeds/ directory for any seed
+     * 5. If no local seed, queue SEED_REQUEST to EPOCH for latest seed
+     * 6. After bootstrap, automatically check for seed updates from EPOCH
      */
     private void attemptCXNETBootstrap() {
         try {
             // Check if CXNET already exists
             if (networkMap.containsKey("CXNET")) {
                 System.out.println("[Bootstrap] CXNET already loaded");
+                // Even if loaded, check for updates from EPOCH
+                requestSeedUpdateFromEpoch();
                 return;
             }
 
             System.out.println("[Bootstrap] CXNET not found, attempting bootstrap...");
 
-            // Check for local seeds directory
+            // Step 1: Check for distribution bootstrap seed (shipped with software)
+            File bootstrapSeed = new File(cxRoot, "cxnet-bootstrap.cxn");
+            if (bootstrapSeed.exists()) {
+                System.out.println("[Bootstrap] Found distribution bootstrap seed");
+                dev.droppinganvil.v3.network.Seed seed = dev.droppinganvil.v3.network.Seed.load(bootstrapSeed);
+
+                // Apply bootstrap seed to get initial CXNET config and EPOCH's public key
+                applySeed(seed);
+
+                System.out.println("[Bootstrap] Successfully bootstrapped from distribution seed");
+
+                // Copy bootstrap seed to seeds/ directory for future use
+                File seedsDir = new File(cxRoot, "seeds");
+                if (!seedsDir.exists()) {
+                    seedsDir.mkdirs();
+                }
+                File seedCopy = new File(seedsDir, seed.seedID + ".cxn");
+                if (!seedCopy.exists()) {
+                    seed.save(seedCopy);
+                    System.out.println("[Bootstrap] Saved bootstrap seed to seeds/ directory");
+                }
+
+                // Request updated seed from EPOCH (bootstrap seed may be outdated)
+                requestSeedUpdateFromEpoch();
+                return;
+            }
+
+            // Step 2: Check for local seeds directory
             File seedsDir = new File(cxRoot, "seeds");
             if (!seedsDir.exists()) {
                 seedsDir.mkdirs();
@@ -223,17 +261,21 @@ public class ConnectX {
                 applySeed(seed);
 
                 System.out.println("[Bootstrap] Successfully bootstrapped from local seed");
+
+                // Request updated seed from EPOCH (local seed may be outdated)
+                requestSeedUpdateFromEpoch();
                 return;
             }
 
-            // No local seed found - request from EPOCH (if we're not EPOCH)
-            if (self != null && "00000000-0000-0000-0000-000000000001".equals(self.cxID)) {
+            // Step 3: No local seed found - request from EPOCH (if we're not EPOCH)
+            if (self != null && EPOCH_UUID.equals(self.cxID)) {
                 System.out.println("[Bootstrap] This is EPOCH - no bootstrap needed");
                 return;
             }
 
-            System.out.println("[Bootstrap] No local seed found, requesting from EPOCH...");
-            requestSeedFromEpoch();
+            System.out.println("[Bootstrap] No bootstrap or local seed found");
+            System.out.println("[Bootstrap] Unable to bootstrap - please obtain cxnet-bootstrap.cxn");
+            System.out.println("[Bootstrap] Download from: https://CXNET.AnvilDevelopment.US/bootstrap");
 
         } catch (Exception e) {
             System.err.println("[Bootstrap] Bootstrap attempt failed: " + e.getMessage());
@@ -242,8 +284,19 @@ public class ConnectX {
     }
 
     /**
+     * Request updated seed from EPOCH (called after successful bootstrap)
+     * This allows nodes to get the latest network configuration
+     */
+    private void requestSeedUpdateFromEpoch() {
+        if (self != null && !EPOCH_UUID.equals(self.cxID)) {
+            System.out.println("[Bootstrap] Requesting seed update from EPOCH...");
+            requestSeedFromEpoch();
+        }
+    }
+
+    /**
      * Apply a seed to this ConnectX instance
-     * Loads networks, adds peers to directory, and caches certificates
+     * Loads networks, adds peers to directory, caches certificates, and extracts NMI public key
      * @param seed Seed to apply
      * @throws Exception if application fails
      */
@@ -252,6 +305,22 @@ public class ConnectX {
         System.out.println("[Seed]   Networks: " + seed.networks.size());
         System.out.println("[Seed]   HV Peers: " + seed.hvPeers.size());
         System.out.println("[Seed]   Certificates: " + seed.certificates.size());
+
+        // IMPORTANT: Extract and save NMI public key (cx.asc) first
+        // This allows nodes to initialize crypto before connecting
+        if (seed.certificates != null && seed.certificates.containsKey(EPOCH_UUID)) {
+            File cxAsc = new File(cxRoot, "cx.asc");
+            if (!cxAsc.exists()) {
+                String nmiPublicKey = seed.certificates.get(EPOCH_UUID);
+                FileWriter writer = new FileWriter(cxAsc);
+                writer.write(nmiPublicKey);
+                writer.flush();
+                writer.close();
+                System.out.println("[Seed] Extracted NMI public key to cx.asc");
+            } else {
+                System.out.println("[Seed] cx.asc already exists, skipping extraction");
+            }
+        }
 
         // Add hv peers to directory
         for (dev.droppinganvil.v3.network.nodemesh.Node peer : seed.hvPeers) {
@@ -281,11 +350,72 @@ public class ConnectX {
 
     /**
      * Request CXNET seed from EPOCH NMI via SEED_REQUEST event
-     * Queues a SEED_REQUEST to be sent to EPOCH
+     * First introduces this node to EPOCH via NewNode, then requests seed
+     * Uses CXS scope for direct node-to-node communication during bootstrap
      */
     private void requestSeedFromEpoch() {
         try {
-            // Create SEED_REQUEST event
+            System.out.println("[Bootstrap] Contacting EPOCH at " + EPOCH_BRIDGE_ADDRESS);
+
+            // Step 1: Create hardcoded EPOCH node with bridge address for bootstrap
+            Node epochNode = new Node();
+            epochNode.cxID = EPOCH_UUID;
+            epochNode.addr = EPOCH_BRIDGE_ADDRESS; // Use HTTP bridge for initial contact
+            // Note: EPOCH's public key will be cached when we receive signed responses
+
+            // Add EPOCH to peer directory so we can reach it
+            try {
+                PeerDirectory.addNode(epochNode);
+                System.out.println("[Bootstrap] Added EPOCH to peer directory");
+            } catch (SecurityException e) {
+                // EPOCH already exists - this is fine
+                System.out.println("[Bootstrap] EPOCH already in peer directory");
+            }
+
+            // Step 2: Introduce ourselves to EPOCH via NewNode event
+            // This allows EPOCH to cache our certificate and encrypt responses for us
+            if (self != null && self.publicKey != null) {
+                System.out.println("[Bootstrap] Introducing ourselves to EPOCH...");
+
+                // Create NewNode event with our node information
+                dev.droppinganvil.v3.network.events.NetworkEvent newNodeEvent =
+                    new dev.droppinganvil.v3.network.events.NetworkEvent(
+                        dev.droppinganvil.v3.network.events.EventType.NewNode,
+                        new byte[0]);
+                newNodeEvent.eT = dev.droppinganvil.v3.network.events.EventType.NewNode.name();
+                newNodeEvent.iD = java.util.UUID.randomUUID().toString();
+
+                // Set path to EPOCH - use CXS scope for node-to-node communication
+                dev.droppinganvil.v3.network.CXPath epochPath = new dev.droppinganvil.v3.network.CXPath();
+                epochPath.cxID = EPOCH_UUID; // Target EPOCH specifically
+                epochPath.scope = "CXS"; // Node/system scope (not authorized for CX/CXNET yet)
+                epochPath.bridge = "cxHTTP1"; // Specify HTTP bridge
+                epochPath.bridgeArg = "http://localhost:8080/cx"; // Bridge endpoint (localhost for testing)
+                newNodeEvent.p = epochPath;
+
+                // Serialize our node information as the event payload
+                String selfJson = serialize("cxJSON1", self);
+                newNodeEvent.d = selfJson.getBytes("UTF-8");
+
+                // Create container for NewNode
+                dev.droppinganvil.v3.network.events.NetworkContainer newNodeContainer =
+                    new dev.droppinganvil.v3.network.events.NetworkContainer();
+                newNodeContainer.se = "cxJSON1";
+                newNodeContainer.s = false; // Not E2E encrypted
+                newNodeContainer.iD = self.cxID; // Our ID
+
+                // Queue the NewNode introduction
+                OutputBundle newNodeBundle = new OutputBundle(newNodeEvent, epochNode, null, null, newNodeContainer);
+                synchronized (outputQueue) {
+                    outputQueue.add(newNodeBundle);
+                }
+
+                System.out.println("[Bootstrap] NewNode introduction queued");
+            }
+
+            // Step 3: Send SEED_REQUEST to EPOCH
+            System.out.println("[Bootstrap] Requesting CXNET seed...");
+
             dev.droppinganvil.v3.network.events.NetworkEvent seedRequest =
                 new dev.droppinganvil.v3.network.events.NetworkEvent(
                     dev.droppinganvil.v3.network.events.EventType.SEED_REQUEST,
@@ -293,27 +423,31 @@ public class ConnectX {
             seedRequest.eT = dev.droppinganvil.v3.network.events.EventType.SEED_REQUEST.name();
             seedRequest.iD = java.util.UUID.randomUUID().toString();
 
-            // Set path to EPOCH NMI
-            dev.droppinganvil.v3.network.CXPath epochPath = new dev.droppinganvil.v3.network.CXPath();
-            epochPath.cxID = "00000000-0000-0000-0000-000000000001"; // EPOCH UUID
-            epochPath.scope = "CXN";
-            epochPath.network = "CXNET";
-            seedRequest.p = epochPath;
+            // Set path to EPOCH NMI - use CXS scope for node-to-node communication
+            dev.droppinganvil.v3.network.CXPath seedPath = new dev.droppinganvil.v3.network.CXPath();
+            seedPath.cxID = EPOCH_UUID; // Target EPOCH specifically
+            seedPath.scope = "CXS"; // Node/system scope (not authorized for CX/CXNET yet)
+            seedPath.bridge = "cxHTTP1"; // Specify HTTP bridge
+            seedPath.bridgeArg = "http://localhost:8080/cx"; // Bridge endpoint (localhost for testing)
+            seedRequest.p = seedPath;
 
             // Create container
             dev.droppinganvil.v3.network.events.NetworkContainer seedRequestContainer =
                 new dev.droppinganvil.v3.network.events.NetworkContainer();
             seedRequestContainer.se = "cxJSON1";
             seedRequestContainer.s = false;
+            if (self != null) {
+                seedRequestContainer.iD = self.cxID; // Our ID
+            }
 
-            // Queue the request (will be transmitted by OutConnectionController)
-            OutputBundle seedRequestBundle = new OutputBundle(seedRequest, null, null, null, seedRequestContainer);
+            // Queue the request (will be transmitted by OutConnectionController via bridge)
+            OutputBundle seedRequestBundle = new OutputBundle(seedRequest, epochNode, null, null, seedRequestContainer);
             synchronized (outputQueue) {
                 outputQueue.add(seedRequestBundle);
             }
 
             System.out.println("[Bootstrap] SEED_REQUEST queued for EPOCH");
-            System.out.println("[Bootstrap] Waiting for SEED_RESPONSE...");
+            System.out.println("[Bootstrap] Waiting for SEED_RESPONSE via HTTP bridge...");
 
         } catch (Exception e) {
             System.err.println("[Bootstrap] Failed to request seed from EPOCH: " + e.getMessage());

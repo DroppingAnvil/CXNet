@@ -77,11 +77,60 @@ public class OutConnectionController {
                 } else {
                     n = PeerDirectory.lookup(out.ne.p.cxID, true, true);
                 }
-                String[] addr = n.addr.split(":");
-                Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
-                s.getOutputStream().write(cryptNetworkContainer);
-                s.close();
-                return;
+
+                // Try direct P2P connection if node has address
+                if (n != null && n.addr != null && !n.addr.isEmpty()) {
+                    try {
+                        // Check if addr is a bridge address (starts with protocol:)
+                        if (n.addr.contains(":") && !n.addr.matches("^\\d+\\.\\d+\\.\\d+\\.\\d+:.*")) {
+                            // This is a bridge address like "cxHTTP1:https://..."
+                            String[] parts = n.addr.split(":", 2);
+                            String bridgeProtocol = parts[0];
+                            String bridgeEndpoint = parts[1];
+
+                            // Use bridge provider
+                            dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =
+                                ConnectX.getBridgeProvider(bridgeProtocol);
+                            if (bridge != null) {
+                                System.out.println("[OutConnection] Using " + bridgeProtocol + " bridge to reach " + out.ne.p.cxID);
+                                // Create path with bridge info
+                                dev.droppinganvil.v3.network.CXPath bridgePath = new dev.droppinganvil.v3.network.CXPath();
+                                bridgePath.bridgeArg = bridgeEndpoint;
+                                bridge.transmitEvent(bridgePath, cryptNetworkContainer);
+                                return;
+                            } else {
+                                System.err.println("[OutConnection] Bridge provider " + bridgeProtocol + " not available");
+                            }
+                        } else {
+                            // Standard P2P address (IP:port)
+                            String[] addr = n.addr.split(":");
+                            Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
+                            s.getOutputStream().write(cryptNetworkContainer);
+                            s.close();
+                            return;
+                        }
+                    } catch (Exception e) {
+                        System.err.println("[OutConnection] P2P transmission failed: " + e.getMessage());
+                        // Fall through to bridge fallback
+                    }
+                }
+
+                // Bridge fallback: If direct P2P failed or node not found, try CXPath bridge
+                if (out.ne.p.bridge != null && out.ne.p.bridgeArg != null) {
+                    dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =
+                        ConnectX.getBridgeProvider(out.ne.p.bridge);
+                    if (bridge != null) {
+                        System.out.println("[OutConnection] Falling back to " + out.ne.p.bridge + " bridge for " + out.ne.p.cxID);
+                        bridge.transmitEvent(out.ne.p, cryptNetworkContainer);
+                        return;
+                    } else {
+                        System.err.println("[OutConnection] Bridge provider " + out.ne.p.bridge + " not available");
+                        throw new Exception("Cannot reach node " + out.ne.p.cxID + " - no P2P address and bridge unavailable");
+                    }
+                }
+
+                // No way to reach the node
+                throw new Exception("Cannot reach node " + out.ne.p.cxID + " - no P2P address or bridge information");
             }
             if (out.ne.p.scope.equalsIgnoreCase("CXN")) {
                 // CXN scope: Network transmission with TransmitPref support

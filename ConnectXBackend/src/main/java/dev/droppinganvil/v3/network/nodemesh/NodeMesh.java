@@ -114,16 +114,97 @@ public class NodeMesh {
                 throw new DecryptionFailureException();
                 //o1 = connectX.encryptionProvider.decrypt(bais, baoss);
             } else {
-                // Verify NetworkContainer signature using transmitter's ID
-                // nc.iD must be set by the transmitter before signing
+                // Check if transmitter ID is present
                 if (nc.iD == null) {
                     Analytics.addData(AnalyticData.Tear, "NetworkContainer missing transmitter ID");
                     throw new DecryptionFailureException();
                 }
-                o1 = connectX.encryptionProvider.verifyAndStrip(bais, baoss, nc.iD);
+
+                // TODO: PERFORMANCE - This NewNode handling is inefficient (2-3x signature operations)
+                // We strip signature once to peek, then verify again after importing node.
+                // This is ONLY acceptable because NewNode is the only event that requires this.
+                // If more events need pre-verification processing, we need to redesign this
+                // to avoid multiple signature operations (perhaps return signature data from strip).
+                // For production: Monitor if other event types need similar handling.
+
+                // SPECIAL HANDLING FOR NewNode EVENTS
+                // Strip signature first to check event type
+                ByteArrayOutputStream stripBaos = new ByteArrayOutputStream();
+                connectX.encryptionProvider.stripSignature(bais, stripBaos);
+                String strippedEventJson = stripBaos.toString("UTF-8");
+                NetworkEvent parsedEvent = (NetworkEvent) ConnectX.deserialize(nc.se, strippedEventJson, NetworkEvent.class);
+
+                // Check if this is a NewNode event
+                if (parsedEvent.eT != null && parsedEvent.eT.equals("NewNode")) {
+                    System.out.println("[NodeMesh] Processing NewNode event from " + nc.iD);
+
+                    // Import node BEFORE verification (we need the public key)
+                    Node importedNode = null;
+                    if (parsedEvent.d != null && parsedEvent.d.length > 0) {
+                        try {
+                            String nodeJson = new String(parsedEvent.d, "UTF-8");
+                            Node newNode = (Node) ConnectX.deserialize("cxJSON1", nodeJson, Node.class);
+
+                            // SECURITY: Validate node data
+                            if (newNode.cxID == null || newNode.publicKey == null) {
+                                System.err.println("[NodeMesh] NewNode missing cxID or publicKey");
+                                throw new DecryptionFailureException();
+                            }
+
+                            // SECURITY: Verify transmitter matches the node being added
+                            if (!newNode.cxID.equals(nc.iD)) {
+                                System.err.println("[NodeMesh] NewNode cxID mismatch: " + newNode.cxID + " vs " + nc.iD);
+                                throw new DecryptionFailureException();
+                            }
+
+                            // Import the node
+                            PeerDirectory.addNode(newNode);
+                            importedNode = newNode;
+                            System.out.println("[NodeMesh] Imported NewNode: " + newNode.cxID);
+
+                            // Now VERIFY the signature using the imported public key
+                            ByteArrayInputStream verifyBais = new ByteArrayInputStream(nc.e);
+                            ByteArrayOutputStream verifyBaos = new ByteArrayOutputStream();
+                            o1 = connectX.encryptionProvider.verifyAndStrip(verifyBais, verifyBaos, nc.iD);
+
+                            if (o1 == null) {
+                                System.err.println("[NodeMesh] NewNode signature verification FAILED for " + nc.iD);
+                                // Rollback: Remove the imported node
+                                PeerDirectory.removeNode(importedNode.cxID);
+                                throw new DecryptionFailureException();
+                            }
+
+                            System.out.println("[NodeMesh] NewNode signature VERIFIED for " + newNode.cxID);
+                            verifyBais.close();
+                            verifyBaos.close();
+
+                        } catch (DecryptionFailureException e) {
+                            throw e;
+                        } catch (Exception e) {
+                            System.err.println("[NodeMesh] Failed to process NewNode: " + e.getMessage());
+                            if (importedNode != null) {
+                                PeerDirectory.removeNode(importedNode.cxID);
+                            }
+                            throw new DecryptionFailureException();
+                        }
+                    } else {
+                        System.err.println("[NodeMesh] NewNode event has no data");
+                        throw new DecryptionFailureException();
+                    }
+
+                    // Use the already parsed event
+                    ne = parsedEvent;
+                    networkEvent = strippedEventJson;
+
+                } else {
+                    // Standard event: Verify signature (we already have public key)
+                    ByteArrayInputStream verifyBais = new ByteArrayInputStream(nc.e);
+                    o1 = connectX.encryptionProvider.verifyAndStrip(verifyBais, baoss, nc.iD);
+                    networkEvent = baoss.toString("UTF-8");
+                    ne = (NetworkEvent) ConnectX.deserialize(nc.se, networkEvent, NetworkEvent.class);
+                    verifyBais.close();
+                }
             }
-            networkEvent = baoss.toString("UTF-8");  // Use baoss (output from verifyAndStrip)
-            ne = (NetworkEvent) ConnectX.deserialize(nc.se, networkEvent, NetworkEvent.class);
             bais.close();
             baoss.close();
 

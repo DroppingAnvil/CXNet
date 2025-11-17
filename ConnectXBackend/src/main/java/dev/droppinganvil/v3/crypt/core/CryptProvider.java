@@ -44,6 +44,18 @@ public abstract class CryptProvider {
     public boolean verifyAndStripWithKey(InputStream is, OutputStream os, String publicKeyBase64) throws DecryptionFailureException {
         return false;
     }
+
+    /**
+     * Strip signature WITHOUT verification
+     * Used for NewNode events where we need to peek at the event type before we have the sender's public key
+     * SECURITY WARNING: This does NOT verify the signature - caller MUST verify after using this method
+     * @param is Signed input
+     * @param os Output stripped of signature
+     */
+    public void stripSignature(InputStream is, OutputStream os) throws DecryptionFailureException {
+        // Default implementation - subclasses must override
+    }
+
     public void encrypt(InputStream is, OutputStream os, String cxID) throws EncryptionFailureException {
 
     }

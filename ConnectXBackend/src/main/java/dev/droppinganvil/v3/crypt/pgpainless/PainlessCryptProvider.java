@@ -250,4 +250,25 @@ public class PainlessCryptProvider extends CryptProvider {
         }
         return false;
     }
+
+    @Override
+    public void stripSignature(InputStream is, OutputStream os) throws DecryptionFailureException {
+        try {
+            // Strip signature WITHOUT verification - used for NewNode peeking
+            // NOTE: NetworkEvent is SIGNED ONLY (not encrypted), so we don't add decryption keys
+            DecryptionStream decryptionStream = PGPainless.decryptAndOrVerify()
+                    .onInputStream(is)
+                    .withOptions(new ConsumerOptions()
+                            // NOTE: No decryption key - data is signed only, not encrypted
+                            // NOTE: No verification cert - this strips without verifying
+                    );
+            Streams.pipeAll(decryptionStream, os);
+            decryptionStream.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+            DecryptionFailureException dfe = new DecryptionFailureException();
+            dfe.initCause(e);
+            throw dfe;
+        }
+    }
 }

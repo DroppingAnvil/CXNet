@@ -34,6 +34,7 @@ dev\droppinganvil\v3\io\IOThread$1.class
 dev\droppinganvil\v3\network\nodemesh\MessageHandler.class
 dev\droppinganvil\v3\network\events\PeerFinding.class
 dev\droppinganvil\v3\network\services\messagex\MessageXContainer.class
+dev\droppinganvil\v3\test\BootstrapTest.class
 dev\droppinganvil\v3\network\threads\EventProcessor.class
 dev\droppinganvil\v3\ConnectX$1.class
 dev\droppinganvil\v3\network\UnauthorizedNetworkConnectivityException.class

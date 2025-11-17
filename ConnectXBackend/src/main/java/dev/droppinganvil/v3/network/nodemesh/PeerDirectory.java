@@ -119,6 +119,23 @@ public class PeerDirectory implements Serializable {
         }
     }
 
+    /**
+     * Remove a node from all peer directories
+     * Used for rollback when NewNode signature verification fails
+     * @param cxID The node ID to remove
+     */
+    public static void removeNode(String cxID) {
+        if (cxID == null) return;
+
+        // Remove from all peer directories
+        if (hv != null) hv.remove(cxID);
+        if (seen != null) seen.remove(cxID);
+        if (lan != null) lan.remove(cxID);
+        if (peerCache != null) peerCache.remove(cxID);
+
+        System.out.println("[PeerDirectory] Removed node: " + cxID);
+    }
+
     public static boolean stableConnection() {
         return true;
     }

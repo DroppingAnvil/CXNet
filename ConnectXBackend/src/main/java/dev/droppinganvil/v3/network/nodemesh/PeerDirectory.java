@@ -15,10 +15,10 @@ import java.io.Serializable;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class PeerDirectory implements Serializable {
-    public static ConcurrentHashMap<String,Node> peerCache;
-    public static ConcurrentHashMap<String,Node> seen;
-    public static ConcurrentHashMap<String, Node> lan;
-    public static ConcurrentHashMap<String,Node> hv;
+    public static ConcurrentHashMap<String,Node> peerCache = new ConcurrentHashMap<>();
+    public static ConcurrentHashMap<String,Node> seen = new ConcurrentHashMap<>();
+    public static ConcurrentHashMap<String, Node> lan = new ConcurrentHashMap<>();
+    public static ConcurrentHashMap<String,Node> hv = new ConcurrentHashMap<>();
     public static File peers;
 
 
@@ -76,16 +76,22 @@ public class PeerDirectory implements Serializable {
 
     public static void addNode(Node n) {
         if (Node.validate(n)) {
+            // Lazy initialization - ensure maps are initialized before use
+            if (seen == null) seen = new ConcurrentHashMap<>();
+            if (hv == null) hv = new ConcurrentHashMap<>();
+            if (lan == null) lan = new ConcurrentHashMap<>();
+            if (peerCache == null) peerCache = new ConcurrentHashMap<>();
+
             // SECURITY: UUID Collision/Spoofing Protection
             // If we already have a node with this cxID, verify the public key matches
             Node existing = null;
 
             // Check all peer directories for existing node with same cxID
-            if (hv != null && hv.containsKey(n.cxID)) {
+            if (hv.containsKey(n.cxID)) {
                 existing = hv.get(n.cxID);
-            } else if (seen != null && seen.containsKey(n.cxID)) {
+            } else if (seen.containsKey(n.cxID)) {
                 existing = seen.get(n.cxID);
-            } else if (peerCache != null && peerCache.containsKey(n.cxID)) {
+            } else if (peerCache.containsKey(n.cxID)) {
                 existing = peerCache.get(n.cxID);
             }
 

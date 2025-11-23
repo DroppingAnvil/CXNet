@@ -39,7 +39,12 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 public class ConnectX {
     // EPOCH NMI Bootstrap Constants
     public static final String EPOCH_UUID = "00000000-0000-0000-0000-000000000001";
-    // For testing: use localhost. For production: use public URL
+
+    // TODO: Bootstrap URL Configuration
+    // PRODUCTION: Switch to public URL once RProx/Cloudflare configuration is verified
+    // - Verify health endpoint works through Cloudflare
+    // - Test bootstrap process end-to-end
+    // - Update to: cxHTTP1:https://CXNET.AnvilDevelopment.US/cx
     public static final String EPOCH_BRIDGE_ADDRESS = "cxHTTP1:http://localhost:8080/cx";
     // public static final String EPOCH_BRIDGE_ADDRESS = "cxHTTP1:https://CXNET.AnvilDevelopment.US/cx";
 
@@ -68,6 +73,45 @@ public class ConnectX {
     }
 
     public ConnectX(String rootDir) throws IOException {
+        initializeFileSystem(rootDir);
+    }
+
+    /**
+     * Constructor that automatically connects to the network
+     * @param rootDir Root directory for this ConnectX instance
+     * @param port P2P listening port
+     * @throws IOException if initialization or connection fails
+     */
+    public ConnectX(String rootDir, int port) throws IOException {
+        initializeFileSystem(rootDir);
+        connect(port);
+    }
+
+    /**
+     * Constructor that fully initializes and connects with crypto
+     * @param rootDir Root directory for this ConnectX instance
+     * @param port P2P listening port
+     * @param cxID UUID for this node (null to generate random)
+     * @param password Password for private key encryption
+     * @throws Exception if initialization fails
+     */
+    public ConnectX(String rootDir, int port, String cxID, String password) throws Exception {
+        initializeFileSystem(rootDir);
+
+        // Initialize crypto with provided or generated UUID
+        String actualID = cxID != null ? cxID : java.util.UUID.randomUUID().toString();
+        String address = "127.0.0.1:" + port;
+        initializeCrypto(actualID, password, address);
+
+        // Connect to network
+        connect(port);
+    }
+
+    /**
+     * Internal method to initialize file system and platform detection
+     * Called by all constructors
+     */
+    private void initializeFileSystem(String rootDir) throws IOException {
         this.cxRoot = new File(rootDir);
 
         String osS = System.getProperty("os.name");
@@ -94,8 +138,19 @@ public class ConnectX {
         resources = new File(nodemesh, "nodemesh-resources");
         if (!resources.exists()) if (!resources.mkdir()) throw new IOException();
 
-        //TODO network join
+        // Register default HTTP bridge provider if not already registered
+        if (!isBridgeProviderPresent("cxHTTP1")) {
+            try {
+                dev.droppinganvil.v3.network.nodemesh.bridge.http.HTTPBridgeProvider httpBridge =
+                    new dev.droppinganvil.v3.network.nodemesh.bridge.http.HTTPBridgeProvider();
+                addBridgeProvider(httpBridge, this);
+            } catch (Exception e) {
+                // Bridge registration failed - not critical for initialization
+                System.err.println("[ConnectX] Failed to register default HTTP bridge: " + e.getMessage());
+            }
+        }
 
+        //TODO network join
     }
     public static void checkSafety(String s) throws UnsafeKeywordException {
         //TODO filesystem safety
@@ -185,6 +240,78 @@ public class ConnectX {
 
     public Node getSelf() {
         return self;
+    }
+
+    /**
+     * Initialize cryptography with a random UUID
+     * Convenience method for testing and simple deployments
+     * @param password Password for private key encryption
+     * @param listenAddress Listen address for this node (e.g., "127.0.0.1:49153")
+     * @return The generated UUID (also accessible via getOwnID())
+     * @throws Exception if crypto initialization fails
+     */
+    public String initializeCrypto(String password, String listenAddress) throws Exception {
+        String uuid = java.util.UUID.randomUUID().toString();
+        return initializeCrypto(uuid, password, listenAddress);
+    }
+
+    /**
+     * Initialize cryptography with a specific UUID
+     * @param cxID UUID for this node
+     * @param password Password for private key encryption
+     * @param listenAddress Listen address for this node (e.g., "127.0.0.1:49153")
+     * @return The cxID (same as parameter)
+     * @throws Exception if crypto initialization fails
+     */
+    public String initializeCrypto(String cxID, String password, String listenAddress) throws Exception {
+        // Initialize encryption provider
+        encryptionProvider.setup(cxID, password, cxRoot);
+
+        // Create and set self node
+        Node selfNode = new Node();
+        selfNode.cxID = cxID;
+        selfNode.publicKey = encryptionProvider.getPublicKey();
+        selfNode.addr = listenAddress;
+        setSelf(selfNode);
+
+        return cxID;
+    }
+
+    /**
+     * Setup bootstrap seed from EPOCH's seed file
+     * Copies the provided seed file to this instance's cxnet-bootstrap.cxn
+     * This allows the instance to bootstrap into CXNET when connect() is called
+     *
+     * @param epochSeedFile Path to EPOCH's seed file (usually latest from EPOCH/seeds/)
+     * @throws Exception if seed copy fails
+     */
+    public void setupBootstrap(File epochSeedFile) throws Exception {
+        if (!epochSeedFile.exists()) {
+            throw new FileNotFoundException("EPOCH seed file not found: " + epochSeedFile.getAbsolutePath());
+        }
+
+        // Copy to bootstrap seed location
+        File bootstrapSeed = new File(cxRoot, "cxnet-bootstrap.cxn");
+        java.nio.file.Files.copy(
+            epochSeedFile.toPath(),
+            bootstrapSeed.toPath(),
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING
+        );
+
+        // Load seed to extract cx.asc
+        dev.droppinganvil.v3.network.Seed seed = dev.droppinganvil.v3.network.Seed.load(bootstrapSeed);
+
+        // Extract EPOCH's public key (cx.asc) if not already present
+        if (seed.certificates != null && seed.certificates.containsKey(EPOCH_UUID)) {
+            File cxAsc = new File(cxRoot, "cx.asc");
+            if (!cxAsc.exists()) {
+                String epochPublicKey = seed.certificates.get(EPOCH_UUID);
+                FileWriter writer = new FileWriter(cxAsc);
+                writer.write(epochPublicKey);
+                writer.flush();
+                writer.close();
+            }
+        }
     }
 
     /**

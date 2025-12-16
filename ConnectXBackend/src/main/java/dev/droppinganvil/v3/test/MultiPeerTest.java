@@ -3,15 +3,10 @@ package dev.droppinganvil.v3.test;
 import dev.droppinganvil.v3.ConnectX;
 import dev.droppinganvil.v3.network.CXNetwork;
 import dev.droppinganvil.v3.network.events.EventType;
-import dev.droppinganvil.v3.network.events.NetworkContainer;
-import dev.droppinganvil.v3.network.events.NetworkEvent;
-import dev.droppinganvil.v3.network.nodemesh.Node;
-import dev.droppinganvil.v3.network.nodemesh.OutputBundle;
 import dev.droppinganvil.v3.network.nodemesh.PeerDirectory;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Multi-peer network test demonstrating CXNET mesh network with 5 peers
@@ -67,13 +62,14 @@ public class MultiPeerTest {
                 String peerDir = "ConnectX-Peer" + i;
                 int port = basePort + (i - 1);
 
-                // Create temporary instance just to setup bootstrap
-                ConnectX tempPeer = new ConnectX(peerDir);
-                tempPeer.setupBootstrap(latestEpochSeed);
-
-                // Now create the real peer with full initialization
+                // Create peer with full initialization
                 System.out.println("  Creating Peer " + i + " on port " + port + "...");
                 ConnectX peer = new ConnectX(peerDir, port, null, "password" + i);
+
+                // Setup bootstrap seed and trigger bootstrap
+                peer.setupBootstrap(latestEpochSeed);
+                peer.attemptCXNETBootstrap();
+
                 peers.add(peer);
 
                 System.out.println("    UUID: " + peer.getOwnID());
@@ -123,40 +119,18 @@ public class MultiPeerTest {
             if (successCount > 0) {
                 // Test 1: Send message from Peer3 to network
                 System.out.println("\n=== Test 1: Peer 3 broadcasts message ===");
-                NetworkEvent testEvent1 = new NetworkEvent(EventType.MESSAGE, "Hello from Peer 3 to CXNET!".getBytes());
-                testEvent1.eT = EventType.MESSAGE.name();
-
-                dev.droppinganvil.v3.network.CXPath path1 = new dev.droppinganvil.v3.network.CXPath();
-                path1.scope = "CXN";
-                path1.network = "CXNET";
-                testEvent1.p = path1;
-
-                NetworkContainer nc1 = new NetworkContainer();
-                nc1.se = "cxJSON1";
-                nc1.s = false;
-
-                OutputBundle bundle1 = new OutputBundle(testEvent1, null, null, null, nc1);
-                ConnectX.outputQueue.add(bundle1);
+                peers.get(2).buildEvent(EventType.MESSAGE, "Hello from Peer 3 to CXNET!".getBytes())
+                    .toNetwork("CXNET")
+                    .queue();
                 System.out.println("Message queued from Peer 3 (" + peers.get(2).getOwnID() + ")");
 
                 Thread.sleep(2000);
 
                 // Test 2: Send message from Peer5 to network
                 System.out.println("\n=== Test 2: Peer 5 broadcasts message ===");
-                NetworkEvent testEvent2 = new NetworkEvent(EventType.MESSAGE, "Hello from Peer 5 to CXNET!".getBytes());
-                testEvent2.eT = EventType.MESSAGE.name();
-
-                dev.droppinganvil.v3.network.CXPath path2 = new dev.droppinganvil.v3.network.CXPath();
-                path2.scope = "CXN";
-                path2.network = "CXNET";
-                testEvent2.p = path2;
-
-                NetworkContainer nc2 = new NetworkContainer();
-                nc2.se = "cxJSON1";
-                nc2.s = false;
-
-                OutputBundle bundle2 = new OutputBundle(testEvent2, null, null, null, nc2);
-                ConnectX.outputQueue.add(bundle2);
+                peers.get(4).buildEvent(EventType.MESSAGE, "Hello from Peer 5 to CXNET!".getBytes())
+                    .toNetwork("CXNET")
+                    .queue();
                 System.out.println("Message queued from Peer 5 (" + peers.get(4).getOwnID() + ")");
 
                 Thread.sleep(2000);
@@ -164,21 +138,9 @@ public class MultiPeerTest {
                 // Test 3: Peer finding test
                 System.out.println("\n=== Test 3: Peer finding broadcast ===");
                 //TODO fix implementation Finding peers as a string is not proper implementation and this done nothing but throw errors, this also showed how much of an issue it was for bad data to mess up the incontroller
-                NetworkEvent peerFindingEvent = new NetworkEvent(EventType.PeerFinding, "Finding peers".getBytes());
-                peerFindingEvent.eT = EventType.PeerFinding.name();
-
-                dev.droppinganvil.v3.network.CXPath path3 = new dev.droppinganvil.v3.network.CXPath();
-                path3.scope = "CXN";
-                path3.network = "CXNET";
-                peerFindingEvent.p = path3;
-
-                NetworkContainer nc3 = new NetworkContainer();
-                nc3.se = "cxJSON1";
-                nc3.s = false;
-                // nc.iD is now set automatically by OutConnectionController.transmitEvent()
-
-                OutputBundle bundle3 = new OutputBundle(peerFindingEvent, null, null, null, nc3);
-                ConnectX.outputQueue.add(bundle3);
+                peers.get(0).buildEvent(EventType.PeerFinding, "Finding peers".getBytes())
+                    .toNetwork("CXNET")
+                    .queue();
                 System.out.println("Peer finding event queued");
             } else {
                 System.out.println("\n⚠ Skipping message tests - no peers successfully bootstrapped");
@@ -190,8 +152,11 @@ public class MultiPeerTest {
 
             while (true) {
                 Thread.sleep(5000);
-                System.out.println("Queues - Output: " + ConnectX.outputQueue.size() +
-                                 ", Event: " + ConnectX.eventQueue.size() +
+                // Aggregate queue sizes from all peers
+                int totalOutput = peers.stream().mapToInt(p -> p.outputQueue.size()).sum();
+                int totalEvent = peers.stream().mapToInt(p -> p.eventQueue.size()).sum();
+                System.out.println("Queues - Output: " + totalOutput +
+                                 ", Event: " + totalEvent +
                                  ", HV Peers: " + PeerDirectory.hv.size());
             }
 

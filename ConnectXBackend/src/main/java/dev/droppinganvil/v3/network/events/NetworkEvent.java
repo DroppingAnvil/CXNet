@@ -27,4 +27,15 @@ public class NetworkEvent implements Serializable {
      * Event specific data
      */
     public byte[] d;
+    /**
+     * Determines if event should be executed during blockchain sync
+     * TRUE = State-modifying events (permission changes, NMI updates) - MUST execute during sync
+     * FALSE = Ephemeral/realtime events (messages, pings) - only execute when received live
+     *
+     * Example: A 2-year-old permission change MUST be applied during sync to rebuild state
+     *          A 2-year-old message should NOT be displayed during sync
+     *
+     * Default: false (most events are realtime)
+     */
+    public boolean executeOnSync = false;
 }

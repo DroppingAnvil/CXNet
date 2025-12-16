@@ -2,10 +2,7 @@ package dev.droppinganvil.v3.test;
 
 import dev.droppinganvil.v3.ConnectX;
 import dev.droppinganvil.v3.network.events.EventType;
-import dev.droppinganvil.v3.network.events.NetworkContainer;
-import dev.droppinganvil.v3.network.events.NetworkEvent;
 import dev.droppinganvil.v3.network.nodemesh.Node;
-import dev.droppinganvil.v3.network.nodemesh.OutputBundle;
 import dev.droppinganvil.v3.network.nodemesh.PeerDirectory;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -172,29 +169,15 @@ public class TwoPeerTest {
 
             // Create a test event using CXN scope (network backend routing)
             System.out.println("\n=== Creating Test Event ===");
-            NetworkEvent testEvent = new NetworkEvent(EventType.MESSAGE, "Hello from Peer 1 via TESTNET blockchain!".getBytes());
-            testEvent.eT = EventType.MESSAGE.name();
-
-            // Create CXPath for routing using CXN scope (network-based routing)
-            dev.droppinganvil.v3.network.CXPath path = new dev.droppinganvil.v3.network.CXPath();
-            path.scope = "CXN";  // Network scope, not direct peer-to-peer
-            path.network = "TESTNET";  // Route through TESTNET network
-            testEvent.p = path;
-
-            NetworkContainer nc = new NetworkContainer();
-            nc.se = "cxJSON1";
-            nc.s = false; // Not E2E encrypted for test
-
-            OutputBundle bundle = new OutputBundle(testEvent, null, null, null, nc);
-
-            // Queue event for transmission
             System.out.println("Queueing event for transmission...");
-            System.out.println("  Event Type: " + testEvent.eT);
-            System.out.println("  Target Scope: " + testEvent.p.scope);
-            System.out.println("  Target Network: " + testEvent.p.network);
-            System.out.println("  Data: " + new String(testEvent.d));
+            System.out.println("  Event Type: MESSAGE");
+            System.out.println("  Target Scope: CXN");
+            System.out.println("  Target Network: TESTNET");
+            System.out.println("  Data: Hello from Peer 1 via TESTNET blockchain!");
 
-            ConnectX.outputQueue.add(bundle);
+            peer1.buildEvent(EventType.MESSAGE, "Hello from Peer 1 via TESTNET blockchain!".getBytes())
+                .toNetwork("TESTNET")
+                .queue();
 
             System.out.println("\n=== Test Setup Complete ===");
             System.out.println("Blockchain-based network architecture:");
@@ -210,8 +193,10 @@ public class TwoPeerTest {
             while (true) {
                 Thread.sleep(5000);
                 System.out.println("\nQueues status:");
-                System.out.println("  Output queue size: " + ConnectX.outputQueue.size());
-                System.out.println("  Event queue size: " + ConnectX.eventQueue.size());
+                int totalOutput = peer1.outputQueue.size() + peer2.outputQueue.size();
+                int totalEvent = peer1.eventQueue.size() + peer2.eventQueue.size();
+                System.out.println("  Output queue size: " + totalOutput + " (peer1: " + peer1.outputQueue.size() + ", peer2: " + peer2.outputQueue.size() + ")");
+                System.out.println("  Event queue size: " + totalEvent + " (peer1: " + peer1.eventQueue.size() + ", peer2: " + peer2.eventQueue.size() + ")");
             }
 
         } catch (Exception e) {

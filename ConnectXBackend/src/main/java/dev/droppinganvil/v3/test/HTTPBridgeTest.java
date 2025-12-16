@@ -104,13 +104,41 @@ public class HTTPBridgeTest {
         // Check if CXNET already exists in memory
         cxnet = dev.droppinganvil.v3.ConnectX.getNetwork(NETWORK_NAME);
         if (cxnet == null) {
-            // Create new CXNET network
-            cxnet = server.createNetwork(NETWORK_NAME);
-            System.out.println("  ✓ CXNET created");
-            System.out.println("    Chain c1 (Admin): " + cxnet.networkDictionary.c1);
-            System.out.println("    Chain c2 (Resources): " + cxnet.networkDictionary.c2);
-            System.out.println("    Chain c3 (Events): " + cxnet.networkDictionary.c3);
-            System.out.println("    NMI: EPOCH");
+            // Check if blockchain data exists on disk (persistence test)
+            boolean blockchainExists = server.blockchainPersistence.exists(NETWORK_NAME);
+
+            if (blockchainExists) {
+                System.out.println("  ✓ CXNET blockchain found on disk - testing persistence");
+
+                // Try to load persisted blockchain by recreating network structure
+                // In production, this would happen via importNetwork() from a seed
+                // For EPOCH/NMI, we recreate the network structure and let persistence layer restore it
+                cxnet = server.createNetwork(NETWORK_NAME);
+
+                // Verify blockchain was restored from disk
+                ConnectX.BlockchainStats stats = server.getBlockchainStats(cxnet);
+                System.out.println("  ✓ Blockchain loaded from disk");
+                System.out.println("    c1: " + stats.c1BlockCount + " blocks (current: " + stats.c1CurrentBlock + ")");
+                System.out.println("    c2: " + stats.c2BlockCount + " blocks (current: " + stats.c2CurrentBlock + ")");
+                System.out.println("    c3: " + stats.c3BlockCount + " blocks (current: " + stats.c3CurrentBlock + ")");
+
+            } else {
+                // Create new CXNET network (first run)
+                System.out.println("  No existing blockchain found - creating new CXNET");
+                cxnet = server.createNetwork(NETWORK_NAME);
+                System.out.println("  ✓ CXNET created");
+                System.out.println("    Chain c1 (Admin): " + cxnet.networkDictionary.c1);
+                System.out.println("    Chain c2 (Resources): " + cxnet.networkDictionary.c2);
+                System.out.println("    Chain c3 (Events): " + cxnet.networkDictionary.c3);
+                System.out.println("    NMI: EPOCH");
+
+                // Verify blockchain was persisted
+                ConnectX.BlockchainStats stats = server.getBlockchainStats(cxnet);
+                System.out.println("  ✓ Blockchain persisted to disk");
+                System.out.println("    c1: " + stats.c1BlockCount + " blocks");
+                System.out.println("    c2: " + stats.c2BlockCount + " blocks");
+                System.out.println("    c3: " + stats.c3BlockCount + " blocks");
+            }
 
             // Create versioned seed for CXNET distribution
             System.out.println("  Creating official CXNET seed...");
@@ -225,8 +253,8 @@ public class HTTPBridgeTest {
             Thread.sleep(5000);
 
             // Display stats
-            int outputQueue = ConnectX.outputQueue.size();
-            int eventQueue = ConnectX.eventQueue.size();
+            int outputQueue = server.outputQueue.size();
+            int eventQueue = server.eventQueue.size();
 
             if (outputQueue > 0 || eventQueue > 0) {
                 System.out.println("[" + new java.util.Date() + "] " +
@@ -280,10 +308,10 @@ public class HTTPBridgeTest {
                     Thread.sleep(100);
 
                     // Check event queue
-                    if (!ConnectX.eventQueue.isEmpty()) {
+                    if (!server.eventQueue.isEmpty()) {
                         dev.droppinganvil.v3.network.InputBundle bundle;
-                        synchronized (ConnectX.eventQueue) {
-                            bundle = ConnectX.eventQueue.poll();
+                        synchronized (server.eventQueue) {
+                            bundle = server.eventQueue.poll();
                         }
 
                         if (bundle != null && bundle.ne != null) {

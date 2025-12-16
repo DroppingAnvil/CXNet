@@ -123,17 +123,29 @@ public class HTTPBridgeProvider implements BridgeProvider {
             // TODO: Response format - for now assume single or multiple containers
             byte[] responseBody = response.body().bytes();
             if (responseBody != null && responseBody.length > 0) {
-                // Deserialize response NetworkContainers
-                // This would be an array of signed NetworkContainers
-                // For simplicity, treat as single container for now
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                ByteArrayInputStream bais = new ByteArrayInputStream(responseBody);
+                try {
+                    // Deserialize response NetworkContainers
+                    // This would be an array of signed NetworkContainers
+                    // For simplicity, treat as single container for now
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    ByteArrayInputStream bais = new ByteArrayInputStream(responseBody);
 
-                // Decrypt and deserialize
-                Object decrypted = connectX.encryptionProvider.decrypt(bais, baos);
-                String json = baos.toString("UTF-8");
-                NetworkContainer nc = (NetworkContainer) ConnectX.deserialize("cxJSON1", json, NetworkContainer.class);
-                responses.add(nc);
+                    // Decrypt and deserialize
+                    Object decrypted = connectX.encryptionProvider.decrypt(bais, baos);
+                    String json = baos.toString("UTF-8");
+
+                    // Skip if response is not JSON (e.g., "OK", error messages)
+                    String trimmed = json.trim();
+                    if (!trimmed.isEmpty() && (trimmed.startsWith("{") || trimmed.startsWith("["))) {
+                        NetworkContainer nc = (NetworkContainer) ConnectX.deserialize("cxJSON1", json, NetworkContainer.class);
+                        responses.add(nc);
+                    } else {
+                        System.out.println("[HTTP Bridge] Received non-JSON response (acknowledgment): " + trimmed);
+                    }
+                } catch (Exception parseEx) {
+                    // Response parsing failed - likely an acknowledgment or error message
+                    System.out.println("[HTTP Bridge] Response parse skipped (likely acknowledgment)");
+                }
             }
 
             response.close();

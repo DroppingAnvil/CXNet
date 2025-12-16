@@ -7,6 +7,7 @@ dev\droppinganvil\v3\edge\NetworkBlock.class
 dev\droppinganvil\v3\network\nodemesh\bridge\http\HTTPBridgeProvider.class
 dev\droppinganvil\v3\network\remotedirectory\ReadOnlyException.class
 dev\droppinganvil\v3\utils\obj\InstanceOnly.class
+dev\droppinganvil\v3\ConnectX$BlockchainStats.class
 dev\droppinganvil\v3\crypt\core\exceptions\EncryptionFailureException.class
 dev\droppinganvil\v3\test\MultiPeerTest.class
 dev\droppinganvil\v3\network\nodemesh\Connections.class
@@ -35,6 +36,7 @@ dev\droppinganvil\v3\network\nodemesh\MessageHandler.class
 dev\droppinganvil\v3\network\events\PeerFinding.class
 dev\droppinganvil\v3\network\services\messagex\MessageXContainer.class
 dev\droppinganvil\v3\test\BootstrapTest.class
+dev\droppinganvil\v3\network\BlockchainPersistence$ChainMetadata.class
 dev\droppinganvil\v3\network\threads\EventProcessor.class
 dev\droppinganvil\v3\ConnectX$1.class
 dev\droppinganvil\v3\network\UnauthorizedNetworkConnectivityException.class
@@ -56,7 +58,9 @@ dev\droppinganvil\v3\network\nodemesh\bridge\http\HTTPBridge.class
 dev\droppinganvil\v3\network\nodemesh\NodeMesh.class
 dev\droppinganvil\v3\utils\obj\BaseStatus.class
 dev\droppinganvil\v3\utils\obj\LockOwnerException.class
+dev\droppinganvil\v3\ConnectX$EventBuilder.class
 dev\droppinganvil\v3\resourcecore\ResourceType.class
+dev\droppinganvil\v3\network\BlockchainPersistence.class
 dev\droppinganvil\v3\utils\obj\LockedStateException.class
 dev\droppinganvil\v3\crypt\core\exceptions\TempDirectoryPermissions.class
 dev\droppinganvil\v3\io\JobType.class

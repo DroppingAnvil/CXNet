@@ -26,8 +26,8 @@ public class OutputProcessor implements Runnable {
         while (active) {
             try {
                 OutputBundle bundle;
-                synchronized (ConnectX.outputQueue) {
-                    bundle = ConnectX.outputQueue.poll();
+                synchronized (outController.connectXAPI.outputQueue) {
+                    bundle = outController.connectXAPI.outputQueue.poll();
                 }
 
                 if (bundle != null) {

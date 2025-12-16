@@ -176,8 +176,8 @@ public class BootstrapTest {
             // Keep running
             while (true) {
                 Thread.sleep(5000);
-                System.out.println("Queues - Output: " + ConnectX.outputQueue.size() +
-                                 ", Event: " + ConnectX.eventQueue.size());
+                System.out.println("Queues - Output: " + peer.outputQueue.size() +
+                                 ", Event: " + peer.eventQueue.size());
             }
 
         } catch (Exception e) {

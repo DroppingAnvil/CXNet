@@ -1,7 +1,7 @@
 # ConnectX (CX) Protocol Documentation
 
 **Version:** 3.0
-**Last Updated:** 2025-01-12
+**Last Updated:** 2025-01-23
 
 ---
 
@@ -72,6 +72,46 @@ The identity that creates and controls a CXNetwork.
 - Manage permissions (add/edit entries)
 - Manage backend infrastructure nodes
 - Sign network configuration
+
+**NMI Management:**
+
+Individual networks can manage their NMIs through the following event types:
+- `UPDATE_NMI` - Update existing NMI credentials (requires existing NMI signature)
+- `ADD_NMI` - Add additional NMI for redundancy (requires existing NMI signature)
+- `DELETE_NMI` - Remove an NMI (requires existing NMI signature)
+
+All NMI management operations require proper permission verification using the existing permission system.
+
+**CXNET NMI Immutability:**
+The CXNET NMI is immutable and should never change under normal circumstances. Exception conditions for CXNET NMI updates will be defined in future protocol updates. This ensures the stability and security of the global network infrastructure.
+
+**Network Seed Distribution:**
+
+Each network's seed data is stored in Chain 1 (c1 - Admin chain) and must be signed by that network's NMI. This ensures:
+- **Authenticity:** Only the network's NMI can publish official seed data
+- **Peer Discovery:** New nodes joining a network can find peers through c1 blockchain
+- **Integrity:** Seed data is cryptographically verified through NMI signature
+
+When joining a new network, nodes MUST retrieve the network seed from c1 to discover initial peers.
+
+**CXNET Official Seed Policy:**
+
+Networks wishing to be included in the CXNET official seed distribution must meet strict policies to ensure the health and stability of the global network. These policies include (but are not limited to):
+- **Security Requirements:** Strong NMI key management and security practices
+- **Performance Standards:** Minimum uptime and response time requirements
+- **Compliance:** Adherence to CXNET protocol specifications
+- **Application Review:** Networks are evaluated based on their intended use case
+
+Additional information on security requirements, performance benchmarks, and application procedures will be available at:
+**https://AnvilDevelopment.US/ConnectX**
+
+**Default Permissions:**
+
+CXNET enforces restrictive default permissions to maintain system health:
+- **CXNET:** Nodes joining CXNET receive only `AddAccount` permission by default (NO blockchain recording)
+- **Other Networks:** Nodes receive `AddAccount` + `Record-c3` (events chain) permissions
+
+This ensures that CXNET blockchain is not spammed with arbitrary events, while individual networks maintain flexibility for their use cases.
 
 #### 3. **Backend Infrastructure Nodes (`backendSet`)**
 Trusted infrastructure servers for specific network services.
@@ -471,6 +511,553 @@ if (tP.peerProxy) {
     ConnectX.recordEvent(networkEvent); // If permissions allow
 }
 ```
+
+### Blockchain Persistence Layer
+
+ConnectX implements a scalable block-per-file persistence architecture for blockchain data. This enables efficient storage and retrieval of blockchain history while supporting lazy loading for memory optimization.
+
+#### Architecture Overview
+
+**Design Philosophy:**
+- **Lightweight chain metadata** - Only pointers and configuration (no block data)
+- **Block-per-file storage** - Each block stored as individual JSON file
+- **Lazy loading** - Blocks loaded on-demand from disk
+- **Thread-safe** - Per-chain locks prevent concurrent modification
+- **Scalable** - Supports up to 100 chains per network
+
+#### File Structure
+
+```
+{cxRoot}/
+  └── blockchain/
+      └── {networkID}/
+          ├── chain-1.json           (c1 metadata - lightweight)
+          ├── chain-2.json           (c2 metadata - lightweight)
+          ├── chain-3.json           (c3 metadata - lightweight)
+          ├── ...
+          ├── chain-100.json         (up to 100 chains)
+          └── blocks/
+              ├── chain-1/
+              │   ├── block-0.json   (individual block files)
+              │   ├── block-1.json
+              │   └── block-2.json
+              ├── chain-2/
+              │   └── block-0.json
+              └── chain-3/
+                  ├── block-0.json
+                  └── block-1.json
+```
+
+#### Components
+
+##### 1. BlockchainPersistence Class
+**Location:** `dev.droppinganvil.v3.network.BlockchainPersistence`
+
+**Responsibilities:**
+- Save/load individual blocks
+- Save/load chain metadata
+- Manage per-chain locks for thread safety
+- Validate chain IDs (1-100)
+- Delete network blockchain data
+
+**Key Methods:**
+```java
+// Save operations
+void saveBlock(String networkID, Long chainID, NetworkBlock block)
+void saveChainMetadata(NetworkRecord chain, String networkID)
+void saveAllBlocks(NetworkRecord chain, String networkID)
+
+// Load operations
+NetworkBlock loadBlock(String networkID, Long chainID, Long blockID)
+NetworkRecord loadChain(String networkID, Long chainID, boolean loadAllBlocks)
+
+// Utility operations
+void deleteNetwork(String networkID)
+boolean exists(String networkID)
+boolean chainExists(String networkID, Long chainID)
+```
+
+##### 2. ChainMetadata Class
+**Location:** `BlockchainPersistence.ChainMetadata`
+
+**Purpose:** Lightweight metadata for efficient chain serialization (no block data)
+
+```java
+class ChainMetadata {
+    String networkID;        // Network identifier
+    Long chainID;            // 1-100
+    Integer blockLength;     // Events per block (default: 100)
+    boolean lock;            // Chain lock status
+    Long currentBlockID;     // Pointer to current block (NOT the block itself)
+    int blockCount;          // Total number of blocks on disk
+}
+```
+
+**Size:** ~167 bytes per chain (minimal overhead)
+
+##### 3. NetworkBlock Files
+**Format:** JSON serialized NetworkBlock objects
+
+```json
+["dev.droppinganvil.v3.edge.NetworkBlock", {
+  "block": 0,
+  "networkEvents": ["java.util.concurrent.ConcurrentHashMap", {...}]
+}]
+```
+
+**Size:** Variable (116 bytes for empty genesis block, grows with events)
+
+#### Persistence Triggers
+
+Blockchain data is automatically persisted at key lifecycle points:
+
+##### 1. Network Creation (ConnectX.createNetwork)
+```java
+// Save genesis blocks for all three chains
+blockchainPersistence.saveBlock(networkID, 1L, network.c1.current);
+blockchainPersistence.saveBlock(networkID, 2L, network.c2.current);
+blockchainPersistence.saveBlock(networkID, 3L, network.c3.current);
+
+// Save chain metadata
+blockchainPersistence.saveChainMetadata(network.c1, networkID);
+blockchainPersistence.saveChainMetadata(network.c2, networkID);
+blockchainPersistence.saveChainMetadata(network.c3, networkID);
+```
+
+##### 2. Block Rotation (ConnectX.recordEvent)
+```java
+// When current block reaches blockLength (default: 100 events)
+if (currentBlock.networkEvents.size() >= targetChain.blockLength) {
+    // Save completed block before creating new one
+    blockchainPersistence.saveBlock(networkID, chainID, currentBlock);
+    blockchainPersistence.saveChainMetadata(targetChain, networkID);
+
+    // Create new block
+    Long newBlockID = currentBlock.block + 1;
+    NetworkBlock newBlock = new NetworkBlock(newBlockID);
+    targetChain.current = newBlock;
+}
+```
+
+##### 3. Network Import (ConnectX.importNetwork)
+```java
+// Try to load persisted blockchain data from disk
+if (blockchainPersistence.exists(networkID)) {
+    // Load chains (lazy loading - only current blocks initially)
+    NetworkRecord c1 = blockchainPersistence.loadChain(networkID, 1L, false);
+    NetworkRecord c2 = blockchainPersistence.loadChain(networkID, 2L, false);
+    NetworkRecord c3 = blockchainPersistence.loadChain(networkID, 3L, false);
+
+    // Apply loaded chains to network
+    if (c1 != null) network.c1 = c1;
+    if (c2 != null) network.c2 = c2;
+    if (c3 != null) network.c3 = c3;
+}
+```
+
+#### Lazy Loading Strategy
+
+**Problem:** Loading all blocks into memory would be memory-intensive for large blockchains.
+
+**Solution:** Only load current block on startup; load historical blocks on-demand.
+
+```java
+// Load chain with lazy loading (default)
+NetworkRecord chain = blockchainPersistence.loadChain(networkID, chainID, false);
+// Result: Only current block loaded into memory
+
+// Load all blocks (when needed)
+NetworkRecord chain = blockchainPersistence.loadChain(networkID, chainID, true);
+// Result: All blocks loaded into memory
+```
+
+**Benefits:**
+- Fast startup times
+- Low memory footprint
+- Scales to millions of blocks
+- Historical blocks loaded only when accessed
+
+#### Thread Safety
+
+**Per-Chain Locking:**
+```java
+private final ReentrantLock[] chainLocks = new ReentrantLock[MAX_CHAINS + 1];
+
+// All save/load operations acquire chain-specific lock
+chainLocks[chainID.intValue()].lock();
+try {
+    // Safe operations on this chain
+} finally {
+    chainLocks[chainID.intValue()].unlock();
+}
+```
+
+**Why This Matters:**
+- Multiple threads can write to different chains concurrently
+- Same chain protected from concurrent modification
+- No global lock bottleneck
+
+#### Utility Methods (ConnectX)
+
+ConnectX provides convenience methods for blockchain management:
+
+```java
+// Get blockchain statistics
+BlockchainStats stats = connectX.getBlockchainStats("CXNET");
+// or
+BlockchainStats stats = connectX.getBlockchainStats(network);
+
+System.out.println(stats); // BlockchainStats{network='CXNET', onDisk=true, c1=5 blocks (current=4), ...}
+
+// Force save all blockchain data
+connectX.forceBlockchainSave("CXNET");
+// or
+connectX.forceBlockchainSave(network);
+
+// Clear blockchain data (testing)
+connectX.clearBlockchainData("CXNET");
+// or
+connectX.clearBlockchainData(network);
+```
+
+**BlockchainStats Class:**
+```java
+public static class BlockchainStats {
+    public String networkID;
+    public boolean exists;         // On disk?
+    public int c1BlockCount;       // Blocks in memory
+    public Long c1CurrentBlock;    // Current block ID
+    public int c2BlockCount;
+    public Long c2CurrentBlock;
+    public int c3BlockCount;
+    public Long c3CurrentBlock;
+}
+```
+
+#### Example: Persistence Flow
+
+**Scenario:** EPOCH creates CXNET, records events, restarts
+
+```
+Step 1: Network Creation
+  → createNetwork("CXNET")
+  → Genesis blocks created (block-0)
+  → Saved to disk:
+    - blockchain/CXNET/chain-1.json (metadata)
+    - blockchain/CXNET/chain-2.json (metadata)
+    - blockchain/CXNET/chain-3.json (metadata)
+    - blockchain/CXNET/blocks/chain-1/block-0.json
+    - blockchain/CXNET/blocks/chain-2/block-0.json
+    - blockchain/CXNET/blocks/chain-3/block-0.json
+
+Step 2: Record Events (100+ events to c3)
+  → recordEvent() x100
+  → Block-0 full (100 events)
+  → Block-0 saved to disk: blocks/chain-3/block-0.json
+  → Block-1 created
+  → Chain metadata updated: currentBlockID=1, blockCount=2
+
+Step 3: Restart EPOCH
+  → importNetwork() or createNetwork()
+  → blockchainPersistence.exists("CXNET") → true
+  → Load chains from disk (lazy loading):
+    - c1: 1 block in memory (block-0)
+    - c2: 1 block in memory (block-0)
+    - c3: 1 block in memory (block-1, current)
+  → Network ready with full blockchain history on disk
+  → Historical blocks loaded on-demand if accessed
+```
+
+#### Performance Characteristics
+
+| Operation | Complexity | Notes |
+|-----------|-----------|-------|
+| Save block | O(1) | Single file write |
+| Save metadata | O(1) | Single file write |
+| Load chain (lazy) | O(1) | Load metadata + current block only |
+| Load chain (all) | O(n) | Load all n blocks from disk |
+| Load specific block | O(1) | Direct file access by block ID |
+
+**Storage Overhead:**
+- Chain metadata: ~167 bytes per chain
+- Genesis block: ~116 bytes (empty)
+- Block with events: ~116 bytes + event data
+- No duplication of block data between memory and disk
+
+#### Configuration
+
+**Maximum Chains:**
+```java
+public static final int MAX_CHAINS = 100;
+```
+
+**Block Length (events per block):**
+```java
+network.c1.blockLength = 100; // Default: 100 events
+network.c2.blockLength = 100;
+network.c3.blockLength = 100;
+```
+
+**Lazy Loading:**
+```java
+// Enabled by default during importNetwork()
+NetworkRecord chain = blockchainPersistence.loadChain(networkID, chainID, false);
+```
+
+#### Testing
+
+**HTTPBridgeTest Integration:**
+EPOCH NMI (HTTPBridgeTest) automatically tests persistence:
+
+```
+First Run:
+  → Creates CXNET network
+  → Persists genesis blocks
+  → Output: "No existing blockchain found - creating new CXNET"
+
+Subsequent Runs:
+  → Detects existing blockchain on disk
+  → Loads persisted chains
+  → Output: "✓ CXNET blockchain found on disk - testing persistence"
+           "✓ Blockchain loaded from disk"
+           "  c1: 1 blocks (current: 0)"
+```
+
+No manual intervention required - persistence testing is automatic.
+
+---
+
+## Block Synchronization Protocol
+
+When new nodes join an existing network, they must synchronize the blockchain to rebuild network state. The block sync protocol enables efficient, validated synchronization while maintaining security.
+
+### Sync Overview
+
+**Problem:** New nodes need to catch up with years of blockchain history
+**Solution:** Request blocks one-by-one, validate chronologically, rebuild state
+
+### Event Types
+
+#### CHAIN_STATUS_REQUEST
+Request current blockchain heights from a peer.
+
+**Payload:**
+```json
+{
+  "network": "CXNET"
+}
+```
+
+#### CHAIN_STATUS_RESPONSE
+Response containing current block heights.
+
+**Payload:**
+```json
+{
+  "c1": 10,
+  "c2": 25,
+  "c3": 150
+}
+```
+
+#### BLOCK_REQUEST
+Request a specific block from a peer.
+
+**Payload:**
+```json
+{
+  "network": "CXNET",
+  "chain": 3,
+  "block": 42
+}
+```
+
+**Process:**
+1. Peer checks memory (blockMap) for block
+2. If not in memory, loads from disk (lazy loading)
+3. Serializes block as JSON
+4. Sends BLOCK_RESPONSE
+
+#### BLOCK_RESPONSE
+Response containing requested block data.
+
+**Payload:**
+```json
+["dev.droppinganvil.v3.edge.NetworkBlock", {
+  "block": 42,
+  "networkEvents": {...}
+}]
+```
+
+### Synchronization Flow
+
+```
+New Node                                  Existing Peer
+   |                                            |
+   |---(1) CHAIN_STATUS_REQUEST-->             |
+   |                                            |
+   |<--(2) CHAIN_STATUS_RESPONSE (c3: 150)--   |
+   |                                            |
+   |---(3) BLOCK_REQUEST (block 0)-->          |
+   |<--(4) BLOCK_RESPONSE (block 0)--          |
+   |                                            |
+   |--- Validate & Apply Block 0               |
+   |                                            |
+   |---(5) BLOCK_REQUEST (block 1)-->          |
+   |<--(6) BLOCK_RESPONSE (block 1)--          |
+   |                                            |
+   |--- Validate & Apply Block 1               |
+   |                                            |
+   ... (repeat for blocks 2-150)              ...
+   |                                            |
+   |--- Blockchain Synced! ---                 |
+```
+
+### Chronological Permission Validation
+
+**Critical Security Feature:** Events must be validated against permissions AT THE TIME they were created, not current permissions.
+
+**Why This Matters:**
+- Prevents retroactive permission exploits
+- Ensures blockchain integrity
+- Validates historical state transitions
+
+**Validation Process:**
+
+```java
+// 1. Start with genesis permissions
+Map<String, Map<String, Entry>> permissionState =
+    new HashMap<>(network.networkPermissions.permissionSet);
+
+// 2. Replay all previous blocks to rebuild state
+for (NetworkBlock prevBlock : previousBlocks) {
+    for (NetworkEvent event : prevBlock.networkEvents.values()) {
+        // Check: Did sender have permission AT THIS POINT?
+        validatePermission(permissionState, event);
+
+        // Update permission state for next events
+        updatePermissionState(permissionState, event);
+    }
+}
+
+// 3. Validate target block against final permission state
+for (NetworkEvent event : block.networkEvents.values()) {
+    validatePermission(permissionState, event);
+    updatePermissionState(permissionState, event);
+}
+```
+
+**Example Scenario:**
+
+```
+Block 0 (Genesis):
+  - NMI creates network
+  - Alice given Record-c3 permission
+
+Block 1:
+  - Alice records event A (VALID - she has permission)
+  - Alice records event B (VALID - she has permission)
+
+Block 2:
+  - NMI revokes Alice's Record-c3 permission
+  - Alice records event C (INVALID - permission revoked)
+
+Block 3 (Today):
+  - Alice records event D (INVALID - no permission)
+
+When syncing:
+  - Events A & B validate (Alice had permission at Block 1)
+  - Event C fails validation (Alice permission revoked at Block 2)
+  - Event D fails validation (Alice has no permission)
+```
+
+This prevents an attacker from:
+1. Gaining permission temporarily
+2. Creating malicious events
+3. Permission being revoked
+4. Claiming old malicious events are valid
+
+### Event Execution During Sync
+
+**The executeOnSync Flag:**
+
+Not all events should be executed when syncing old blocks. NetworkEvent contains a boolean field to differentiate:
+
+```java
+public boolean executeOnSync = false;
+```
+
+**State-Modifying Events (executeOnSync = true):**
+- Permission changes (UPDATE_NMI, ADD_NMI, DELETE_NMI)
+- Network configuration updates
+- Backend node additions/removals
+- **MUST** be executed during sync to rebuild state correctly
+
+**Ephemeral Events (executeOnSync = false):**
+- Messages (MESSAGE)
+- Pings (PeerFinding)
+- Resource availability updates
+- Should **NOT** be executed during sync (realtime only)
+
+**Example:**
+
+```java
+// During sync, processing Block 42 from 2 years ago
+for (NetworkEvent event : block.networkEvents.values()) {
+    if (event.executeOnSync) {
+        // Execute: Permission changes, NMI updates
+        processStateEvent(event);
+    } else {
+        // Skip: 2-year-old messages, pings
+        // User doesn't want to see ancient messages
+    }
+}
+```
+
+**Benefits:**
+- Efficient sync (skip irrelevant events)
+- Correct state reconstruction (process all state changes)
+- Better user experience (no ancient messages)
+
+### Sync Strategy
+
+**Recommended Approach:**
+
+1. **Query Chain Status**
+   ```java
+   sendChainStatusRequest("CXNET");
+   // Response: {c1: 10, c2: 25, c3: 150}
+   ```
+
+2. **Identify Gaps**
+   ```java
+   int localHeight = network.c3.current.block;  // e.g., 0
+   int remoteHeight = 150;
+   int blocksToSync = remoteHeight - localHeight;  // 150 blocks
+   ```
+
+3. **Request Blocks Sequentially**
+   ```java
+   for (long blockID = localHeight + 1; blockID <= remoteHeight; blockID++) {
+       sendBlockRequest("CXNET", 3, blockID);
+       // Wait for BLOCK_RESPONSE
+       // Validate chronologically
+       // Apply to local blockchain
+   }
+   ```
+
+4. **Verify Final State**
+   ```java
+   // Compare final block heights with peer
+   // Verify merkle roots (if implemented)
+   // Sync complete!
+   ```
+
+**Optimization:**
+- Request from multiple peers in parallel (Byzantine fault tolerance)
+- Verify blocks match across peers before applying
+- Cache commonly requested blocks
+- Prioritize critical chains (c1 > c2 > c3)
 
 ---
 

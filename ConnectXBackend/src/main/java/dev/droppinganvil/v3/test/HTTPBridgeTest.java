@@ -195,6 +195,46 @@ public class HTTPBridgeTest {
             System.out.println("  ✓ CXNET already loaded in memory");
         }
 
+        // Create TESTNET for whitelist security testing
+        System.out.println("\nStep 3b: Setting up TESTNET (whitelist test network)...");
+        dev.droppinganvil.v3.network.CXNetwork testnet = dev.droppinganvil.v3.ConnectX.getNetwork("TESTNET");
+
+        if (testnet == null) {
+            testnet = server.createNetwork("TESTNET");
+
+            // Enable whitelist mode
+            testnet.configuration.whitelistMode = true;
+            testnet.configuration.publicSeed = false;
+
+            System.out.println("  ✓ TESTNET created with whitelist mode");
+            System.out.println("    Whitelist mode: ENABLED");
+            System.out.println("    Backend/NMI: EPOCH");
+
+            // Create TESTNET seed
+            dev.droppinganvil.v3.network.Seed testnetSeed = new dev.droppinganvil.v3.network.Seed();
+            testnetSeed.seedID = java.util.UUID.randomUUID().toString();
+            testnetSeed.timestamp = System.currentTimeMillis();
+            testnetSeed.networkID = "TESTNET";
+            testnetSeed.addNetwork(testnet);
+
+            // Add EPOCH as bootstrap peer for TESTNET too
+            dev.droppinganvil.v3.network.nodemesh.Node epochNode = new dev.droppinganvil.v3.network.nodemesh.Node();
+            epochNode.cxID = SERVER_ID;
+            epochNode.publicKey = serverPubKey;
+            epochNode.addr = "cxHTTP1:https://CXNET.AnvilDevelopment.US/cx";
+            testnetSeed.addHvPeer(epochNode);
+            testnetSeed.addPeerFindingNode(epochNode);
+
+            // Save TESTNET seed
+            java.io.File seedsDir = new java.io.File(server.cxRoot, "seeds");
+            java.io.File testnetSeedFile = new java.io.File(seedsDir, "testnet_" + testnetSeed.seedID + ".cxn");
+            testnetSeed.save(testnetSeedFile);
+
+            System.out.println("  ✓ TESTNET seed created: testnet_" + testnetSeed.seedID + ".cxn");
+        } else {
+            System.out.println("  ✓ TESTNET already loaded in memory");
+        }
+
         // Initialize P2P mesh (for direct CX protocol connections)
         System.out.println("\nStep 4: Initializing P2P mesh...");
         server.connect(P2P_PORT);

@@ -305,8 +305,8 @@ public class NodeMesh {
                 targetNetwork.configuration.whitelistMode != null &&
                 targetNetwork.configuration.whitelistMode) {
 
-                // Check if sender is registered (via REGISTER_NODE in c1)
-                if (!targetNetwork.registeredNodes.contains(nc.iD)) {
+                // Check if sender is registered (stored in local DataContainer)
+                if (!connectX.dataContainer.isNodeRegistered(ne.p.network, nc.iD)) {
                     // Node not registered - reject transmission
                     if (socket != null) socket.close();
                     Analytics.addData(AnalyticData.Tear, "Whitelist rejection: " + nc.iD +
@@ -772,14 +772,9 @@ public class NodeMesh {
                                 // CXNET-level block: blocks ALL transmissions from node globally
                                 ConnectX.blockNodeCXNET(nodeID, reason);
                             } else {
-                                // Network-specific block
-                                CXNetwork network = ConnectX.getNetwork(networkID);
-                                if (network != null) {
-                                    network.blockedNodes.put(nodeID, reason);
-                                    System.out.println("[BLOCK_NODE] Node " + nodeID + " blocked from network " + networkID);
-                                } else {
-                                    System.err.println("[BLOCK_NODE] Network " + networkID + " not found");
-                                }
+                                // Network-specific block (stored in local DataContainer)
+                                connectX.dataContainer.blockNode(networkID, nodeID, reason);
+                                System.out.println("[BLOCK_NODE] Node " + nodeID + " blocked from network " + networkID);
                             }
 
                             // This is a state-modifying event that should be recorded to c1 (Admin) chain
@@ -809,16 +804,11 @@ public class NodeMesh {
                                 // CXNET-level unblock
                                 ConnectX.unblockNodeCXNET(nodeID);
                             } else {
-                                // Network-specific unblock
-                                CXNetwork network = ConnectX.getNetwork(networkID);
-                                if (network != null) {
-                                    String removedReason = network.blockedNodes.remove(nodeID);
-                                    if (removedReason != null) {
-                                        System.out.println("[UNBLOCK_NODE] Node " + nodeID + " unblocked from network " + networkID +
-                                                         " (was blocked for: " + removedReason + ")");
-                                    }
-                                } else {
-                                    System.err.println("[UNBLOCK_NODE] Network " + networkID + " not found");
+                                // Network-specific unblock (stored in local DataContainer)
+                                String removedReason = connectX.dataContainer.unblockNode(networkID, nodeID);
+                                if (removedReason != null) {
+                                    System.out.println("[UNBLOCK_NODE] Node " + nodeID + " unblocked from network " + networkID +
+                                                     " (was blocked for: " + removedReason + ")");
                                 }
                             }
 
@@ -846,15 +836,11 @@ public class NodeMesh {
                             System.out.println("[REGISTER_NODE] Registering node " + nodeID + " to network " + networkID +
                                              " (approved by " + approver + ")");
 
-                            // Add to network's registered nodes set (for whitelist mode)
-                            CXNetwork network = ConnectX.getNetwork(networkID);
-                            if (network != null) {
-                                network.registeredNodes.add(nodeID);
-                                System.out.println("[REGISTER_NODE] Node " + nodeID + " registered to network " + networkID);
-                                System.out.println("[REGISTER_NODE] Total registered nodes: " + network.registeredNodes.size());
-                            } else {
-                                System.err.println("[REGISTER_NODE] Network " + networkID + " not found");
-                            }
+                            // Add to registered nodes set (stored in local DataContainer)
+                            connectX.dataContainer.networkRegisteredNodes.computeIfAbsent(networkID, k -> new java.util.HashSet<>()).add(nodeID);
+                            System.out.println("[REGISTER_NODE] Node " + nodeID + " registered to network " + networkID);
+                            System.out.println("[REGISTER_NODE] Total registered nodes: " +
+                                connectX.dataContainer.networkRegisteredNodes.get(networkID).size());
 
                             // This is a state-modifying event that should be recorded to c1 (Admin) chain
                             // System reads c1 to rebuild registeredNodes set during bootstrap/sync

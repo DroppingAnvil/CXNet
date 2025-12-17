@@ -85,6 +85,7 @@ public class ConnectX {
 
     public NodeMesh nodeMesh;
     public BlockchainPersistence blockchainPersistence;
+    public dev.droppinganvil.v3.edge.DataContainer dataContainer;
 
 
     public ConnectX() throws IOException {
@@ -159,6 +160,9 @@ public class ConnectX {
 
         // Initialize blockchain persistence
         this.blockchainPersistence = new BlockchainPersistence(cxRoot);
+
+        // Initialize or load DataContainer
+        loadDataContainer();
 
         // Register default HTTP bridge provider if not already registered
         if (!isBridgeProviderPresent("cxHTTP1")) {
@@ -888,7 +892,7 @@ public class ConnectX {
      * First introduces this node to EPOCH via NewNode, then requests seed
      * Uses CXS scope for direct node-to-node communication during bootstrap
      */
-    private void requestSeedFromEpoch() {
+ {
         try {
             System.out.println("[Bootstrap] Contacting EPOCH at " + EPOCH_BRIDGE_ADDRESS);
 
@@ -1705,6 +1709,47 @@ public class ConnectX {
                 ", c3=" + c3BlockCount + " blocks (current=" + c3CurrentBlock + ")" +
                 '}';
         }
+    }
+
+    /**
+     * Load DataContainer from disk (local security data)
+     * Creates new container if file doesn't exist
+     */
+    private void loadDataContainer() {
+        File dataFile = new File(cxRoot, "data.cxd");
+        if (!dataFile.exists()) {
+            // Create new container
+            dataContainer = new dev.droppinganvil.v3.edge.DataContainer();
+            return;
+        }
+
+        try {
+            // Deserialize from JSON
+            FileInputStream fis = new FileInputStream(dataFile);
+            dataContainer = (dev.droppinganvil.v3.edge.DataContainer) deserialize(
+                "cxJSON1", fis, dev.droppinganvil.v3.edge.DataContainer.class);
+            fis.close();
+        } catch (Exception e) {
+            System.err.println("[DataContainer] Failed to load data.cxd: " + e.getMessage());
+            // Create new container on error
+            dataContainer = new dev.droppinganvil.v3.edge.DataContainer();
+        }
+    }
+
+    /**
+     * Save DataContainer to disk (persists whitelist/blocklist data)
+     */
+    public void saveDataContainer() throws Exception {
+        if (dataContainer == null) {
+            throw new IllegalStateException("DataContainer not initialized");
+        }
+
+        File dataFile = new File(cxRoot, "data.cxd");
+        String json = serialize("cxJSON1", dataContainer);
+        FileWriter writer = new FileWriter(dataFile);
+        writer.write(json);
+        writer.flush();
+        writer.close();
     }
 
 }

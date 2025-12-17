@@ -38,6 +38,7 @@ dev\droppinganvil\v3\network\services\messagex\MessageXContainer.class
 dev\droppinganvil\v3\test\BootstrapTest.class
 dev\droppinganvil\v3\network\BlockchainPersistence$ChainMetadata.class
 dev\droppinganvil\v3\network\threads\EventProcessor.class
+dev\droppinganvil\v3\test\BlockSyncTest.class
 dev\droppinganvil\v3\ConnectX$1.class
 dev\droppinganvil\v3\network\UnauthorizedNetworkConnectivityException.class
 dev\droppinganvil\v3\Permission.class
@@ -71,6 +72,7 @@ dev\droppinganvil\v3\network\InputBundle.class
 dev\droppinganvil\v3\resourcecore\Resource.class
 dev\droppinganvil\v3\network\CXNetwork.class
 dev\droppinganvil\v3\analytics\AnalyticData.class
+dev\droppinganvil\v3\test\SecurityIntegrationTest.class
 dev\droppinganvil\v3\resourcecore\Resource$1.class
 dev\droppinganvil\v3\network\remotedirectory\RemoteDirectory.class
 dev\droppinganvil\v3\network\Scope.class

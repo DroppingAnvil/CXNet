@@ -71,6 +71,18 @@ public class ConnectX {
     private transient Node self;
     private static ConcurrentHashMap<String, CXPlugin> plugins = new ConcurrentHashMap<>();
     private static transient List<String> reserved = Arrays.asList("SYSTEM", "CX", "cxJSON1", "CXNET");
+
+    /**
+     * CXNET-level blocked nodes (global blocks across all networks)
+     * Populated by reading BLOCK_NODE events from CXNET's c1 (Admin) chain where network="CXNET"
+     * Key: Node UUID
+     * Value: Block reason/metadata
+     *
+     * When a node is blocked at CXNET level, ALL transmissions from that node are rejected
+     * This is separate from network-specific blocks (stored in CXNetwork.blockedNodes)
+     */
+    private static ConcurrentHashMap<String, String> cxnetBlockedNodes = new ConcurrentHashMap<>();
+
     public NodeMesh nodeMesh;
     public BlockchainPersistence blockchainPersistence;
 
@@ -1293,6 +1305,40 @@ public class ConnectX {
         assert !cxID.contains("SYSTEM");
         return cx.checkNetworkPermission(cxID, permission);
     }
+
+    /**
+     * Check if a node is blocked at CXNET level (global block)
+     * CXNET-level blocks reject ALL transmissions from the node across all networks
+     * @param nodeID Node UUID to check
+     * @return true if node is blocked at CXNET level
+     */
+    public static boolean isCXNETBlocked(String nodeID) {
+        return cxnetBlockedNodes.containsKey(nodeID);
+    }
+
+    /**
+     * Block a node at CXNET level (global block across all networks)
+     * This should only be called when processing a BLOCK_NODE event where network="CXNET"
+     * @param nodeID Node UUID to block
+     * @param reason Block reason/metadata
+     */
+    public static void blockNodeCXNET(String nodeID, String reason) {
+        cxnetBlockedNodes.put(nodeID, reason);
+        System.out.println("[CXNET] Blocked node globally: " + nodeID + " (reason: " + reason + ")");
+    }
+
+    /**
+     * Unblock a node from CXNET level
+     * This should only be called when processing an UNBLOCK_NODE event where network="CXNET"
+     * @param nodeID Node UUID to unblock
+     */
+    public static void unblockNodeCXNET(String nodeID) {
+        String reason = cxnetBlockedNodes.remove(nodeID);
+        if (reason != null) {
+            System.out.println("[CXNET] Unblocked node globally: " + nodeID + " (was blocked for: " + reason + ")");
+        }
+    }
+
     public Resource locateResource(String networkID, ResourceType type, Availability availability) {
         //TODO implement resource location
         return null;

@@ -29,4 +29,29 @@ public class Configuration implements Serializable {
      */
     public String lastSeedID;
 
+    /**
+     * Whitelist mode: When enabled, nodes must be explicitly registered via REGISTER_NODE event
+     * System reads c1 (Admin) chain for REGISTER_NODE events to build approved nodes list
+     * If node is not registered and whitelist mode is enabled: connection rejected
+     *
+     * Default: false (open network - anyone can join)
+     *
+     * Network Types:
+     * - false = Open Network (public access)
+     * - true = Whitelist/Private Network (pre-approval required)
+     */
+    public Boolean whitelistMode = false;
+
+    /**
+     * Whether this network's seed should be distributed in public seed lists
+     * Private networks may want to distribute seeds only through secure channels
+     *
+     * Default: true (include in public seed distribution)
+     *
+     * Use Cases:
+     * - true = Open/Whitelist networks (discoverable)
+     * - false = Private networks (invitation-only, seeds distributed out-of-band)
+     */
+    public Boolean publicSeed = true;
+
 }

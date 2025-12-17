@@ -33,6 +33,17 @@ public class NodeMesh {
     public Connections connections = new Connections();
     public ConnectX connectX;
 
+    /**
+     * IP rate limiting for PEER_LIST_REQUEST
+     * Tracks timestamps of requests per IP address
+     * Rate limit: 3 requests per IP per hour
+     * Key: IP address
+     * Value: List of request timestamps (in milliseconds)
+     */
+    private ConcurrentHashMap<String, java.util.List<Long>> peerRequestTimestamps = new ConcurrentHashMap<>();
+    private static final int PEER_REQUEST_LIMIT = 3;
+    private static final long PEER_REQUEST_WINDOW_MS = 60 * 60 * 1000; // 1 hour in milliseconds
+
     //Initial object must be signed by initiator
     //If it is a global resource encrypting for only the next recipient node is acceptable
     //If it is not a global resource it must be encrypted using only the end recipients key then re encrypted for transport
@@ -285,6 +296,31 @@ public class NodeMesh {
             }
         }
 
+        // SECURITY: Whitelist Mode Enforcement
+        // If network has whitelistMode enabled, only registered nodes can transmit
+        // Registered nodes are tracked in c1 (Admin) chain via REGISTER_NODE events
+        if (ne.p != null && ne.p.network != null && nc.iD != null) {
+            CXNetwork targetNetwork = ConnectX.getNetwork(ne.p.network);
+            if (targetNetwork != null && targetNetwork.configuration != null &&
+                targetNetwork.configuration.whitelistMode != null &&
+                targetNetwork.configuration.whitelistMode) {
+
+                // Check if sender is registered (via REGISTER_NODE in c1)
+                if (!targetNetwork.registeredNodes.contains(nc.iD)) {
+                    // Node not registered - reject transmission
+                    if (socket != null) socket.close();
+                    Analytics.addData(AnalyticData.Tear, "Whitelist rejection: " + nc.iD +
+                                    " not registered to network " + ne.p.network);
+                    System.err.println("[WHITELIST] Rejected transmission from unregistered node " +
+                                     nc.iD + " to whitelist network " + ne.p.network);
+                    return; // Drop the event - do not queue
+                }
+                // Node is registered - allow transmission
+                System.out.println("[WHITELIST] Accepted transmission from registered node " +
+                                 nc.iD + " to network " + ne.p.network);
+            }
+        }
+
         synchronized (connectX.eventQueue) {
             connectX.eventQueue.add(new InputBundle(ne, nc));
         }
@@ -337,6 +373,44 @@ public class NodeMesh {
             }
         }
     }
+
+    /**
+     * Check if an IP address is rate-limited for PEER_LIST_REQUEST
+     * Cleans up old timestamps (older than 1 hour) before checking
+     * @param ipAddress IP address to check
+     * @return true if IP has exceeded rate limit (3 requests per hour)
+     */
+    private boolean isPeerRequestRateLimited(String ipAddress) {
+        long now = System.currentTimeMillis();
+        long cutoff = now - PEER_REQUEST_WINDOW_MS;
+
+        // Get or create timestamp list for this IP
+        java.util.List<Long> timestamps = peerRequestTimestamps.computeIfAbsent(
+            ipAddress,
+            k -> new java.util.concurrent.CopyOnWriteArrayList<>()
+        );
+
+        // Remove timestamps older than 1 hour
+        timestamps.removeIf(timestamp -> timestamp < cutoff);
+
+        // Check if limit exceeded
+        return timestamps.size() >= PEER_REQUEST_LIMIT;
+    }
+
+    /**
+     * Record a PEER_LIST_REQUEST from an IP address
+     * Should only be called after checking isPeerRequestRateLimited()
+     * @param ipAddress IP address making the request
+     */
+    private void recordPeerRequest(String ipAddress) {
+        long now = System.currentTimeMillis();
+        java.util.List<Long> timestamps = peerRequestTimestamps.computeIfAbsent(
+            ipAddress,
+            k -> new java.util.concurrent.CopyOnWriteArrayList<>()
+        );
+        timestamps.add(now);
+    }
+
     public boolean fireEvent(NetworkEvent ne, NetworkContainer nc, byte[] signedEventBytes) {
         boolean handledLocally = false;
 
@@ -675,6 +749,223 @@ public class NodeMesh {
 
                         } catch (Exception e) {
                             System.err.println("[BLOCK_RESPONSE] Error handling response: " + e.getMessage());
+                            e.printStackTrace();
+                        }
+                        handledLocally = true;
+                        break;
+                    case BLOCK_NODE:
+                        System.out.println("[" + connectX.getOwnID() + "] BLOCK_NODE event received from " + nc.iD);
+                        try {
+                            // Parse payload: {network: "NETWORKID", nodeID: "UUID", reason: "spam"}
+                            String blockJson = new String(ne.d, "UTF-8");
+                            java.util.Map<String, Object> blockData =
+                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", blockJson, java.util.Map.class);
+
+                            String networkID = (String) blockData.get("network");
+                            String nodeID = (String) blockData.get("nodeID");
+                            String reason = (String) blockData.get("reason");
+
+                            System.out.println("[BLOCK_NODE] Blocking node " + nodeID + " on network " + networkID + " (reason: " + reason + ")");
+
+                            // Check if CXNET-level or network-specific block
+                            if ("CXNET".equals(networkID)) {
+                                // CXNET-level block: blocks ALL transmissions from node globally
+                                ConnectX.blockNodeCXNET(nodeID, reason);
+                            } else {
+                                // Network-specific block
+                                CXNetwork network = ConnectX.getNetwork(networkID);
+                                if (network != null) {
+                                    network.blockedNodes.put(nodeID, reason);
+                                    System.out.println("[BLOCK_NODE] Node " + nodeID + " blocked from network " + networkID);
+                                } else {
+                                    System.err.println("[BLOCK_NODE] Network " + networkID + " not found");
+                                }
+                            }
+
+                            // This is a state-modifying event that should be recorded to c1 (Admin) chain
+                            ne.executeOnSync = true;
+
+                        } catch (Exception e) {
+                            System.err.println("[BLOCK_NODE] Error handling event: " + e.getMessage());
+                            e.printStackTrace();
+                        }
+                        handledLocally = true;
+                        break;
+                    case UNBLOCK_NODE:
+                        System.out.println("[" + connectX.getOwnID() + "] UNBLOCK_NODE event received from " + nc.iD);
+                        try {
+                            // Parse payload: {network: "NETWORKID", nodeID: "UUID"}
+                            String unblockJson = new String(ne.d, "UTF-8");
+                            java.util.Map<String, Object> unblockData =
+                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", unblockJson, java.util.Map.class);
+
+                            String networkID = (String) unblockData.get("network");
+                            String nodeID = (String) unblockData.get("nodeID");
+
+                            System.out.println("[UNBLOCK_NODE] Unblocking node " + nodeID + " from network " + networkID);
+
+                            // Check if CXNET-level or network-specific unblock
+                            if ("CXNET".equals(networkID)) {
+                                // CXNET-level unblock
+                                ConnectX.unblockNodeCXNET(nodeID);
+                            } else {
+                                // Network-specific unblock
+                                CXNetwork network = ConnectX.getNetwork(networkID);
+                                if (network != null) {
+                                    String removedReason = network.blockedNodes.remove(nodeID);
+                                    if (removedReason != null) {
+                                        System.out.println("[UNBLOCK_NODE] Node " + nodeID + " unblocked from network " + networkID +
+                                                         " (was blocked for: " + removedReason + ")");
+                                    }
+                                } else {
+                                    System.err.println("[UNBLOCK_NODE] Network " + networkID + " not found");
+                                }
+                            }
+
+                            // This is a state-modifying event that should be recorded to c1 (Admin) chain
+                            ne.executeOnSync = true;
+
+                        } catch (Exception e) {
+                            System.err.println("[UNBLOCK_NODE] Error handling event: " + e.getMessage());
+                            e.printStackTrace();
+                        }
+                        handledLocally = true;
+                        break;
+                    case REGISTER_NODE:
+                        System.out.println("[" + connectX.getOwnID() + "] REGISTER_NODE event received from " + nc.iD);
+                        try {
+                            // Parse payload: {network: "NETWORKID", nodeID: "UUID", approver: "APPROVER_UUID"}
+                            String registerJson = new String(ne.d, "UTF-8");
+                            java.util.Map<String, Object> registerData =
+                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", registerJson, java.util.Map.class);
+
+                            String networkID = (String) registerData.get("network");
+                            String nodeID = (String) registerData.get("nodeID");
+                            String approver = (String) registerData.get("approver");
+
+                            System.out.println("[REGISTER_NODE] Registering node " + nodeID + " to network " + networkID +
+                                             " (approved by " + approver + ")");
+
+                            // Add to network's registered nodes set (for whitelist mode)
+                            CXNetwork network = ConnectX.getNetwork(networkID);
+                            if (network != null) {
+                                network.registeredNodes.add(nodeID);
+                                System.out.println("[REGISTER_NODE] Node " + nodeID + " registered to network " + networkID);
+                                System.out.println("[REGISTER_NODE] Total registered nodes: " + network.registeredNodes.size());
+                            } else {
+                                System.err.println("[REGISTER_NODE] Network " + networkID + " not found");
+                            }
+
+                            // This is a state-modifying event that should be recorded to c1 (Admin) chain
+                            // System reads c1 to rebuild registeredNodes set during bootstrap/sync
+                            ne.executeOnSync = true;
+
+                        } catch (Exception e) {
+                            System.err.println("[REGISTER_NODE] Error handling event: " + e.getMessage());
+                            e.printStackTrace();
+                        }
+                        handledLocally = true;
+                        break;
+                    case PEER_LIST_REQUEST:
+                        System.out.println("[" + connectX.getOwnID() + "] PEER_LIST_REQUEST received from " + nc.iD);
+                        try {
+                            // Get requester's IP address (from socket if available)
+                            String requesterIP = nc.iD; // TODO: Extract actual IP from socket/connection context
+
+                            // Check rate limiting: 3 requests per IP per hour
+                            if (isPeerRequestRateLimited(requesterIP)) {
+                                System.out.println("[PEER_LIST_REQUEST] Rate limit exceeded for IP " + requesterIP + " (3 per hour)");
+                                handledLocally = true;
+                                break;
+                            }
+
+                            // Record this request for rate limiting
+                            recordPeerRequest(requesterIP);
+
+                            // Collect all known peers from PeerDirectory
+                            java.util.List<Node> allPeers = new java.util.ArrayList<>();
+                            if (PeerDirectory.hv != null) allPeers.addAll(PeerDirectory.hv.values());
+                            if (PeerDirectory.seen != null) allPeers.addAll(PeerDirectory.seen.values());
+                            if (PeerDirectory.peerCache != null) allPeers.addAll(PeerDirectory.peerCache.values());
+
+                            // Get peer count (30% of known peers or max 10)
+                            int knownPeerCount = allPeers.size();
+                            int maxPeers = Math.min(10, (int) Math.ceil(knownPeerCount * 0.3));
+
+                            // Select random peers and extract only IP:port
+                            java.util.List<String> peerIPs = new java.util.ArrayList<>();
+
+                            // Shuffle and take up to maxPeers
+                            java.util.Collections.shuffle(allPeers);
+                            for (int i = 0; i < Math.min(maxPeers, allPeers.size()); i++) {
+                                Node peer = allPeers.get(i);
+                                if (peer.addr != null) {
+                                    peerIPs.add(peer.addr); // addr is already in "host:port" format
+                                }
+                            }
+
+                            // Create response event
+                            NetworkEvent responseEvent = new NetworkEvent();
+                            responseEvent.eT = EventType.PEER_LIST_RESPONSE.name();
+                            responseEvent.iD = java.util.UUID.randomUUID().toString();
+
+                            // Serialize response: {ips: ["192.168.1.100:49152", "10.0.0.5:49153", ...]}
+                            java.util.Map<String, Object> response = new java.util.HashMap<>();
+                            response.put("ips", peerIPs);
+                            String responseJson = ConnectX.serialize("cxJSON1", response);
+                            responseEvent.d = responseJson.getBytes("UTF-8");
+
+                            // Set path to send back to requester
+                            responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
+                            responseEvent.p.cxID = nc.iD;
+                            if (ne.p != null) {
+                                responseEvent.p.network = ne.p.network;
+                                responseEvent.p.scope = ne.p.scope;
+                                responseEvent.p.bridge = ne.p.bridge;
+                                responseEvent.p.bridgeArg = ne.p.bridgeArg;
+                            }
+
+                            System.out.println("[PEER_LIST_REQUEST] Sending " + peerIPs.size() + " peer IPs to " + nc.iD);
+
+                            // Queue response
+                            Node requesterNode = PeerDirectory.lookup(nc.iD, true, true);
+                            NetworkContainer responseContainer = new NetworkContainer();
+                            responseContainer.se = "cxJSON1";
+                            responseContainer.s = false;
+                            OutputBundle responseBundle = new OutputBundle(responseEvent, requesterNode, null, null, responseContainer);
+                            connectX.queueEvent(responseBundle);
+
+                        } catch (Exception e) {
+                            System.err.println("[PEER_LIST_REQUEST] Error handling request: " + e.getMessage());
+                            e.printStackTrace();
+                        }
+                        handledLocally = true;
+                        break;
+                    case PEER_LIST_RESPONSE:
+                        System.out.println("[" + connectX.getOwnID() + "] PEER_LIST_RESPONSE received from " + nc.iD);
+                        try {
+                            // Parse response: {ips: ["192.168.1.100:49152", ...]}
+                            String responseJson = new String(ne.d, "UTF-8");
+                            java.util.Map<String, Object> response =
+                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", responseJson, java.util.Map.class);
+
+                            java.util.List<String> peerIPs = (java.util.List<String>) response.get("ips");
+
+                            System.out.println("[PEER_LIST_RESPONSE] Received " + peerIPs.size() + " peer IPs");
+
+                            // TODO: Contact each IP for Node info/seed
+                            // For each IP:
+                            //   1. Connect to IP:port
+                            //   2. Send NewNode or SEED_REQUEST
+                            //   3. Receive Node info and add to PeerDirectory
+                            //   4. Cache certificate
+                            for (String ipPort : peerIPs) {
+                                System.out.println("[PEER_LIST_RESPONSE] Received peer: " + ipPort);
+                                // TODO: Implement actual connection logic
+                            }
+
+                        } catch (Exception e) {
+                            System.err.println("[PEER_LIST_RESPONSE] Error handling response: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;

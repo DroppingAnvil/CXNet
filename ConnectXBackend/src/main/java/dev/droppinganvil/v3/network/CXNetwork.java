@@ -33,6 +33,26 @@ public class CXNetwork {
      */
     public BasicPermissionContainer networkPermissions;
 
+    /**
+     * Blocked nodes for this network
+     * Populated by reading BLOCK_NODE events from c1 (Admin) chain
+     * Key: Node UUID
+     * Value: Block reason/metadata
+     *
+     * Note: This is network-specific blocking. CXNET-level blocks are tracked separately.
+     */
+    public java.util.concurrent.ConcurrentHashMap<String, String> blockedNodes = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Registered/approved nodes for whitelist mode
+     * Populated by reading REGISTER_NODE events from c1 (Admin) chain
+     * Only contains node UUIDs that have been explicitly registered
+     *
+     * Used when configuration.whitelistMode = true
+     * If whitelist mode enabled and node not in this set: connection rejected
+     */
+    public java.util.Set<String> registeredNodes = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     public boolean checkChainPermission(String deviceID, String permission, Long chainID) {
         assert !permission.contains("-");
         assert !deviceID.contains("SYSTEM");

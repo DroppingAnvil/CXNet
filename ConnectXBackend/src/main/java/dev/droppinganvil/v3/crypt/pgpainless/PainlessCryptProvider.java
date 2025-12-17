@@ -53,6 +53,21 @@ public class PainlessCryptProvider extends CryptProvider {
         this.epochMode = epochMode;
     }
 
+    /**
+     * CXNET NMI Public Key (cx.asc) - HARDCODED for security
+     * This is the official CXNET Network Master Identity public key.
+     * All CXNET seeds MUST be signed by this key.
+     *
+     * Security Model:
+     * 1. This key is hardcoded in the application (certificate pinning)
+     * 2. During bootstrap, compare with seed's nmiPub field
+     * 3. If different: contact multiple peers for verification
+     * 4. If consensus doesn't match: REFUSE and prompt user
+     * 5. User can manually trust new key (key rotation scenario)
+     */
+    private static final String HARDCODED_CXNET_NMI_PUBLIC_KEY =
+        "mDMEaReGrRYJKwYBBAHaRw8BAQdAYJ9WTY6LY5gnOu6hX4+hPIq87rHghM6IFIoUQ3EsVHu0JDAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwMDAwMYh4BBMWCgAgBQJpF4atAhsBBRYCAwEABAsJCAcFFQoJCAsCHgECGQEACgkQZ7PbdlbrnH6L1gEAsHp5sU18rfsuR5+LqpEzLmGD54RO7+rOuLvAIZC5378A/2H+OoAhnz18RmtHcZ/+0qNZKNxcSLqIRWJpTwzzLsgOuDgEaReGrRIKKwYBBAGXVQEFAQEHQOqHVj6aFo0yUi5e3RmBg/bYMsGTJk0DX1ql73Z0YdYsAwEIB4h1BBgWCgAdBQJpF4atAhsMBRYCAwEABAsJCAcFFQoJCAsCHgEACgkQZ7PbdlbrnH7iwQEAk1oh9aK73s/gKVaIoA8JfMKyruKfOgDHZzXksNqnzEcBALu1LH+st6D+6jk+3lQDrzXeRMecWecEUcwd2c+Azg8HuDMEaReGrRYJKwYBBAHaRw8BAQdAx58p+H95rzrJ/lrTbql4qW61UpZY3XA4yo1aBvqcnd6I1QQYFgoAfQUCaReGrQIbAgUWAgMBAAQLCQgHBRUKCQgLAh4BXyAEGRYKAAYFAmkXhq0ACgkQaxHYF824w+HtCwEAnmOkdXlwi+z37mcEIP2Uy/E+wymNKz7e0FNmA+rz8sEA/3QX7zFWjwe4DHaCGGPKYVV0mbDPgLxXaleuz9oVeu4CAAoJEGez23ZW65x+xikA/2+dI9NbgEiBVQb6ZvvyuqzTTcgydrTU5fAye+dWMc8KAP9DpMVf4oI8gsyf8MSYJBTEEBxO69j6foOMl7t1ESURBg==";
+
     @Override
     public String getPublicKey() {
         if (publicKey == null) return null;
@@ -216,15 +231,38 @@ public class PainlessCryptProvider extends CryptProvider {
         }
 
         publicKey = KeyRingUtils.publicKeyRingFrom(secretKey);
-        File nmipublicKeyFile = new File(dir, "cx.asc");
-        if (nmipublicKeyFile.exists()) {
-            nmipubkey = PGPainless.readKeyRing().publicKeyRing(nmipublicKeyFile.toURL().openStream());
-        } else if (epochMode) {
+
+        // Load CXNET NMI Public Key (cx.asc)
+        if (epochMode) {
             // EPOCH mode: This node IS the NMI, use own key as network master key
             nmipubkey = publicKey;
+            System.out.println("[Crypto] EPOCH mode: Using own key as CXNET NMI");
         } else {
-            // TODO: Implement HTTP bridge seed download to get cx.asc (NMI public key)
-            throw new IOException("NMI public key (cx.asc) not found and node is not in EPOCH mode");
+            // Standard mode: Use hardcoded CXNET NMI public key
+            // This provides certificate pinning security against MITM attacks
+            try {
+                nmipubkey = PGPainless.readKeyRing().publicKeyRing(
+                    new ByteArrayInputStream(HARDCODED_CXNET_NMI_PUBLIC_KEY.getBytes())
+                );
+                System.out.println("[Crypto] Loaded hardcoded CXNET NMI public key");
+            } catch (Exception e) {
+                throw new IOException("Failed to load hardcoded CXNET NMI public key: " + e.getMessage(), e);
+            }
+
+            // Optional: Check if local cx.asc file exists and compare
+            File nmipublicKeyFile = new File(dir, "cx.asc");
+            if (nmipublicKeyFile.exists()) {
+                try {
+                    PGPPublicKeyRing localKey = PGPainless.readKeyRing().publicKeyRing(nmipublicKeyFile.toURL().openStream());
+                    if (!localKey.equals(nmipubkey)) {
+                        System.err.println("[SECURITY WARNING] Local cx.asc does NOT match hardcoded CXNET NMI key!");
+                        System.err.println("[SECURITY WARNING] Using hardcoded key for security.");
+                        System.err.println("[SECURITY WARNING] TODO: Implement multi-peer verification");
+                    }
+                } catch (Exception e) {
+                    System.err.println("[Crypto] Warning: Could not compare local cx.asc: " + e.getMessage());
+                }
+            }
         }
         //load keys
         ready = true;

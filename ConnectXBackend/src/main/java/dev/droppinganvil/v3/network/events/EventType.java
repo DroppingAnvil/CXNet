@@ -77,5 +77,51 @@ public enum EventType {
      * Tells requesting node how many blocks exist in each chain
      */
     CHAIN_STATUS_RESPONSE,
+    /**
+     * Block a node from the network (CXNET-level or network-specific)
+     * Payload format: JSON {"network": "NETWORKID", "nodeID": "UUID", "reason": "spam"}
+     * If network is "CXNET", blocks at CXNET level (all transmissions rejected)
+     * If network is specific network ID, blocks only from that network
+     * Requires BlockNode permission (NMI-only or designated moderators)
+     * Sets executeOnSync = true (state-modifying event)
+     */
+    BLOCK_NODE,
+    /**
+     * Unblock a previously blocked node
+     * Payload format: JSON {"network": "NETWORKID", "nodeID": "UUID"}
+     * Reverses BLOCK_NODE action
+     * Requires UnblockNode permission
+     * Sets executeOnSync = true (state-modifying event)
+     */
+    UNBLOCK_NODE,
+    /**
+     * Request random peer IPs for discovery
+     * Payload format: JSON {"count": 10} (optional, defaults to 30% of known peers or max 10)
+     * Response contains only IP addresses (not full Node objects)
+     * Rate limited: 3 requests per IP per hour per node
+     * Requesting node must then contact each IP for Node info/seed
+     */
+    PEER_LIST_REQUEST,
+    /**
+     * Response to PEER_LIST_REQUEST
+     * Payload format: JSON {"ips": ["192.168.1.100:49152", "10.0.0.5:49153", ...]}
+     * Contains only IP:port combinations
+     * Receiving node must manually request NewNode/SEED from each IP
+     */
+    PEER_LIST_RESPONSE,
+    /**
+     * Register a node to a network (for whitelist/private networks)
+     * Payload format: JSON {"network": "NETWORKID", "nodeID": "UUID", "approver": "APPROVER_UUID"}
+     * Recorded to c1 (Admin) chain as the source of truth
+     * System reads c1 to populate approved nodes list for whitelist mode
+     * Requires RegisterNode permission (NMI-only or designated approvers)
+     * Sets executeOnSync = true (state-modifying event)
+     *
+     * Whitelist Mode Behavior:
+     * - Nodes cannot join network unless REGISTER_NODE event exists in c1
+     * - During bootstrap, system checks c1 for registration entry
+     * - If not found and whitelist mode enabled: reject connection
+     */
+    REGISTER_NODE,
     ;
 }

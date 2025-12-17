@@ -1290,4 +1290,546 @@ Result: All TESTNET members receive message exactly once.
 
 ---
 
+## Event Types Reference
+
+This section provides a comprehensive reference for all EventTypes in the ConnectX protocol.
+
+### Core Events
+
+#### `NewNode`
+**Description:** Device joined CX network
+**Payload:** Serialized `Node` object (cxJSON1)
+**Recorded To:** Not recorded to blockchain (ephemeral)
+**ExecuteOnSync:** `false`
+**Purpose:** Announces a new node's presence to the network. Other nodes cache the public key for future encrypted communication.
+
+#### `MESSAGE`
+**Description:** Internal messaging between nodes
+**Payload:** UTF-8 encoded message text
+**Recorded To:** Not recorded to blockchain (ephemeral)
+**ExecuteOnSync:** `false`
+**Purpose:** Real-time communication between nodes. Not persisted to blockchain as messages are ephemeral.
+
+#### `HELLOWORLD`
+**Description:** Initial handshake/test transmission
+**Payload:** Varies (used for testing)
+**Recorded To:** Not recorded to blockchain
+**ExecuteOnSync:** `false`
+**Purpose:** Used when transmitting initial data or testing connectivity.
+
+### Resource & Network Management
+
+#### `GLOBALRESOURCEUPDATE`
+**Description:** Resource common to all nodes has been updated
+**Payload:** Resource update data
+**Recorded To:** Chain 2 (c2 - Resources)
+**ExecuteOnSync:** `true`
+**Purpose:** Notify all nodes of global resource changes (e.g., shared configuration files).
+
+#### `ResourceModification`
+**Description:** Resource has been modified
+**Payload:** Resource modification details
+**Recorded To:** Chain 2 (c2 - Resources)
+**ExecuteOnSync:** `true`
+**Purpose:** Track changes to network resources.
+
+#### `DICTIONARYEDIT`
+**Description:** Network dictionary metadata edited
+**Payload:** Dictionary modification data
+**Recorded To:** Chain 1 (c1 - Admin)
+**ExecuteOnSync:** `true`
+**Purpose:** Update network metadata and configuration.
+
+#### `RESTART`
+**Description:** Schedules a network restart
+**Payload:** Restart schedule data
+**Recorded To:** Chain 1 (c1 - Admin)
+**ExecuteOnSync:** `true`
+**Purpose:** Coordinate network-wide restarts or maintenance windows.
+
+### Bootstrap & Discovery
+
+#### `SEED_REQUEST`
+**Description:** Request official network seed from NMI
+**Payload:** None (empty or network ID)
+**Recorded To:** Not recorded to blockchain (ephemeral)
+**ExecuteOnSync:** `false`
+**Purpose:** New nodes request bootstrap seed from NMI/infrastructure nodes to join CXNET.
+
+#### `SEED_RESPONSE`
+**Description:** Response to SEED_REQUEST containing seed data
+**Payload:** Serialized `Seed` object (cxJSON1)
+**Recorded To:** Not recorded to blockchain (ephemeral)
+**ExecuteOnSync:** `false`
+**Purpose:** Provides bootstrap seed containing network metadata, peer list, and certificates.
+
+#### `PeerFinding`
+**Description:** Legacy peer discovery request
+**Payload:** Peer discovery data
+**Recorded To:** Not recorded to blockchain
+**ExecuteOnSync:** `false`
+**Purpose:** Request peer information for network discovery. **Note:** Consider using `PEER_LIST_REQUEST` for modern implementations.
+
+#### `PEER_LIST_REQUEST`
+**Description:** Request random peer IPs for discovery
+**Payload:** JSON `{"count": 10}` (optional, defaults to 30% of known peers or max 10)
+**Recorded To:** Not recorded to blockchain (ephemeral)
+**ExecuteOnSync:** `false`
+**Rate Limited:** 3 requests per IP per hour per node
+**Purpose:** Modern peer discovery. Requesting node receives only IP addresses, must then contact each IP for full Node info/seed. This prevents exposing full network topology to untrusted nodes.
+
+#### `PEER_LIST_RESPONSE`
+**Description:** Response to PEER_LIST_REQUEST
+**Payload:** JSON `{"ips": ["192.168.1.100:49152", "10.0.0.5:49153", ...]}`
+**Recorded To:** Not recorded to blockchain (ephemeral)
+**ExecuteOnSync:** `false`
+**Purpose:** Returns IP:port combinations for peer discovery. Receiving node must manually request `NewNode`/`SEED` from each IP.
+
+### NMI Management
+
+#### `UPDATE_NMI`
+**Description:** Update existing Network Master Identity (NMI)
+**Payload:** New NMI credentials
+**Recorded To:** Chain 1 (c1 - Admin)
+**ExecuteOnSync:** `true`
+**Permission Required:** Existing NMI signature
+**Purpose:** Allows networks to update their NMI credentials (e.g., key rotation). **Note:** CXNET NMI is immutable (exception conditions to be added later).
+
+#### `ADD_NMI`
+**Description:** Add new Network Master Identity (NMI)
+**Payload:** New NMI credentials
+**Recorded To:** Chain 1 (c1 - Admin)
+**ExecuteOnSync:** `true`
+**Permission Required:** Existing NMI signature
+**Purpose:** Allows networks to add additional NMIs for redundancy and failover.
+
+#### `DELETE_NMI`
+**Description:** Delete Network Master Identity (NMI)
+**Payload:** NMI identifier to remove
+**Recorded To:** Chain 1 (c1 - Admin)
+**ExecuteOnSync:** `true`
+**Permission Required:** Existing NMI signature
+**Purpose:** Allows networks to remove NMIs that are no longer needed or compromised.
+
+### Blockchain Synchronization
+
+#### `CHAIN_STATUS_REQUEST`
+**Description:** Request blockchain metadata (current block heights)
+**Payload:** JSON `{"network": "NETWORKID"}`
+**Recorded To:** Not recorded to blockchain (ephemeral)
+**ExecuteOnSync:** `false`
+**Purpose:** New/syncing nodes request current blockchain heights to determine sync status.
+
+#### `CHAIN_STATUS_RESPONSE`
+**Description:** Response to CHAIN_STATUS_REQUEST
+**Payload:** JSON `{"c1": 10, "c2": 25, "c3": 150}`
+**Recorded To:** Not recorded to blockchain (ephemeral)
+**ExecuteOnSync:** `false`
+**Purpose:** Returns current block height for each chain. Requesting node compares with local heights to identify gaps.
+
+#### `BLOCK_REQUEST`
+**Description:** Request a specific block from a peer
+**Payload:** JSON `{"network": "NETWORKID", "chain": 3, "block": 5}`
+**Recorded To:** Not recorded to blockchain (ephemeral)
+**ExecuteOnSync:** `false`
+**Purpose:** Request specific block data for blockchain synchronization. Nodes sync blocks one-by-one for validation.
+
+#### `BLOCK_RESPONSE`
+**Description:** Response to BLOCK_REQUEST containing block data
+**Payload:** Serialized `NetworkBlock` object (cxJSON1)
+**Recorded To:** Not recorded to blockchain (ephemeral)
+**ExecuteOnSync:** `false`
+**Purpose:** Delivers requested block data. Receiving node validates chronologically and applies to local blockchain.
+
+### Access Control & Moderation
+
+#### `BLOCK_NODE`
+**Description:** Block a node from the network (CXNET-level or network-specific)
+**Payload:** JSON `{"network": "NETWORKID", "nodeID": "UUID", "reason": "spam"}`
+**Recorded To:** Chain 1 (c1 - Admin)
+**ExecuteOnSync:** `true`
+**Permission Required:** `BlockNode` (NMI-only or designated moderators)
+**Purpose:**
+- If `network` is `"CXNET"`: Blocks at CXNET level (all transmissions rejected)
+- If `network` is specific network ID: Blocks only from that network
+**Security:** State-modifying event that must be replayed during blockchain sync to rebuild block lists correctly.
+
+#### `UNBLOCK_NODE`
+**Description:** Unblock a previously blocked node
+**Payload:** JSON `{"network": "NETWORKID", "nodeID": "UUID"}`
+**Recorded To:** Chain 1 (c1 - Admin)
+**ExecuteOnSync:** `true`
+**Permission Required:** `UnblockNode` (NMI-only or designated moderators)
+**Purpose:** Reverses `BLOCK_NODE` action, restoring node's network access.
+
+#### `REGISTER_NODE`
+**Description:** Register a node to a network (for whitelist/private networks)
+**Payload:** JSON `{"network": "NETWORKID", "nodeID": "UUID", "approver": "APPROVER_UUID"}`
+**Recorded To:** Chain 1 (c1 - Admin) **[SOURCE OF TRUTH]**
+**ExecuteOnSync:** `true`
+**Permission Required:** `RegisterNode` (NMI-only or designated approvers)
+**Purpose:** Explicitly approve a node for network membership. System reads c1 blockchain to populate approved nodes list.
+
+**Whitelist Mode Behavior:**
+- Nodes cannot join network unless `REGISTER_NODE` event exists in c1
+- During bootstrap, system checks c1 for registration entry
+- If not found and whitelist mode enabled: **reject connection**
+
+---
+
+## Permissions Reference
+
+This section provides a comprehensive reference for all Permission types in the ConnectX protocol.
+
+### Network Operations
+
+#### `AddResource`
+**Description:** Permission to add new resources to the network
+**Typical Weight:** 50-100
+**Granted To:** NMI, backend infrastructure nodes, trusted contributors
+**Purpose:** Control who can upload new resources to the network resource pool.
+
+#### `NetworkUpload`
+**Description:** Permission to upload data to the network
+**Typical Weight:** 30-100
+**Granted To:** NMI, backend nodes, regular members (lower weight)
+**Purpose:** General upload permission for network data.
+
+#### `UploadGlobalResource`
+**Description:** Permission to upload resources accessible to all nodes
+**Typical Weight:** 70-100
+**Granted To:** NMI, designated administrators
+**Purpose:** Control who can create/update global resources (e.g., network configuration, shared libraries).
+
+#### `AddAccount`
+**Description:** Permission to add new accounts/nodes to the network
+**Typical Weight:** 50-100 (NMI), 10 (default nodes)
+**Granted To:**
+- **NMI:** Weight 100 (full control)
+- **DEFAULT_NODE:** Weight 10 (CXNET: all networks get this)
+- **Regular nodes:** Weight 10 (non-CXNET networks only)
+**Purpose:** Control network membership. In CXNET, all nodes can add accounts. In custom networks, this can be restricted.
+
+### Blockchain & Data
+
+#### `Record`
+**Description:** Permission to record events to blockchain chains
+**Typical Weight:** 30-100
+**Granted To:** Varies by chain and network policy
+**Format:** `"Record-{chainID}"` (e.g., `"Record-1"`, `"Record-2"`, `"Record-3"`)
+**Purpose:** Control who can write to specific blockchain chains.
+
+**Chain-Specific Recording:**
+- `Record-1` (c1): Admin events (permissions, NMI updates, network config)
+- `Record-2` (c2): Resource events (file uploads, resource modifications)
+- `Record-3` (c3): General events (messages, user activities)
+
+**Network-Specific Defaults:**
+- **CXNET:** Only `AddAccount` permission granted (NO blockchain recording by default)
+- **Custom Networks:** `AddAccount` + `Record-3` permissions granted
+
+**Purpose:** Protect blockchain integrity by limiting who can write to each chain.
+
+#### `Transmit`
+**Description:** Permission to transmit data through the network
+**Typical Weight:** 10-100
+**Granted To:** Most nodes (fundamental communication right)
+**Purpose:** Control basic network communication capability.
+
+### Moderation & Security
+
+#### `BlockNode`
+**Description:** Permission to block nodes at network level
+**Typical Weight:** 100 (NMI-only typically)
+**Granted To:** NMI, designated moderators (with high weight)
+**Purpose:** Protect network from spam, abuse, or malicious nodes.
+
+**Blocking Levels:**
+- **CXNET-level:** Blocks all transmissions (network-wide ban)
+- **Network-specific:** Blocks only from specific network
+
+**Event:** `BLOCK_NODE` (recorded to c1, executeOnSync = true)
+
+#### `UnblockNode`
+**Description:** Permission to unblock previously blocked nodes
+**Typical Weight:** 100 (NMI-only typically)
+**Granted To:** NMI, designated moderators
+**Purpose:** Restore network access to blocked nodes after review/appeal.
+
+**Event:** `UNBLOCK_NODE` (recorded to c1, executeOnSync = true)
+
+### Whitelist/Private Networks
+
+#### `RegisterNode`
+**Description:** Permission to register nodes to a network (whitelist/private networks)
+**Typical Weight:** 100 (NMI-only typically)
+**Granted To:** NMI, designated approvers
+**Purpose:** Explicitly approve nodes for network membership in whitelist mode.
+
+**How It Works:**
+1. Approver creates `REGISTER_NODE` event with target node UUID
+2. Event recorded to c1 (Admin) chain
+3. System reads c1 to populate approved nodes list
+4. During bootstrap/connection, system checks c1 for registration
+5. If not found and whitelist mode enabled: **connection rejected**
+
+**Event:** `REGISTER_NODE` (recorded to c1, executeOnSync = true)
+
+**Use Cases:**
+- Private corporate networks (employee-only access)
+- Invite-only communities
+- Paid/subscription networks (register after payment verification)
+- High-security networks (manual vetting required)
+
+---
+
+## Network Types
+
+ConnectX supports three fundamental network types, each with different access control and membership models.
+
+### Open Networks
+
+**Description:** Public networks with minimal barriers to entry. Any node can join and participate.
+
+**Characteristics:**
+- **Whitelist Mode:** Disabled
+- **Default Permissions:** Broad (AddAccount, Record-c3, Transmit)
+- **Registration:** None required
+- **Moderation:** Post-hoc (block malicious nodes after detection)
+- **Membership:** Automatic upon bootstrap
+
+**Example Configuration:**
+```java
+CXNetwork network = new CXNetwork("PUBLIC_CHAT", nmiPublicKey);
+network.configuration.whitelistMode = false;
+
+// Grant broad default permissions
+network.networkPermissions.addEntry("DEFAULT_NODE", Permission.AddAccount, 10);
+network.networkPermissions.addEntry("DEFAULT_NODE", Permission.Record-3, 10);
+network.networkPermissions.addEntry("DEFAULT_NODE", Permission.Transmit, 10);
+```
+
+**Use Cases:**
+- Public chat networks
+- Open-source project collaboration
+- Community forums
+- Public file sharing
+
+**Benefits:**
+- Easy onboarding (no approval needed)
+- Maximum network growth
+- Minimal administrative overhead
+
+**Challenges:**
+- Spam/abuse potential (mitigated by BLOCK_NODE)
+- Quality control difficulty
+- Resource consumption from untrusted nodes
+
+**Moderation Strategy:**
+- Monitor network activity
+- Use `BLOCK_NODE` to ban malicious actors
+- Implement rate limiting (e.g., PEER_LIST_REQUEST: 3/hour per IP)
+- Use blockchain to track abuse patterns
+
+### Whitelist Networks
+
+**Description:** Semi-private networks where nodes must be explicitly approved before joining.
+
+**Characteristics:**
+- **Whitelist Mode:** Enabled
+- **Default Permissions:** Minimal (typically no blockchain recording)
+- **Registration:** Required via `REGISTER_NODE` event
+- **Moderation:** Pre-emptive (approve before access)
+- **Membership:** Manual approval process
+
+**Example Configuration:**
+```java
+CXNetwork network = new CXNetwork("APPROVED_USERS", nmiPublicKey);
+network.configuration.whitelistMode = true;
+
+// Minimal default permissions (connection only)
+network.networkPermissions.addEntry("DEFAULT_NODE", Permission.Transmit, 5);
+
+// NMI can register nodes
+network.networkPermissions.addEntry(nmiUUID, Permission.RegisterNode, 100);
+```
+
+**Registration Flow:**
+1. Node requests to join network
+2. Administrator reviews request (out-of-band)
+3. Administrator creates `REGISTER_NODE` event:
+   ```json
+   {
+     "network": "APPROVED_USERS",
+     "nodeID": "requesting-node-uuid",
+     "approver": "nmi-uuid"
+   }
+   ```
+4. Event recorded to c1 (Admin) chain
+5. Node can now successfully bootstrap into network
+
+**Use Cases:**
+- Paid subscription services (register after payment)
+- Employee-only corporate networks
+- Verified user communities
+- Educational platforms (register enrolled students)
+
+**Benefits:**
+- Quality control (vet members before access)
+- Reduced spam/abuse
+- Compliance (know your users)
+- Resource protection
+
+**Challenges:**
+- Administrative overhead (manual approvals)
+- Slower growth
+- User friction (waiting for approval)
+
+**Moderation Strategy:**
+- Pre-approval vetting process
+- Still use `BLOCK_NODE` for post-approval issues
+- Review c1 chain for registration audit trail
+- Can revoke access without unregistering (just block)
+
+### Private Networks
+
+**Description:** Highly restricted networks with strict access control and limited visibility.
+
+**Characteristics:**
+- **Whitelist Mode:** Enabled
+- **Default Permissions:** None (zero default access)
+- **Registration:** Required + additional verification
+- **Moderation:** Strict pre-emptive control
+- **Membership:** Invitation-only, verified identities
+- **Visibility:** May not appear in public seed distribution
+
+**Example Configuration:**
+```java
+CXNetwork network = new CXNetwork("EXECUTIVE_BOARD", nmiPublicKey);
+network.configuration.whitelistMode = true;
+network.configuration.publicSeed = false; // Don't distribute in public seeds
+
+// No default permissions at all
+// Every member must be explicitly granted permissions
+
+// NMI full control
+network.networkPermissions.addEntry(nmiUUID, Permission.RegisterNode, 100);
+network.networkPermissions.addEntry(nmiUUID, Permission.BlockNode, 100);
+network.networkPermissions.addEntry(nmiUUID, Permission.Record-1, 100);
+// ... all permissions at weight 100
+
+// Manually add each approved member
+network.networkPermissions.addEntry(approvedUserUUID, Permission.Transmit, 50);
+network.networkPermissions.addEntry(approvedUserUUID, Permission.Record-3, 30);
+```
+
+**Registration Flow:**
+1. Invitation sent out-of-band (email, secure channel)
+2. Recipient provides node UUID
+3. Identity verification (may involve KYC, credentials, etc.)
+4. Administrator creates `REGISTER_NODE` event
+5. Administrator grants specific permissions for that node UUID
+6. Node receives private seed data (not in public distribution)
+7. Node can bootstrap using private seed
+
+**Use Cases:**
+- Corporate executive communications
+- Government/military secure networks
+- Financial institution inter-bank networks
+- Healthcare HIPAA-compliant networks
+- Legal attorney-client privileged communications
+
+**Benefits:**
+- Maximum security and privacy
+- Full control over membership
+- Audit trail of all access (c1 blockchain)
+- Can enforce strict identity requirements
+
+**Challenges:**
+- High administrative burden
+- Scalability limitations
+- Complex onboarding process
+- Requires secure out-of-band communication
+
+**Moderation Strategy:**
+- Multi-layer approval process
+- Regular access reviews
+- Immediate `BLOCK_NODE` for violations
+- Audit c1 chain for compliance
+- May require additional authentication layers (beyond CX protocol)
+
+### Comparison Matrix
+
+| Feature | Open Network | Whitelist Network | Private Network |
+|---------|-------------|-------------------|-----------------|
+| **Whitelist Mode** | Disabled | Enabled | Enabled |
+| **Registration Required** | No | Yes | Yes + Verification |
+| **Default Permissions** | Broad | Minimal | None |
+| **Public Seed Distribution** | Yes | Yes | No |
+| **Approval Process** | None | Manual (REGISTER_NODE) | Strict Multi-Layer |
+| **Growth Rate** | Fast | Moderate | Slow |
+| **Administrative Overhead** | Low | Medium | High |
+| **Security Level** | Basic (post-hoc moderation) | Medium (pre-approval) | Maximum (strict control) |
+| **Use Case Example** | Public Chat | Paid Service | Corporate Secure |
+
+### Network Type Selection Guide
+
+**Choose Open Network When:**
+- Building public community/social platform
+- Want rapid user growth
+- Can tolerate some spam/abuse
+- Focus on accessibility over control
+- Have robust moderation tools
+
+**Choose Whitelist Network When:**
+- Need quality control
+- Operating paid/subscription model
+- Want to verify users before access
+- Regulatory requirements (KYC, etc.)
+- Balance between growth and control
+
+**Choose Private Network When:**
+- Handling sensitive/confidential data
+- Regulatory compliance critical (HIPAA, GDPR, etc.)
+- Need strict identity verification
+- Security is paramount
+- Limited membership is acceptable
+- Can manage complex onboarding
+
+### Implementation Notes
+
+**Switching Network Types:**
+
+Networks can transition between types, but this requires careful planning:
+
+**Open → Whitelist:**
+1. Enable `whitelistMode` in configuration
+2. Create `REGISTER_NODE` events for all existing members (recorded to c1)
+3. New members now require registration
+4. Existing unregistered members will be blocked on next sync
+
+**Whitelist → Private:**
+1. Already have `whitelistMode` enabled
+2. Disable public seed distribution
+3. Review and revoke broad default permissions
+4. Grant permissions individually per node UUID
+5. Distribute seeds through private channels only
+
+**Private/Whitelist → Open:**
+1. Disable `whitelistMode` in configuration
+2. Grant broad default permissions
+3. Enable public seed distribution
+4. **Warning:** Cannot retroactively hide previous registrations (c1 blockchain is immutable)
+
+**Blockchain Considerations:**
+
+All network type transitions must be recorded to c1 (Admin) chain:
+- Configuration changes (whitelistMode toggle)
+- Permission updates (default permission grants/revokes)
+- Registration events (REGISTER_NODE)
+
+This provides an **immutable audit trail** of network access policy changes.
+
+---
+
 *ConnectX Protocol v3.0 - Decentralized, Secure, Private*

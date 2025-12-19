@@ -89,7 +89,7 @@ public class RemoteDirectory {
             }
         } else {
             // Remote directory: fetch permissions from network blockchain via CXNode
-            CXNetwork network = ConnectX.getNetwork(serverID);
+            CXNetwork network = cx.getNetwork(serverID);
             if (network != null) {
                 // TODO: Query blockchain (c2 - resources chain) for directory permissions at machinePath
                 // For now, use network-level permissions as fallback

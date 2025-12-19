@@ -36,11 +36,9 @@ public class BootstrapTest {
             ConnectX peer = new ConnectX(peerDir);
             System.out.println("  ✓ Peer created at: " + peer.cxRoot.getAbsolutePath());
 
-            // Step 2: Register HTTP bridge provider
-            System.out.println("\nStep 2: Registering cxHTTP1 bridge...");
-            HTTPBridgeProvider httpBridge = new HTTPBridgeProvider();
-            ConnectX.addBridgeProvider(httpBridge, peer);
-            System.out.println("  ✓ cxHTTP1 bridge registered");
+            // Step 2: HTTP bridge is auto-registered by ConnectX constructor
+            System.out.println("\nStep 2: HTTP bridge auto-registered");
+            System.out.println("  ✓ cxHTTP1 bridge available (per-instance)");
 
             // Step 3: Copy EPOCH's seed as bootstrap seed
             System.out.println("\nStep 3: Obtaining bootstrap seed...");
@@ -127,7 +125,7 @@ public class BootstrapTest {
 
             // Step 7: Check if CXNET was loaded
             System.out.println("\n=== Bootstrap Results ===");
-            dev.droppinganvil.v3.network.CXNetwork cxnet = ConnectX.getNetwork("CXNET");
+            dev.droppinganvil.v3.network.CXNetwork cxnet = peer.getNetwork("CXNET");
 
             if (cxnet != null) {
                 System.out.println("✓ SUCCESS: CXNET loaded!");

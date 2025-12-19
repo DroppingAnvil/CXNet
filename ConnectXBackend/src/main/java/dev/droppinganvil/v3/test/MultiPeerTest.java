@@ -66,6 +66,36 @@ public class MultiPeerTest {
                 System.out.println("  Creating Peer " + i + " on port " + port + "...");
                 ConnectX peer = new ConnectX(peerDir, port, null, "password" + i);
 
+                // Start HTTP bridge for this peer (for NAT/firewall traversal)
+                int httpPort = 8080 + i; // 8081, 8082, 8083, 8084, 8085
+
+                // Determine public address based on peer number
+                // Using public DNS through RProx for security-compliant testing
+                boolean usePublicDNS = true; // RProx is configured
+                String publicEndpoint;
+                if (usePublicDNS && i <= 3) {
+                    // Production addresses (RProx configured: cx1, cx2, cx3)
+                    publicEndpoint = "https://cx" + i + ".anvildevelopment.us/cx";
+                } else {
+                    // Fallback for peers 4-5 (use localhost for now)
+                    publicEndpoint = "http://localhost:" + httpPort + "/cx";
+                }
+
+                try {
+                    // Get THIS peer's bridge provider instance (not the global one)
+                    dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =
+                        peer.getBridgeProvider("cxHTTP1");
+                    if (bridge instanceof dev.droppinganvil.v3.network.nodemesh.bridge.http.HTTPBridgeProvider) {
+                        ((dev.droppinganvil.v3.network.nodemesh.bridge.http.HTTPBridgeProvider) bridge).startServer(httpPort);
+                        peer.setPublicBridgeAddress("cxHTTP1", publicEndpoint);
+                        System.out.println("    HTTP bridge started on port " + httpPort);
+                        System.out.println("    Public address: cxHTTP1:" + publicEndpoint);
+                    }
+                } catch (Exception e) {
+                    System.err.println("    Warning: Failed to start HTTP bridge: " + e.getMessage());
+                    e.printStackTrace();
+                }
+
                 // Setup bootstrap seed and trigger bootstrap
                 peer.setupBootstrap(latestEpochSeed);
                 peer.attemptCXNETBootstrap();

@@ -88,9 +88,9 @@ public class OutConnectionController {
                             String bridgeProtocol = parts[0];
                             String bridgeEndpoint = parts[1];
 
-                            // Use bridge provider
+                            // Use bridge provider (per-instance)
                             dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =
-                                ConnectX.getBridgeProvider(bridgeProtocol);
+                                connectXAPI.getBridgeProvider(bridgeProtocol);
                             if (bridge != null) {
                                 System.out.println("[OutConnection] Using " + bridgeProtocol + " bridge to reach " + out.ne.p.cxID);
                                 // Create path with bridge info
@@ -118,7 +118,7 @@ public class OutConnectionController {
                 // Bridge fallback: If direct P2P failed or node not found, try CXPath bridge
                 if (out.ne.p.bridge != null && out.ne.p.bridgeArg != null) {
                     dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =
-                        ConnectX.getBridgeProvider(out.ne.p.bridge);
+                        connectXAPI.getBridgeProvider(out.ne.p.bridge);
                     if (bridge != null) {
                         System.out.println("[OutConnection] Falling back to " + out.ne.p.bridge + " bridge for " + out.ne.p.cxID);
                         bridge.transmitEvent(out.ne.p, cryptNetworkContainer);
@@ -134,7 +134,7 @@ public class OutConnectionController {
             }
             if (out.ne.p.scope.equalsIgnoreCase("CXN")) {
                 // CXN scope: Network transmission with TransmitPref support
-                CXNetwork cxn = ConnectX.getNetwork(out.ne.p.network);
+                CXNetwork cxn = connectXAPI.getNetwork(out.ne.p.network);
 
                 if (nc.tP != null && nc.tP.directOnly && cxn != null) {
                     // directOnly: Direct backend transmission for speed (no relay)

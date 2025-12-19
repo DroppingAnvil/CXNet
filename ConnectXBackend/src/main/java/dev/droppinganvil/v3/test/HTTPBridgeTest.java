@@ -88,9 +88,9 @@ public class HTTPBridgeTest {
         dev.droppinganvil.v3.network.nodemesh.PeerDirectory.hv.put(SERVER_ID, serverNode);
         System.out.println("  ✓ EPOCH added to peer directory");
 
-        // Get auto-registered cxHTTP1 bridge provider
+        // Get auto-registered cxHTTP1 bridge provider (per-instance)
         System.out.println("\nStep 2: Getting cxHTTP1 bridge provider...");
-        BridgeProvider httpBridge = ConnectX.getBridgeProvider("cxHTTP1");
+        BridgeProvider httpBridge = server.getBridgeProvider("cxHTTP1");
         if (httpBridge == null) {
             System.err.println("  ✗ cxHTTP1 bridge not registered (should be auto-registered)");
             return;
@@ -102,7 +102,7 @@ public class HTTPBridgeTest {
         dev.droppinganvil.v3.network.CXNetwork cxnet;
 
         // Check if CXNET already exists in memory
-        cxnet = dev.droppinganvil.v3.ConnectX.getNetwork(NETWORK_NAME);
+        cxnet = server.getNetwork(NETWORK_NAME);
         if (cxnet == null) {
             // Check if blockchain data exists on disk (persistence test)
             boolean blockchainExists = server.blockchainPersistence.exists(NETWORK_NAME);
@@ -197,7 +197,7 @@ public class HTTPBridgeTest {
 
         // Create TESTNET for whitelist security testing
         System.out.println("\nStep 3b: Setting up TESTNET (whitelist test network)...");
-        dev.droppinganvil.v3.network.CXNetwork testnet = dev.droppinganvil.v3.ConnectX.getNetwork("TESTNET");
+        dev.droppinganvil.v3.network.CXNetwork testnet = server.getNetwork("TESTNET");
 
         if (testnet == null) {
             testnet = server.createNetwork("TESTNET");

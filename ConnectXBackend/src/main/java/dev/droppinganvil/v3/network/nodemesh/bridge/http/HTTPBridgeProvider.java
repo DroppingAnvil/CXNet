@@ -165,7 +165,9 @@ public class HTTPBridgeProvider implements BridgeProvider {
      */
     @Override
     public void startServer(int port) throws Exception {
-        httpServer = HttpServer.create(new InetSocketAddress(port), 0);
+        // IMPORTANT: Bind to 0.0.0.0 (all interfaces) so RProx can reach us from LAN
+        // Default InetSocketAddress(port) may bind to localhost only on some systems
+        httpServer = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
 
         // Main CX endpoint - receives forwarded requests from RProx
         httpServer.createContext("/cx", new CXMessageHandler());
@@ -180,6 +182,7 @@ public class HTTPBridgeProvider implements BridgeProvider {
         httpServer.start();
 
         System.out.println("cxHTTP1 Bridge Server started on port " + port);
+        System.out.println("  Binding: 0.0.0.0:" + port + " (all interfaces)");
         System.out.println("  INTERNAL Endpoint: http://localhost:" + port + "/cx");
         System.out.println("  INTERNAL Health: http://localhost:" + port + "/health");
         System.out.println("  PUBLIC Endpoint: https://CXNET.AnvilDevelopment.US/cx (via RProx)");

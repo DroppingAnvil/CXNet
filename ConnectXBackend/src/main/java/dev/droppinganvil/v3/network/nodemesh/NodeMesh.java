@@ -223,7 +223,7 @@ public class NodeMesh {
             // Only CXNET backendSet or NMI can send CXNET or CX-scoped messages
             if (ne.p != null && ne.p.scope != null &&
                 (ne.p.scope.equalsIgnoreCase("CXNET") || ne.p.scope.equalsIgnoreCase("CX"))) {
-                CXNetwork cxnet = ConnectX.getNetwork("CXNET");
+                CXNetwork cxnet = connectX.getNetwork("CXNET");
                 boolean authorized = false;
 
                 if (cxnet != null && nc.iD != null) {
@@ -300,7 +300,7 @@ public class NodeMesh {
         // If network has whitelistMode enabled, only registered nodes can transmit
         // Registered nodes are tracked in c1 (Admin) chain via REGISTER_NODE events
         if (ne.p != null && ne.p.network != null && nc.iD != null) {
-            CXNetwork targetNetwork = ConnectX.getNetwork(ne.p.network);
+            CXNetwork targetNetwork = connectX.getNetwork(ne.p.network);
             if (targetNetwork != null && targetNetwork.configuration != null &&
                 targetNetwork.configuration.whitelistMode != null &&
                 targetNetwork.configuration.whitelistMode) {
@@ -443,15 +443,24 @@ public class NodeMesh {
                         System.out.println("[" + connectX.getOwnID() + "] Seed request received from " + nc.iD);
                         try {
                             // Look up current official seed ID from network configuration
-                            CXNetwork cxnet = ConnectX.getNetwork("CXNET");
+                            CXNetwork cxnet = connectX.getNetwork("CXNET");
                             if (cxnet != null && cxnet.configuration != null && cxnet.configuration.currentSeedID != null) {
                                 // Load versioned seed from seeds/ directory
                                 java.io.File seedsDir = new java.io.File(connectX.cxRoot, "seeds");
                                 java.io.File seedFile = new java.io.File(seedsDir, cxnet.configuration.currentSeedID + ".cxn");
 
                                 if (seedFile.exists()) {
-                                    dev.droppinganvil.v3.network.Seed seed = dev.droppinganvil.v3.network.Seed.load(seedFile);
-                                    System.out.println("[SEED] Loaded seed " + seed.seedID + " (v" + seed.timestamp + ")");
+                                    // Load static seed for network configuration
+                                    dev.droppinganvil.v3.network.Seed staticSeed = dev.droppinganvil.v3.network.Seed.load(seedFile);
+
+                                    // Create dynamic seed from current PeerDirectory.hv
+                                    dev.droppinganvil.v3.network.Seed seed = dev.droppinganvil.v3.network.Seed.fromCurrentPeers();
+                                    seed.seedID = java.util.UUID.randomUUID().toString();
+                                    seed.timestamp = System.currentTimeMillis();
+                                    seed.networkID = staticSeed.networkID;
+                                    seed.networks = staticSeed.networks;
+
+                                    System.out.println("[SEED] Generated dynamic seed with " + seed.hvPeers.size() + " HV peers");
 
                                     // Create response event with Seed as payload
                                     NetworkEvent responseEvent = new NetworkEvent();
@@ -531,16 +540,10 @@ public class NodeMesh {
                                     }
                                 }
 
-                                // Import networks
-                                for (dev.droppinganvil.v3.network.CXNetwork network : seed.networks) {
-                                    String networkID = network.configuration.netID;
-                                    ConnectX.getNetwork(networkID); // Check if already loaded
-                                    if (ConnectX.getNetwork(networkID) == null) {
-                                        // Add directly to network map (simplified for now)
-                                        // In production, this should use a proper method
-                                        System.out.println("[SEED] Loaded network: " + networkID);
-                                    }
-                                }
+                                // Apply seed properly using ConnectX.applySeed() method
+                                // This registers networks with the instance's networkMap
+                                seed.apply(connectX);
+                                System.out.println("[SEED] Applied seed to ConnectX instance");
 
                                 // Cache certificates
                                 for (java.util.Map.Entry<String, String> cert : seed.certificates.entrySet()) {
@@ -571,7 +574,7 @@ public class NodeMesh {
                                 (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", requestJson, java.util.Map.class);
                             String networkID = (String) request.get("network");
 
-                            CXNetwork network = ConnectX.getNetwork(networkID);
+                            CXNetwork network = connectX.getNetwork(networkID);
                             if (network != null) {
                                 // Build response with current block heights
                                 java.util.Map<String, Long> chainStatus = new java.util.HashMap<>();
@@ -646,7 +649,7 @@ public class NodeMesh {
                             Long chainID = ((Number) request.get("chain")).longValue();
                             Long blockID = ((Number) request.get("block")).longValue();
 
-                            CXNetwork network = ConnectX.getNetwork(networkID);
+                            CXNetwork network = connectX.getNetwork(networkID);
                             if (network != null) {
                                 // Get the requested chain
                                 dev.droppinganvil.v3.edge.NetworkRecord targetChain = null;
@@ -1056,7 +1059,7 @@ public class NodeMesh {
         // Step 4d: Default behavior for CXN scope - priority routing through backend + all peers
         // This is the standard mode when TransmitPref flags are all false
         if (ne.p != null && ne.p.scope != null && ne.p.scope.equalsIgnoreCase("CXN") && ne.p.network != null) {
-            CXNetwork cxn = ConnectX.getNetwork(ne.p.network);
+            CXNetwork cxn = connectX.getNetwork(ne.p.network);
             if (cxn != null && cxn.configuration != null && cxn.configuration.backendSet != null) {
                 // Send to all peers, with backend getting priority (sent first)
                 java.util.Set<String> sentTo = new java.util.HashSet<>();
@@ -1083,7 +1086,28 @@ public class NodeMesh {
                 }
 
                 // Then send to all other peers (not already sent to)
+                // Try hv peers first (high-value/stored), then seen (real-time active connections)
                 for (Node peer : PeerDirectory.hv.values()) {
+                    if (!peer.cxID.equals(connectX.getOwnID()) &&
+                        !peer.cxID.equals(transmitterID) &&
+                        !sentTo.contains(peer.cxID)) {
+                        try {
+                            NetworkContainer relayContainer = new NetworkContainer();
+                            relayContainer.se = "cxJSON1";
+                            relayContainer.s = false;
+                            relayContainer.tP = tP; // Preserve TransmitPref
+                            // Use signedEventBytes to preserve original NetworkEvent signature
+                            OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
+                            connectX.queueEvent(relayBundle);
+                            sentTo.add(peer.cxID);
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+
+                // Also try seen peers (may have additional real-time connections not in hv)
+                for (Node peer : PeerDirectory.seen.values()) {
                     if (!peer.cxID.equals(connectX.getOwnID()) &&
                         !peer.cxID.equals(transmitterID) &&
                         !sentTo.contains(peer.cxID)) {

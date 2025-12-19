@@ -54,11 +54,16 @@ public class ConnectX {
 
     public static Platform platform;
     public State state = State.CXConnecting;
-    private static ConcurrentHashMap<String, CXNetwork> networkMap = new ConcurrentHashMap<>();
+    // IMPORTANT: Per-instance network map to support multiple ConnectX instances in same JVM
+    private final ConcurrentHashMap<String, CXNetwork> networkMap = new ConcurrentHashMap<>();
     public final CryptProvider encryptionProvider = new PainlessCryptProvider();
     private static final transient ConcurrentHashMap<String, SerializationProvider> serializationProviders = new ConcurrentHashMap<>();
     public static final ConcurrentHashMap<String, CXBridge> bridgeMap = new ConcurrentHashMap<>(); // Legacy - deprecated
-    private static final ConcurrentHashMap<String, dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider> bridgeProviders = new ConcurrentHashMap<>();
+
+    // IMPORTANT: Per-instance bridge providers to support multiple ConnectX instances in same JVM
+    // Each instance gets its own bridge provider instances (e.g., separate HTTP servers on different ports)
+    private final ConcurrentHashMap<String, dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider> bridgeProviders = new ConcurrentHashMap<>();
+
     public final Queue<IOJob> jobQueue = new ConcurrentLinkedQueue<>();
     // IMPORTANT: Instance queues (not static) to support multiple ConnectX instances in same JVM
     // Each instance has its own queues and processors to avoid cross-instance contamination
@@ -164,12 +169,13 @@ public class ConnectX {
         // Initialize or load DataContainer
         loadDataContainer();
 
-        // Register default HTTP bridge provider if not already registered
+        // Register default HTTP bridge provider (per-instance)
+        // Each ConnectX instance gets its own HTTPBridgeProvider for independent HTTP servers
         if (!isBridgeProviderPresent("cxHTTP1")) {
             try {
                 dev.droppinganvil.v3.network.nodemesh.bridge.http.HTTPBridgeProvider httpBridge =
                     new dev.droppinganvil.v3.network.nodemesh.bridge.http.HTTPBridgeProvider();
-                addBridgeProvider(httpBridge, this);
+                addBridgeProvider(httpBridge);
             } catch (Exception e) {
                 // Bridge registration failed - not critical for initialization
                 System.err.println("[ConnectX] Failed to register default HTTP bridge: " + e.getMessage());
@@ -210,22 +216,22 @@ public class ConnectX {
         serializationProviders.put(name, provider);
     }
 
-    // Bridge Provider Management (similar to SerializationProvider)
-    public static void addBridgeProvider(dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider provider, ConnectX instance) throws UnsafeKeywordException, IllegalAccessException {
+    // Bridge Provider Management (per-instance for multi-peer support)
+    public void addBridgeProvider(dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider provider) throws UnsafeKeywordException, IllegalAccessException {
         String protocol = provider.getBridgeProtocol();
         checkSafety(protocol);
         if (bridgeProviders.containsKey(protocol)) {
-            throw new IllegalAccessException("Bridge provider " + protocol + " already registered");
+            throw new IllegalAccessException("Bridge provider " + protocol + " already registered for this instance");
         }
-        provider.initialize(instance);
+        provider.initialize(this);
         bridgeProviders.put(protocol, provider);
     }
 
-    public static dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider getBridgeProvider(String protocol) {
+    public dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider getBridgeProvider(String protocol) {
         return bridgeProviders.get(protocol);
     }
 
-    public static boolean isBridgeProviderPresent(String protocol) {
+    public boolean isBridgeProviderPresent(String protocol) {
         return bridgeProviders.containsKey(protocol);
     }
     // Instance methods for signing (use these for proper per-instance crypto)
@@ -363,7 +369,7 @@ public class ConnectX {
          * @param node The target Node object
          */
         public EventBuilder toPeer(Node node) {
-            this.path.scope = "P2P";
+            this.path.scope = "CXS";  // CXS = ConnectX Secure (single peer transmission)
             if (node != null) {
                 this.path.cxID = node.cxID;
                 this.targetNode = node;
@@ -687,6 +693,19 @@ public class ConnectX {
         setSelf(selfNode);
 
         return cxID;
+    }
+
+    /**
+     * Set the public bridge address for this node
+     * Used when node is behind NAT/firewall and accessible via HTTP bridge
+     * @param bridgeProtocol Bridge protocol (e.g., "cxHTTP1")
+     * @param bridgeEndpoint Public endpoint (e.g., "https://cx1.anvildevelopment.us/cx")
+     */
+    public void setPublicBridgeAddress(String bridgeProtocol, String bridgeEndpoint) {
+        if (self != null) {
+            self.addr = bridgeProtocol + ":" + bridgeEndpoint;
+            System.out.println("[ConnectX] Updated public address: " + self.addr);
+        }
     }
 
     /**
@@ -1562,7 +1581,7 @@ public class ConnectX {
         return false;
     }
 
-    public static CXNetwork getNetwork(String networkID) {
+    public CXNetwork getNetwork(String networkID) {
         if (!networkMap.containsKey(networkID)) return null;
         return networkMap.get(networkID);
     }

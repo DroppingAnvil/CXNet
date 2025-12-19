@@ -76,13 +76,38 @@ public class MultiPeerTest {
                 Thread.sleep(500); // Stagger initialization
             }
 
-            // Step 3: Wait for bootstrap to complete
+            // Step 3: Wait for bootstrap to complete (with periodic checks)
             System.out.println("\nStep 3: Waiting for bootstrap to complete...");
-            Thread.sleep(5000);
-
-            // Step 8: Verify all peers joined CXNET
-            System.out.println("\n=== Bootstrap Results ===");
             int successCount = 0;
+            int maxWaitSeconds = 30;
+            int checkIntervalSeconds = 3;
+
+            for (int elapsed = 0; elapsed < maxWaitSeconds; elapsed += checkIntervalSeconds) {
+                Thread.sleep(checkIntervalSeconds * 1000);
+
+                // Count how many peers have CXNET
+                int currentCount = 0;
+                for (ConnectX peer : peers) {
+                    if (peer.getNetwork("CXNET") != null) {
+                        currentCount++;
+                    }
+                }
+
+                if (currentCount > successCount) {
+                    successCount = currentCount;
+                    System.out.println("  [" + elapsed + "s] " + successCount + "/" + peers.size() + " peers joined CXNET");
+                }
+
+                // If all peers joined, stop waiting
+                if (successCount == peers.size()) {
+                    System.out.println("  All peers bootstrapped successfully!");
+                    break;
+                }
+            }
+
+            // Final verification
+            System.out.println("\n=== Bootstrap Results ===");
+            successCount = 0;
             for (int i = 0; i < peers.size(); i++) {
                 CXNetwork cxnet = peers.get(i).getNetwork("CXNET");
                 if (cxnet != null) {

@@ -72,7 +72,6 @@ dev\droppinganvil\v3\network\InputBundle.class
 dev\droppinganvil\v3\resourcecore\Resource.class
 dev\droppinganvil\v3\network\CXNetwork.class
 dev\droppinganvil\v3\analytics\AnalyticData.class
-dev\droppinganvil\v3\test\SecurityIntegrationTest.class
 dev\droppinganvil\v3\resourcecore\Resource$1.class
 dev\droppinganvil\v3\network\remotedirectory\RemoteDirectory.class
 dev\droppinganvil\v3\network\Scope.class

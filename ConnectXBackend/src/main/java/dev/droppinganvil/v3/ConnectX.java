@@ -49,8 +49,8 @@ public class ConnectX {
     // - Verify health endpoint works through Cloudflare
     // - Test bootstrap process end-to-end
     // - Update to: cxHTTP1:https://CXNET.AnvilDevelopment.US/cx
-    public static final String EPOCH_BRIDGE_ADDRESS = "cxHTTP1:http://localhost:8080/cx";
-    // public static final String EPOCH_BRIDGE_ADDRESS = "cxHTTP1:https://CXNET.AnvilDevelopment.US/cx";
+    // public static final String EPOCH_BRIDGE_ADDRESS = "cxHTTP1:http://localhost:8080/cx";
+    public static final String EPOCH_BRIDGE_ADDRESS = "cxHTTP1:https://CXNET.AnvilDevelopment.US/cx";
 
     public static Platform platform;
     public State state = State.CXConnecting;
@@ -892,7 +892,7 @@ public class ConnectX {
      * First introduces this node to EPOCH via NewNode, then requests seed
      * Uses CXS scope for direct node-to-node communication during bootstrap
      */
- {
+    private void requestSeedFromEpoch() {
         try {
             System.out.println("[Bootstrap] Contacting EPOCH at " + EPOCH_BRIDGE_ADDRESS);
 

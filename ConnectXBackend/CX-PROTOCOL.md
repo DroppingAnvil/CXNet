@@ -1,7 +1,7 @@
 # ConnectX (CX) Protocol Documentation
 
 **Version:** 3.0
-**Last Updated:** 2025-01-23
+**Last Updated:** 2025-01-24 (Security Features & Bootstrap)
 
 ---
 
@@ -1580,6 +1580,293 @@ This section provides a comprehensive reference for all Permission types in the 
 - Invite-only communities
 - Paid/subscription networks (register after payment verification)
 - High-security networks (manual vetting required)
+
+---
+
+## DataContainer - Local State Management
+
+### Overview
+
+**DataContainer** is a local encrypted storage system for network state that should NOT be distributed in network seeds. It stores ephemeral and sensitive data that is specific to each node's perspective of the network.
+
+**Location:** `{cxRoot}/data.cxd`
+**Format:** JSON (cxJSON1 serialization)
+**Encryption:** Optional (recommended for production)
+
+### Purpose
+
+**Why Separate from Seeds?**
+- **Security:** Registration tokens should never be distributed
+- **Privacy:** Local block lists are node-specific
+- **Scalability:** Registered nodes list derived from blockchain (c1), not static storage
+- **Flexibility:** Nodes can have different local policies
+
+### Data Structure
+
+```java
+public class DataContainer {
+    // Whitelist/Registration Management
+    public Map<String, Set<String>> networkRegisteredNodes;
+    // networkID → Set of node UUIDs
+
+    // Block List Management (local perspective)
+    public Map<String, Map<String, String>> networkBlockedNodes;
+    // networkID → (nodeID → reason)
+
+    // Token-Based Registration
+    public Map<String, String> registrationTokens;
+    // token → nodeID (one-time use)
+}
+```
+
+### Token-Based Registration System
+
+**Problem:** How do whitelist networks approve new members without manually adding UUIDs to blockchain?
+
+**Solution:** Backend generates one-time use tokens that nodes present during registration.
+
+#### Registration Flow
+
+```
+Step 1: User requests access to whitelist network
+  ↓
+Step 2: Backend verifies request (out-of-band: payment, email verification, etc.)
+  ↓
+Step 3: Backend generates registration token
+  → token = UUID.randomUUID().toString()
+  → registrationTokens.put(token, requestingNodeID)
+  → dataContainer saved to disk
+  ↓
+Step 4: Backend sends token to user (email, SMS, web portal, etc.)
+  ↓
+Step 5: User's node sends REGISTER_NODE event with token
+  → Payload: {"network": "TESTNET", "nodeID": "abc-123", "token": "xyz-789"}
+  ↓
+Step 6: Backend validates token
+  → Check: registrationTokens.get(token) == nodeID?
+  → If valid: Process registration (record to c1 blockchain)
+  → If invalid: Reject
+  → Remove token (one-time use)
+  ↓
+Step 7: Registration recorded to c1 (Admin) chain
+  → REGISTER_NODE event persisted
+  → Event has executeOnSync=true
+  → During blockchain sync, all nodes rebuild registered nodes list from c1
+```
+
+#### Security Features
+
+**One-Time Use Tokens:**
+```java
+public boolean registerNode(String networkID, String nodeID, String token) {
+    // Verify token exists and matches nodeID
+    if (!registrationTokens.containsKey(token)) {
+        return false; // Token not found
+    }
+
+    String expectedNodeID = registrationTokens.get(token);
+    if (!expectedNodeID.equals(nodeID)) {
+        return false; // Token doesn't match requesting node
+    }
+
+    // Token is valid - consume it (one-time use)
+    registrationTokens.remove(token);
+
+    // Add to registered nodes (local cache)
+    networkRegisteredNodes
+        .computeIfAbsent(networkID, k -> new HashSet<>())
+        .add(nodeID);
+
+    // Save DataContainer to persist token removal
+    connectX.saveDataContainer();
+
+    return true;
+}
+```
+
+**Benefits:**
+- **Scalability:** Backends can pre-generate tokens for batch registrations
+- **Flexibility:** Different token distribution methods (email, QR codes, etc.)
+- **Auditability:** Token generation/use tracked in backend logs
+- **Security:** Tokens cannot be reused or guessed
+
+### Registered Nodes Management
+
+**Source of Truth:** Chain 1 (c1 - Admin) blockchain
+**Local Cache:** `networkRegisteredNodes` in DataContainer
+
+```java
+// Check if node is registered (local cache)
+public boolean isNodeRegistered(String networkID, String nodeID) {
+    Set<String> registered = networkRegisteredNodes.get(networkID);
+    return registered != null && registered.contains(nodeID);
+}
+
+// During blockchain sync: Rebuild registered nodes from c1
+public void rebuildRegisteredNodesFromBlockchain(CXNetwork network) {
+    Set<String> registered = new HashSet<>();
+
+    // Scan all c1 blocks for REGISTER_NODE events
+    for (NetworkBlock block : network.c1.getAllBlocks()) {
+        for (NetworkEvent event : block.networkEvents.values()) {
+            if (event.eT.equals("REGISTER_NODE")) {
+                Map<String, Object> payload = deserialize(event.d);
+                String nodeID = (String) payload.get("nodeID");
+                registered.add(nodeID);
+            }
+        }
+    }
+
+    // Update local cache
+    networkRegisteredNodes.put(network.networkDictionary.networkID, registered);
+    saveDataContainer();
+}
+```
+
+### Block List Management
+
+**Two-Tier Blocking:**
+
+1. **CXNET-Level Blocking** (Global Ban)
+   - Recorded to CXNET c1 chain
+   - Blocks ALL transmissions from node
+   - Enforced by all CXNET participants
+
+2. **Network-Specific Blocking**
+   - Recorded to specific network's c1 chain
+   - Blocks only within that network
+   - Other networks unaffected
+
+```java
+// Block a node (local enforcement + blockchain recording)
+public void blockNode(String networkID, String nodeID, String reason) {
+    networkBlockedNodes
+        .computeIfAbsent(networkID, k -> new HashMap<>())
+        .put(nodeID, reason);
+
+    // Also record BLOCK_NODE event to c1 blockchain
+    connectX.recordBlockNodeEvent(networkID, nodeID, reason);
+}
+
+// Check if node is blocked
+public boolean isNodeBlocked(String networkID, String nodeID) {
+    Map<String, String> blocked = networkBlockedNodes.get(networkID);
+    return blocked != null && blocked.containsKey(nodeID);
+}
+
+// Unblock a node
+public String unblockNode(String networkID, String nodeID) {
+    Map<String, String> blocked = networkBlockedNodes.get(networkID);
+    if (blocked == null) return null;
+
+    String reason = blocked.remove(nodeID);
+
+    // Also record UNBLOCK_NODE event to c1 blockchain
+    if (reason != null) {
+        connectX.recordUnblockNodeEvent(networkID, nodeID);
+    }
+
+    return reason; // Return original block reason
+}
+```
+
+### Whitelist Enforcement
+
+**Enforcement Point:** NodeMesh.processNetworkInput (line 299-322)
+
+```java
+// Check whitelist BEFORE processing event
+CXNetwork network = ConnectX.getNetwork(networkID);
+if (network != null && network.configuration.whitelistMode) {
+    // Check if transmitter is registered
+    boolean isRegistered = connectX.dataContainer.isNodeRegistered(
+        networkID,
+        transmitterID
+    );
+
+    if (!isRegistered) {
+        System.out.println("[WHITELIST] Rejected transmission from unregistered node: "
+            + transmitterID);
+        Analytics.addData(AnalyticData.Tear,
+            "Whitelist rejection: " + transmitterID + " not registered to " + networkID);
+        return; // Drop transmission
+    }
+}
+
+// Node is registered or network not whitelisted - proceed
+```
+
+**Result:** Unregistered nodes' transmissions silently dropped at network layer.
+
+### Persistence
+
+**Automatic Save Triggers:**
+- Token generation/consumption
+- Node registration/unregistration
+- Node blocking/unblocking
+- Any DataContainer modification
+
+```java
+// Save DataContainer to disk
+public void saveDataContainer() throws Exception {
+    File dataFile = new File(cxRoot, "data.cxd");
+    String json = serialize("cxJSON1", dataContainer);
+
+    FileWriter writer = new FileWriter(dataFile);
+    writer.write(json);
+    writer.flush();
+    writer.close();
+}
+
+// Load DataContainer from disk (during initialization)
+private void loadDataContainer() {
+    File dataFile = new File(cxRoot, "data.cxd");
+    if (!dataFile.exists()) {
+        dataContainer = new DataContainer();
+        return;
+    }
+
+    FileInputStream fis = new FileInputStream(dataFile);
+    dataContainer = (DataContainer) deserialize(
+        "cxJSON1",
+        fis,
+        DataContainer.class
+    );
+}
+```
+
+### Periodic Backend Synchronization
+
+**Purpose:** Keep backend nodes synchronized on whitelist state
+
+**Implementation:**
+```java
+// Run every 10 minutes
+Thread syncThread = new Thread(() -> {
+    while (true) {
+        Thread.sleep(10 * 60 * 1000); // 10 minutes
+
+        // Send CHAIN_STATUS_REQUEST to all backend peers
+        for (String backendNodeID : network.configuration.backendSet) {
+            Map<String, Object> req = new HashMap<>();
+            req.put("network", networkID);
+            String reqJson = serialize("cxJSON1", req);
+
+            buildEvent(EventType.CHAIN_STATUS_REQUEST, reqJson.getBytes())
+                .toPeer(backendNodeID)
+                .toNetwork(networkID)
+                .queue();
+        }
+    }
+});
+syncThread.setDaemon(true);
+syncThread.start();
+```
+
+**Benefits:**
+- Backends detect registration events from other backends
+- Eventual consistency across infrastructure nodes
+- No single point of failure
 
 ---
 

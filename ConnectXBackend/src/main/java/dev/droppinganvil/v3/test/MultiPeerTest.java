@@ -129,11 +129,53 @@ public class MultiPeerTest {
                 System.out.println("\n⚠ PARTIAL SUCCESS: " + successCount + "/" + peers.size() + " peers joined CXNET");
             }
 
+            // DIAGNOSTICS: Show internal state of each peer
+            System.out.println("\n=== INTERNAL STATE DIAGNOSTICS ===");
+            for (int i = 0; i < peers.size(); i++) {
+                ConnectX peer = peers.get(i);
+                System.out.println("\nPeer " + (i + 1) + " (" + peer.getOwnID().substring(0, 8) + "):");
+
+                // Check CXNET membership
+                CXNetwork cxnet = peer.getNetwork("CXNET");
+                System.out.println("  CXNET: " + (cxnet != null ? "JOINED" : "NOT JOINED"));
+                if (cxnet != null) {
+                    System.out.println("    Chain c1: " + cxnet.c1.blockMap.size() + " blocks (current: " + cxnet.c1.current.block + ")");
+                    System.out.println("    Chain c2: " + cxnet.c2.blockMap.size() + " blocks (current: " + cxnet.c2.current.block + ")");
+                    System.out.println("    Chain c3: " + cxnet.c3.blockMap.size() + " blocks (current: " + cxnet.c3.current.block + ")");
+                }
+
+                // Check PeerDirectory
+                int hvPeerCount = dev.droppinganvil.v3.network.nodemesh.PeerDirectory.hv.size();
+                int lanPeerCount = dev.droppinganvil.v3.network.nodemesh.PeerDirectory.lan.size();
+                int cacheCount = dev.droppinganvil.v3.network.nodemesh.PeerDirectory.peerCache.size();
+                System.out.println("  PeerDirectory:");
+                System.out.println("    HV Peers: " + hvPeerCount);
+                System.out.println("    LAN Peers: " + lanPeerCount);
+                System.out.println("    Cached: " + cacheCount);
+
+                // Show first few HV peers
+                if (hvPeerCount > 0) {
+                    System.out.println("    HV Peers list:");
+                    int count = 0;
+                    for (String peerID : dev.droppinganvil.v3.network.nodemesh.PeerDirectory.hv.keySet()) {
+                        if (count++ >= 3) {
+                            System.out.println("      ... and " + (hvPeerCount - 3) + " more");
+                            break;
+                        }
+                        dev.droppinganvil.v3.network.nodemesh.Node node = dev.droppinganvil.v3.network.nodemesh.PeerDirectory.hv.get(peerID);
+                        System.out.println("      " + peerID.substring(0, 8) + " @ " + node.addr);
+                    }
+                }
+
+                // Check queue status
+                System.out.println("  Queues:");
+                System.out.println("    Output: " + peer.outputQueue.size());
+                System.out.println("    Event: " + peer.eventQueue.size());
+            }
+
             System.out.println("\n=== Test Setup Complete ===");
             System.out.println("Mesh network architecture:");
             System.out.println("  " + successCount + "/" + peers.size() + " peers bootstrapped from EPOCH");
-            System.out.println("  Network: CXNET (not TESTNET)");
-            System.out.println("  HTTP bridge registered for all peers");
             if (successCount == peers.size()) {
                 System.out.println("  ✓ Ready for peer-to-peer messaging");
             } else {

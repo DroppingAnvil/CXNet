@@ -199,29 +199,15 @@ public class Seed {
      * @throws Exception if application fails
      */
     public void apply(ConnectX connectX) throws Exception {
-        System.out.println("[Seed] Applying seed with " + hvPeers.size() + " hv peers, " +
-                          peerFindingNodes.size() + " peer finding nodes, " +
-                          networks.size() + " networks");
+        System.out.println("[Seed] Applying seed " + seedID);
+        System.out.println("[Seed]   Networks: " + networks.size());
+        System.out.println("[Seed]   HV Peers: " + hvPeers.size());
+        System.out.println("[Seed]   Certificates: " + certificates.size());
 
-        // Cache certificates first
-        for (Map.Entry<String, String> cert : certificates.entrySet()) {
-            // TODO: Cache certificate in encryption provider
-            // connectX.encryptionProvider.cacheCert(cert.getKey(), cert.getValue());
-            System.out.println("[Seed] Cached certificate for: " + cert.getKey());
-        }
-
-        // Add hv peers to directory (LAN peers are never in seeds)
-        for (Node peer : hvPeers) {
-            PeerDirectory.addNode(peer);
-            System.out.println("[Seed] Added hv peer: " + peer.cxID + " at " + peer.addr);
-        }
-
-        // Import networks
-        for (CXNetwork network : networks) {
-            // TODO: Add public method in ConnectX to add network directly
-            // For now, networks need to be imported via importNetwork(File) method
-            System.out.println("[Seed] Network available for import: " + network.networkDictionary.networkID);
-        }
+        // Use reflection to call private applySeed method in ConnectX
+        java.lang.reflect.Method applySeedMethod = ConnectX.class.getDeclaredMethod("applySeed", Seed.class);
+        applySeedMethod.setAccessible(true);
+        applySeedMethod.invoke(connectX, this);
 
         System.out.println("[Seed] Seed application complete");
     }

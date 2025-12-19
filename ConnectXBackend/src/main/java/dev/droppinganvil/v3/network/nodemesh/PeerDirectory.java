@@ -110,7 +110,11 @@ public class PeerDirectory implements Serializable {
                 // Keys match - this is the same node, update the entry
             }
 
-            //TODO implement node addition to cache/persistence
+            // Add to high-value peer directory for routing
+            // Peers added via addNode() (from seeds, REGISTER_NODE, etc) are considered hv peers
+            hv.put(n.cxID, n);
+
+            // Also track in seen for last-seen timestamp tracking
             seen.put(n.cxID, n);
         } else {
             throw new IllegalStateException();

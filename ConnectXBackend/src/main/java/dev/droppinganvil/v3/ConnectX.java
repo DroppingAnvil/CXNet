@@ -352,7 +352,7 @@ public class ConnectX {
          * @param cxID The target peer's cxID
          */
         public EventBuilder toPeer(String cxID) {
-            this.path.scope = "P2P";
+            this.path.scope = "CXS";  // CXS = ConnectX Secure (single peer transmission)
             this.path.cxID = cxID;
             // Node lookup will happen during transmission if not set
             return this;

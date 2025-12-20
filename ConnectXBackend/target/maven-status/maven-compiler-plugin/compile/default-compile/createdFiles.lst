@@ -41,6 +41,7 @@ dev\droppinganvil\v3\network\threads\EventProcessor.class
 dev\droppinganvil\v3\test\BlockSyncTest.class
 dev\droppinganvil\v3\ConnectX$1.class
 dev\droppinganvil\v3\network\UnauthorizedNetworkConnectivityException.class
+dev\droppinganvil\v3\test\BlockRotationTest.class
 dev\droppinganvil\v3\Permission.class
 dev\droppinganvil\v3\utils\obj\IPXException.class
 dev\droppinganvil\v3\network\nodemesh\CXNode.class
@@ -61,6 +62,7 @@ dev\droppinganvil\v3\utils\obj\BaseStatus.class
 dev\droppinganvil\v3\utils\obj\LockOwnerException.class
 dev\droppinganvil\v3\ConnectX$EventBuilder.class
 dev\droppinganvil\v3\resourcecore\ResourceType.class
+dev\droppinganvil\v3\test\BlockchainPersistenceTest.class
 dev\droppinganvil\v3\network\BlockchainPersistence.class
 dev\droppinganvil\v3\utils\obj\LockedStateException.class
 dev\droppinganvil\v3\crypt\core\exceptions\TempDirectoryPermissions.class
@@ -75,6 +77,7 @@ dev\droppinganvil\v3\analytics\AnalyticData.class
 dev\droppinganvil\v3\resourcecore\Resource$1.class
 dev\droppinganvil\v3\network\remotedirectory\RemoteDirectory.class
 dev\droppinganvil\v3\network\Scope.class
+dev\droppinganvil\v3\test\StatePersistenceTest.class
 dev\droppinganvil\v3\network\threads\SocketWatcher.class
 dev\droppinganvil\v3\utils\obj\RequiresLogin.class
 dev\droppinganvil\v3\crypt\core\exceptions\TempDirectorySolidified.class

@@ -891,6 +891,9 @@ public class ConnectX {
             String networkID = network.configuration.netID;
             networkMap.put(networkID, network);
             System.out.println("[Seed] Loaded network: " + networkID);
+
+            // Replay blockchain to restore state (registeredNodes, blockedNodes, etc.)
+            replayBlockchain(network);
         }
 
         // Cache certificates
@@ -1285,6 +1288,9 @@ public class ConnectX {
             // Not fatal - network can still function with in-memory chains
         }
 
+        // Replay blockchain to restore state after loading from disk
+        replayBlockchain(network);
+
         fis.close();
         baos.close();
         bais.close();
@@ -1520,12 +1526,41 @@ public class ConnectX {
         }
 
         // Determine which chain to use based on event type
-        // Default to c3 (Events chain) for most events
+        // c1 (Admin): State-modifying events (REGISTER_NODE, BLOCK_NODE, UNBLOCK_NODE, permissions)
+        // c2 (Resources): Resource metadata events
+        // c3 (Events): Ephemeral events (MESSAGE, etc.)
         NetworkRecord targetChain = network.c3;
         Long chainID = network.networkDictionary.c3;
 
-        // TODO: Add logic to route specific event types to c1 (Admin) or c2 (Resources)
-        // For now, all events go to c3
+        // Route state-modifying events to c1 (Admin chain)
+        if (ne.eT != null) {
+            try {
+                EventType eventType = EventType.valueOf(ne.eT);
+                switch (eventType) {
+                    case REGISTER_NODE:
+                    case BLOCK_NODE:
+                    case UNBLOCK_NODE:
+                    case UPDATE_NMI:
+                    case ADD_NMI:
+                    case DELETE_NMI:
+                        // Admin/permission events go to c1
+                        targetChain = network.c1;
+                        chainID = network.networkDictionary.c1;
+                        break;
+                    // Resource events would go to c2
+                    // case RESOURCE_UPLOAD:
+                    // case RESOURCE_UPDATE:
+                    //     targetChain = network.c2;
+                    //     chainID = network.networkDictionary.c2;
+                    //     break;
+                    default:
+                        // All other events go to c3 (default)
+                        break;
+                }
+            } catch (IllegalArgumentException e) {
+                // Unknown event type - use default (c3)
+            }
+        }
 
         // Check if sender has permission to record to this chain
         if (!network.checkChainPermission(senderID, Permission.Record.name(), chainID)) {
@@ -1707,6 +1742,124 @@ public class ConnectX {
      */
     public void clearBlockchainData(String networkID) throws Exception {
         blockchainPersistence.deleteNetwork(networkID);
+    }
+
+    /**
+     * Replay blockchain events to rebuild node state after restart
+     *
+     * Loads all blocks from disk and processes state-modifying events (executeOnSync=true)
+     * to rebuild:
+     * - registeredNodes (from REGISTER_NODE events in c1)
+     * - blockedNodes (from BLOCK_NODE/UNBLOCK_NODE events in c1)
+     * - Any other state tracked in blockchain
+     *
+     * Processing order: c1 (Admin) → c2 (Resources) → c3 (Events)
+     * This ensures permissions and registrations are restored before other state
+     *
+     * @param network Network to replay blockchain for
+     */
+    public void replayBlockchain(CXNetwork network) {
+        if (network == null) {
+            System.err.println("[Blockchain Replay] Network is null, skipping");
+            return;
+        }
+
+        String networkID = network.configuration.netID;
+        System.out.println("[Blockchain Replay] Starting replay for network: " + networkID);
+
+        try {
+            // Check if blockchain exists on disk
+            File blockchainDir = new File(cxRoot, "blockchain/" + networkID);
+            if (!blockchainDir.exists()) {
+                System.out.println("[Blockchain Replay] No blockchain data on disk for " + networkID);
+                return;
+            }
+
+            int totalEventsReplayed = 0;
+            int totalEventsSkipped = 0;
+
+            // Replay c1 (Admin) chain first - contains registrations, blocks, permissions
+            totalEventsReplayed += replayChain(network, network.networkDictionary.c1, "c1 (Admin)");
+
+            // Replay c2 (Resources) chain - contains resource metadata
+            totalEventsReplayed += replayChain(network, network.networkDictionary.c2, "c2 (Resources)");
+
+            // Replay c3 (Events) chain - mostly ephemeral, but may have state events
+            totalEventsReplayed += replayChain(network, network.networkDictionary.c3, "c3 (Events)");
+
+            System.out.println("[Blockchain Replay] Complete for " + networkID);
+            System.out.println("[Blockchain Replay]   Events replayed: " + totalEventsReplayed);
+            System.out.println("[Blockchain Replay]   Events skipped (ephemeral): " + totalEventsSkipped);
+
+        } catch (Exception e) {
+            System.err.println("[Blockchain Replay] Error replaying blockchain for " + networkID + ": " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Replay events from a specific chain
+     * @return Number of events replayed
+     */
+    private int replayChain(CXNetwork network, Long chainID, String chainName) {
+        int eventsReplayed = 0;
+        String networkID = network.configuration.netID;
+
+        try {
+            System.out.println("[Blockchain Replay] Loading " + chainName + "...");
+
+            // Load chain from disk (load all blocks)
+            dev.droppinganvil.v3.edge.NetworkRecord chain = blockchainPersistence.loadChain(networkID, chainID, true);
+
+            if (chain == null || chain.blockMap.isEmpty()) {
+                System.out.println("[Blockchain Replay]   No blocks found in " + chainName);
+                return 0;
+            }
+
+            System.out.println("[Blockchain Replay]   Found " + chain.blockMap.size() + " blocks");
+
+            // Process blocks in order (0, 1, 2, ...)
+            for (long blockNum = 0; blockNum < chain.blockMap.size(); blockNum++) {
+                dev.droppinganvil.v3.edge.NetworkBlock block = chain.blockMap.get(blockNum);
+                if (block == null) continue;
+
+                // Process events in this block
+                for (java.util.Map.Entry<Integer, dev.droppinganvil.v3.network.events.NetworkEvent> entry : block.networkEvents.entrySet()) {
+                    dev.droppinganvil.v3.network.events.NetworkEvent event = entry.getValue();
+
+                    // Only replay state-modifying events
+                    if (event.executeOnSync) {
+                        try {
+                            // Queue event for processing through existing framework
+                            // Create a simple NetworkContainer for the replayed event
+                            dev.droppinganvil.v3.network.events.NetworkContainer nc =
+                                new dev.droppinganvil.v3.network.events.NetworkContainer();
+                            nc.se = "cxJSON1";
+                            nc.s = false;
+
+                            // Create InputBundle and add to eventQueue
+                            InputBundle ib = new InputBundle(event, nc);
+                            eventQueue.add(ib);
+
+                            eventsReplayed++;
+
+                            if (eventsReplayed <= 5 || eventsReplayed % 10 == 0) {
+                                System.out.println("[Blockchain Replay]     Queued " + event.eT + " event (ID: " + event.iD + ")");
+                            }
+                        } catch (Exception e) {
+                            System.err.println("[Blockchain Replay]     Failed to queue event " + event.iD + ": " + e.getMessage());
+                        }
+                    }
+                }
+            }
+
+            System.out.println("[Blockchain Replay]   " + chainName + " complete: " + eventsReplayed + " events replayed");
+
+        } catch (Exception e) {
+            System.err.println("[Blockchain Replay] Error loading " + chainName + ": " + e.getMessage());
+        }
+
+        return eventsReplayed;
     }
 
     /**

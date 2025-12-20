@@ -101,19 +101,26 @@ public class HTTPBridgeProvider implements BridgeProvider {
     public List<NetworkContainer> transmitEvent(CXPath path, byte[] containerBytes) throws Exception {
         List<NetworkContainer> responses = new ArrayList<>();
 
+        long startTime = System.currentTimeMillis();
         try {
-            System.out.println("[HTTP Bridge Client] Sending " + containerBytes.length + " bytes to " + path.bridgeArg);
+            System.out.println("[HTTP Bridge Client] === OUTGOING REQUEST ===");
+            System.out.println("[HTTP Bridge Client] To: " + path.bridgeArg);
+            System.out.println("[HTTP Bridge Client] Size: " + containerBytes.length + " bytes");
+            System.out.println("[HTTP Bridge Client] Starting POST request...");
 
             // POST encrypted NetworkContainer to HTTPS endpoint
-            // Example: https://CXNET.AnvilDevelopment.US/cx
             RequestBody body = RequestBody.create(containerBytes, OCTET_STREAM);
             Request request = new Request.Builder()
-                .url(path.bridgeArg) // Must be HTTPS URL (TLS handled by RProx)
+                .url(path.bridgeArg)
                 .post(body)
                 .build();
 
+            long sendStart = System.currentTimeMillis();
             Response response = httpClient.newCall(request).execute();
-            System.out.println("[HTTP Bridge Client] Response: " + response.code() + " " + response.message());
+            long sendEnd = System.currentTimeMillis();
+
+            System.out.println("[HTTP Bridge Client] Response received in " + (sendEnd - sendStart) + "ms");
+            System.out.println("[HTTP Bridge Client] Status: " + response.code() + " " + response.message());
 
             if (!response.isSuccessful()) {
                 throw new IOException("HTTP Bridge failed: " + response.code() + " " + response.message());
@@ -247,32 +254,63 @@ public class HTTPBridgeProvider implements BridgeProvider {
     class CXMessageHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            long startTime = System.currentTimeMillis();
+            String remoteAddr = exchange.getRemoteAddress().toString();
+
+            System.out.println("[HTTP Bridge Server] === INCOMING CONNECTION ===");
+            System.out.println("[HTTP Bridge Server] From: " + remoteAddr);
+            System.out.println("[HTTP Bridge Server] Method: " + exchange.getRequestMethod());
+            System.out.println("[HTTP Bridge Server] URI: " + exchange.getRequestURI());
+
             if (!"POST".equals(exchange.getRequestMethod())) {
-                sendResponse(exchange, 405, "Method Not Allowed".getBytes());
+                System.out.println("[HTTP Bridge Server] REJECTED: Wrong method");
+                sendResponse(exchange, 405, "Method not allowed, use CX Protocol".getBytes());
                 return;
             }
 
             try {
-                // Read encrypted NetworkContainer from request - ensure stream is fully read
+                // Read encrypted NetworkContainer from request with optimized buffering
                 InputStream requestStream = exchange.getRequestBody();
-                byte[] requestBody = requestStream.readAllBytes();
-                requestStream.close(); // Close the request stream
 
-                System.out.println("[HTTP Bridge Server] Received " + requestBody.length + " bytes");
+                // Get expected content length for validation
+                long contentLength = exchange.getRequestHeaders().getFirst("Content-Length") != null
+                    ? Long.parseLong(exchange.getRequestHeaders().getFirst("Content-Length"))
+                    : -1;
+
+                System.out.println("[HTTP Bridge Server] Content-Length header: " + contentLength + " bytes");
+                System.out.println("[HTTP Bridge Server] Starting to read request body...");
+
+                long readStart = System.currentTimeMillis();
+                byte[] requestBody = requestStream.readAllBytes();
+                long readEnd = System.currentTimeMillis();
+                requestStream.close();
+
+                System.out.println("[HTTP Bridge Server] Read " + requestBody.length + " bytes in " + (readEnd - readStart) + "ms");
+
+                // Validate we received all expected data
+                if (contentLength > 0 && requestBody.length != contentLength) {
+                    System.err.println("[HTTP Bridge Server] WARNING: Content-Length mismatch - expected "
+                        + contentLength + " bytes, got " + requestBody.length + " bytes");
+                }
 
                 // Process event through normal CX stack
-                // This handles all decryption, verification, and event processing
+                System.out.println("[HTTP Bridge Server] Processing event...");
+                long procStart = System.currentTimeMillis();
                 connectX.nodeMesh.processNetworkInput(new ByteArrayInputStream(requestBody), null);
+                long procEnd = System.currentTimeMillis();
 
-                System.out.println("[HTTP Bridge Server] Event processed successfully");
+                System.out.println("[HTTP Bridge Server] Event processed in " + (procEnd - procStart) + "ms");
+                System.out.println("[HTTP Bridge Server] Sending 200 OK response");
 
-                // For now, just acknowledge receipt with empty response
-                // TODO: Implement proper sync response collection
-                // This requires modifying processNetworkInput or the event system
-                // to capture responses for HTTP bridge requests
                 sendResponse(exchange, 200, new byte[0]);
 
+                long totalTime = System.currentTimeMillis() - startTime;
+                System.out.println("[HTTP Bridge Server] === REQUEST COMPLETE === Total: " + totalTime + "ms");
+
             } catch (Exception e) {
+                long totalTime = System.currentTimeMillis() - startTime;
+                System.err.println("[HTTP Bridge Server] === REQUEST FAILED === After: " + totalTime + "ms");
+                System.err.println("[HTTP Bridge Server] Error: " + e.getClass().getName() + ": " + e.getMessage());
                 e.printStackTrace();
                 sendResponse(exchange, 500, ("Error: " + e.getMessage()).getBytes());
             }

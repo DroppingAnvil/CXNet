@@ -947,8 +947,10 @@ public class ConnectX {
                 dev.droppinganvil.v3.network.CXPath epochPath = new dev.droppinganvil.v3.network.CXPath();
                 epochPath.cxID = EPOCH_UUID; // Target EPOCH specifically
                 epochPath.scope = "CXS"; // Node/system scope (not authorized for CX/CXNET yet)
-                epochPath.bridge = "cxHTTP1"; // Specify HTTP bridge
-                epochPath.bridgeArg = "http://localhost:8080/cx"; // Bridge endpoint (localhost for testing)
+                // Extract bridge protocol and URL from EPOCH_BRIDGE_ADDRESS
+                String[] bridgeParts = EPOCH_BRIDGE_ADDRESS.split(":", 2);
+                epochPath.bridge = bridgeParts[0]; // "cxHTTP1"
+                epochPath.bridgeArg = bridgeParts[1]; // "https://CXNET.AnvilDevelopment.US/cx"
                 newNodeEvent.p = epochPath;
 
                 // Serialize our node information as the event payload
@@ -983,8 +985,10 @@ public class ConnectX {
             dev.droppinganvil.v3.network.CXPath seedPath = new dev.droppinganvil.v3.network.CXPath();
             seedPath.cxID = EPOCH_UUID; // Target EPOCH specifically
             seedPath.scope = "CXS"; // Node/system scope (not authorized for CX/CXNET yet)
-            seedPath.bridge = "cxHTTP1"; // Specify HTTP bridge
-            seedPath.bridgeArg = "http://localhost:8080/cx"; // Bridge endpoint (localhost for testing)
+            // Extract bridge protocol and URL from EPOCH_BRIDGE_ADDRESS
+            String[] bridgeParts = EPOCH_BRIDGE_ADDRESS.split(":", 2);
+            seedPath.bridge = bridgeParts[0]; // "cxHTTP1"
+            seedPath.bridgeArg = bridgeParts[1]; // "https://CXNET.AnvilDevelopment.US/cx"
             seedRequest.p = seedPath;
 
             // Create container

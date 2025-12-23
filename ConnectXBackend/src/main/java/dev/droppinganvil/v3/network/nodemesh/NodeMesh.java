@@ -339,7 +339,7 @@ public class NodeMesh {
                 if (NodeConfig.supportUnavailableServices) {
                     // Record unsupported events using the transmitter's ID from NetworkContainer
                     if (ib.nc != null && ib.nc.iD != null) {
-                        connectX.recordEvent(ib.ne, ib.nc.iD);
+                        connectX.Event(ib.ne, ib.nc.iD);
                     }
                     //todo relay
                 }
@@ -370,6 +370,49 @@ public class NodeMesh {
 
                 // After infrastructure handling, fire event to application layer
                 fireEvent(ib.ne, ib.nc, ib.signedEventBytes);
+
+                // DEBUG: Log auto-record attempt
+                System.out.println("[Auto-Record DEBUG] Event type: " + ib.ne.eT + ", r=" + ib.ne.r +
+                    ", nc=" + (ib.nc != null) + ", nc.iD=" + (ib.nc != null ? ib.nc.iD : "null") +
+                    ", nc.oD=" + (ib.nc != null ? ib.nc.oD : "null"));
+
+                // Auto-record events with r=true if ORIGINAL sender has permission
+                if (ib.ne.r && ib.nc != null && ib.nc.oD != null) {
+                    String senderID = ib.nc.oD;
+                    String networkID = ib.ne.p != null ? ib.ne.p.network : null;
+
+                    if (networkID != null) {
+                        CXNetwork network = connectX.getNetwork(networkID);
+                        if (network != null) {
+                            // Determine target chain from event type (c1=admin, c2=resources, c3=events)
+                            Long chainID = network.networkDictionary.c3;  // Default to c3 for most events
+                            if (et != null) {
+                                switch (et) {
+                                    case REGISTER_NODE:
+                                    case BLOCK_NODE:
+                                    case UNBLOCK_NODE:
+                                    case GRANT_PERMISSION:
+                                    case REVOKE_PERMISSION:
+                                        chainID = network.networkDictionary.c1;  // Admin events go to c1
+                                        break;
+                                }
+                            }
+
+                            // Check if sender has Record permission for this chain
+                            boolean hasPermission = network.checkChainPermission(senderID, dev.droppinganvil.v3.Permission.Record.name(), chainID);
+
+                            if (hasPermission) {
+                                // Record event to blockchain
+                                boolean recorded = connectX.Event(ib.ne, senderID);
+                                if (recorded) {
+                                    System.out.println("[Auto-Record] Event " + ib.ne.eT + " from " + senderID.substring(0, 8) + " recorded to chain " + chainID);
+                                }
+                            } else {
+                                System.out.println("[Auto-Record] Event " + ib.ne.eT + " from " + senderID.substring(0, 8) + " NOT recorded - no permission");
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -582,12 +625,17 @@ public class NodeMesh {
                                 chainStatus.put("c2", network.c2.current != null ? network.c2.current.block : 0L);
                                 chainStatus.put("c3", network.c3.current != null ? network.c3.current.block : 0L);
 
+                                // Create response with network ID and status
+                                java.util.Map<String, Object> response = new java.util.HashMap<>();
+                                response.put("network", networkID);
+                                response.put("status", chainStatus);
+
                                 // Create response event
                                 NetworkEvent responseEvent = new NetworkEvent();
                                 responseEvent.eT = EventType.CHAIN_STATUS_RESPONSE.name();
                                 responseEvent.iD = java.util.UUID.randomUUID().toString();
 
-                                String statusJson = ConnectX.serialize("cxJSON1", chainStatus);
+                                String statusJson = ConnectX.serialize("cxJSON1", response);
                                 responseEvent.d = statusJson.getBytes("UTF-8");
 
                                 // Set path to requester
@@ -625,13 +673,35 @@ public class NodeMesh {
                         System.out.println("[" + connectX.getOwnID() + "] Chain status response received from " + nc.iD);
                         try {
                             String statusJson = new String(ne.d, "UTF-8");
-                            java.util.Map<String, Number> chainStatus =
-                                (java.util.Map<String, Number>) ConnectX.deserialize("cxJSON1", statusJson, java.util.Map.class);
-                            System.out.println("[CHAIN_STATUS] Remote chain heights:");
+                            java.util.Map<String, Object> response =
+                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", statusJson, java.util.Map.class);
+
+                            String networkID = (String) response.get("network");
+                            java.util.Map<String, Number> chainStatus = (java.util.Map<String, Number>) response.get("status");
+
+                            System.out.println("[CHAIN_STATUS] Remote chain heights for " + networkID + " from " + nc.iD.substring(0, 8) + ":");
                             System.out.println("  c1: " + chainStatus.get("c1"));
                             System.out.println("  c2: " + chainStatus.get("c2"));
                             System.out.println("  c3: " + chainStatus.get("c3"));
-                            // TODO: Compare with local chain heights and initiate sync if behind
+
+                            // Store response for multipeer verification
+                            CXNetwork network = connectX.getNetwork(networkID);
+                            if (network != null) {
+                                // Check if this response is from NMI (always trust NMI)
+                                boolean isNMI = network.configuration.backendSet != null &&
+                                               network.configuration.backendSet.contains(nc.iD);
+
+                                if (isNMI) {
+                                    System.out.println("[CHAIN_STATUS] Response from NMI/Backend - TRUSTED");
+                                    // NMI response is authoritative, initiate sync immediately
+                                    initiateSyncFromPeer(connectX, network, networkID, chainStatus, nc.iD);
+                                } else {
+                                    // Peer response - store for multipeer verification
+                                    System.out.println("[CHAIN_STATUS] Response from peer - storing for verification");
+                                    // TODO: Implement multipeer consensus mechanism
+                                    // For now, skip peer-only responses (require NMI or multiple peer consensus)
+                                }
+                            }
                         } catch (Exception e) {
                             System.err.println("[CHAIN_STATUS] Error handling response: " + e.getMessage());
                             e.printStackTrace();
@@ -726,29 +796,91 @@ public class NodeMesh {
                             System.out.println("[BLOCK_RESPONSE] Received block " + block.block +
                                              " (" + block.networkEvents.size() + " events)");
 
-                            // Process state-modifying events (executeOnSync = true)
-                            // Ephemeral events (messages, pings) are skipped during sync
+                            // Get network ID from block's first event (all events in block should be from same network)
+                            String networkID = null;
+                            Long chainID = null;
+                            for (NetworkEvent event : block.networkEvents.values()) {
+                                if (event.p != null && event.p.network != null) {
+                                    networkID = event.p.network;
+                                    break;
+                                }
+                            }
+
+                            if (networkID == null) {
+                                System.err.println("[BLOCK_RESPONSE] Cannot determine network ID from block events");
+                                handledLocally = true;
+                                break;
+                            }
+
+                            // Get network and determine which chain this block belongs to
+                            CXNetwork network = connectX.getNetwork(networkID);
+                            if (network == null) {
+                                System.err.println("[BLOCK_RESPONSE] Network not found: " + networkID);
+                                handledLocally = true;
+                                break;
+                            }
+
+                            // Determine target chain based on block's chain ID from metadata
+                            dev.droppinganvil.v3.edge.NetworkRecord targetChain = null;
+                            if (block.chain != null) {
+                                chainID = block.chain;
+                                if (chainID.equals(network.networkDictionary.c1)) targetChain = network.c1;
+                                else if (chainID.equals(network.networkDictionary.c2)) targetChain = network.c2;
+                                else if (chainID.equals(network.networkDictionary.c3)) targetChain = network.c3;
+                            }
+
+                            if (targetChain == null) {
+                                System.err.println("[BLOCK_RESPONSE] Cannot determine target chain for block");
+                                handledLocally = true;
+                                break;
+                            }
+
+                            // Add block to local blockchain in memory
+                            targetChain.blockMap.put(block.block, block);
+                            System.out.println("[BLOCK_RESPONSE] Added block " + block.block + " to chain " + chainID + " in memory");
+
+                            // Update current block pointer if this is the latest block
+                            if (targetChain.current == null || block.block > targetChain.current.block) {
+                                targetChain.current = block;
+                                System.out.println("[BLOCK_RESPONSE] Updated current block to " + block.block);
+                            }
+
+                            // Save block to disk for persistence
+                            try {
+                                connectX.blockchainPersistence.saveBlock(networkID, chainID, block);
+                                System.out.println("[BLOCK_RESPONSE] Saved block " + block.block + " to disk");
+                            } catch (Exception e) {
+                                System.err.println("[BLOCK_RESPONSE] Failed to save block to disk: " + e.getMessage());
+                            }
+
+                            // Queue state-modifying events for processing to rebuild state
                             int stateEvents = 0;
                             int skippedEvents = 0;
                             for (NetworkEvent event : block.networkEvents.values()) {
                                 if (event.executeOnSync) {
-                                    // Execute state-modifying events (permission changes, NMI updates)
-                                    // These MUST be processed to rebuild blockchain state correctly
-                                    System.out.println("[BLOCK_SYNC] Executing state event: " + event.eT);
-                                    // Process event through updatePermissionState or similar
+                                    // Queue event for processing through existing framework
+                                    dev.droppinganvil.v3.network.events.NetworkContainer eventContainer =
+                                        new dev.droppinganvil.v3.network.events.NetworkContainer();
+                                    eventContainer.se = "cxJSON1";
+                                    eventContainer.s = false;
+                                    eventContainer.iD = nc.iD; // Mark as coming from the peer who sent the block
+
+                                    InputBundle ib = new InputBundle(event, eventContainer);
+                                    connectX.eventQueue.add(ib);
+
                                     stateEvents++;
+                                    System.out.println("[BLOCK_SYNC] Queued state event: " + event.eT);
                                 } else {
                                     // Skip ephemeral events (messages, pings, etc.)
-                                    // These are realtime-only and shouldn't execute during sync
                                     skippedEvents++;
                                 }
                             }
 
-                            System.out.println("[BLOCK_SYNC] Processed " + stateEvents + " state events, skipped " +
-                                             skippedEvents + " ephemeral events");
-
-                            // TODO: Validate block chronologically and add to local blockchain
-                            // Use connectX.validateBlockChronologically() here
+                            System.out.println("[BLOCK_SYNC] Block " + block.block + " processed:");
+                            System.out.println("  - Added to chain " + chainID);
+                            System.out.println("  - Saved to disk");
+                            System.out.println("  - Queued " + stateEvents + " state events");
+                            System.out.println("  - Skipped " + skippedEvents + " ephemeral events");
 
                         } catch (Exception e) {
                             System.err.println("[BLOCK_RESPONSE] Error handling response: " + e.getMessage());
@@ -851,6 +983,100 @@ public class NodeMesh {
 
                         } catch (Exception e) {
                             System.err.println("[REGISTER_NODE] Error handling event: " + e.getMessage());
+                            e.printStackTrace();
+                        }
+                        handledLocally = true;
+                        break;
+                    case GRANT_PERMISSION:
+                        System.out.println("[" + connectX.getOwnID() + "] GRANT_PERMISSION event received from " + nc.iD);
+                        try {
+                            // Parse payload: {network: "NETWORKID", nodeID: "UUID", permission: "Record", chain: 3, priority: 10}
+                            String grantJson = new String(ne.d, "UTF-8");
+                            java.util.Map<String, Object> grantData =
+                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", grantJson, java.util.Map.class);
+
+                            String networkID = (String) grantData.get("network");
+                            String nodeID = (String) grantData.get("nodeID");
+                            String permission = (String) grantData.get("permission");
+                            Object chainObj = grantData.get("chain");
+                            Long chainID = chainObj instanceof Integer ? ((Integer) chainObj).longValue() : (Long) chainObj;
+                            Object priorityObj = grantData.get("priority");
+                            int priority = priorityObj instanceof Integer ? (Integer) priorityObj : 10;
+
+                            System.out.println("[GRANT_PERMISSION] Granting " + permission + " permission to node " + nodeID +
+                                             " on network " + networkID + " chain " + chainID + " (priority: " + priority + ")");
+
+                            // Get the network
+                            CXNetwork network = connectX.getNetwork(networkID);
+                            if (network != null) {
+                                // Create permission entry
+                                String permKey = permission + "-" + chainID;
+                                us.anvildevelopment.util.tools.permissions.Entry entry =
+                                    new us.anvildevelopment.util.tools.permissions.BasicEntry(permKey, true, priority);
+
+                                // Add to network permissions
+                                java.util.Map<String, us.anvildevelopment.util.tools.permissions.Entry> nodePerms =
+                                    network.networkPermissions.permissionSet.computeIfAbsent(nodeID, k -> new java.util.HashMap<>());
+                                nodePerms.put(permKey, entry);
+
+                                System.out.println("[GRANT_PERMISSION] Permission granted successfully");
+                            } else {
+                                System.err.println("[GRANT_PERMISSION] Network not found: " + networkID);
+                            }
+
+                            // This is a state-modifying event that should be recorded to c1 (Admin) chain
+                            // System reads c1 to rebuild permissions during bootstrap/sync
+                            ne.executeOnSync = true;
+
+                        } catch (Exception e) {
+                            System.err.println("[GRANT_PERMISSION] Error handling event: " + e.getMessage());
+                            e.printStackTrace();
+                        }
+                        handledLocally = true;
+                        break;
+                    case REVOKE_PERMISSION:
+                        System.out.println("[" + connectX.getOwnID() + "] REVOKE_PERMISSION event received from " + nc.iD);
+                        try {
+                            // Parse payload: {network: "NETWORKID", nodeID: "UUID", permission: "Record", chain: 3}
+                            String revokeJson = new String(ne.d, "UTF-8");
+                            java.util.Map<String, Object> revokeData =
+                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", revokeJson, java.util.Map.class);
+
+                            String networkID = (String) revokeData.get("network");
+                            String nodeID = (String) revokeData.get("nodeID");
+                            String permission = (String) revokeData.get("permission");
+                            Object chainObj = revokeData.get("chain");
+                            Long chainID = chainObj instanceof Integer ? ((Integer) chainObj).longValue() : (Long) chainObj;
+
+                            System.out.println("[REVOKE_PERMISSION] Revoking " + permission + " permission from node " + nodeID +
+                                             " on network " + networkID + " chain " + chainID);
+
+                            // Get the network
+                            CXNetwork network = connectX.getNetwork(networkID);
+                            if (network != null) {
+                                // Remove permission entry
+                                String permKey = permission + "-" + chainID;
+                                java.util.Map<String, us.anvildevelopment.util.tools.permissions.Entry> nodePerms =
+                                    network.networkPermissions.permissionSet.get(nodeID);
+                                if (nodePerms != null) {
+                                    nodePerms.remove(permKey);
+                                    if (nodePerms.isEmpty()) {
+                                        network.networkPermissions.permissionSet.remove(nodeID);
+                                    }
+                                    System.out.println("[REVOKE_PERMISSION] Permission revoked successfully");
+                                } else {
+                                    System.out.println("[REVOKE_PERMISSION] Node had no permissions to revoke");
+                                }
+                            } else {
+                                System.err.println("[REVOKE_PERMISSION] Network not found: " + networkID);
+                            }
+
+                            // This is a state-modifying event that should be recorded to c1 (Admin) chain
+                            // System reads c1 to rebuild permissions during bootstrap/sync
+                            ne.executeOnSync = true;
+
+                        } catch (Exception e) {
+                            System.err.println("[REVOKE_PERMISSION] Error handling event: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
@@ -979,6 +1205,7 @@ public class NodeMesh {
                         NetworkContainer relayContainer = new NetworkContainer();
                         relayContainer.se = "cxJSON1";
                         relayContainer.s = false;
+                        relayContainer.oD = nc.oD; // Preserve original sender
                         // Use signedEventBytes to preserve original NetworkEvent signature
                         OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
                         connectX.queueEvent(relayBundle);
@@ -1011,7 +1238,7 @@ public class NodeMesh {
             // Try to record to blockchain if we have permissions
             // Use our own ID when recording (we're accepting responsibility for this event)
             try {
-                connectX.recordEvent(ne, connectX.getOwnID());
+                connectX.Event(ne, connectX.getOwnID());
             } catch (Exception ignored) {
                 // Permission denied or other error - continue with distribution
             }
@@ -1024,6 +1251,7 @@ public class NodeMesh {
                         relayContainer.se = "cxJSON1";
                         relayContainer.s = false;
                         relayContainer.tP = tP; // Preserve TransmitPref
+                        relayContainer.oD = nc.oD; // Preserve original sender
                         // Use signedEventBytes to preserve original NetworkEvent signature
                         OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
                         connectX.queueEvent(relayBundle);
@@ -1037,6 +1265,7 @@ public class NodeMesh {
 
         // Step 4c: Handle peerBroad mode - global cross-network transmission
         if (tP.peerBroad) {
+            System.out.println("[RELAY DEBUG] peerBroad=true, broadcasting to " + PeerDirectory.hv.size() + " peers");
             // Broadcast to all peers across all networks
             for (Node peer : PeerDirectory.hv.values()) {
                 if (!peer.cxID.equals(connectX.getOwnID()) && !peer.cxID.equals(transmitterID)) {
@@ -1045,6 +1274,7 @@ public class NodeMesh {
                         relayContainer.se = "cxJSON1";
                         relayContainer.s = false;
                         relayContainer.tP = tP; // Preserve TransmitPref
+                        relayContainer.oD = nc.oD; // Preserve original sender (must be set)
                         // Use signedEventBytes to preserve original NetworkEvent signature
                         OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
                         connectX.queueEvent(relayBundle);
@@ -1074,6 +1304,7 @@ public class NodeMesh {
                                 relayContainer.se = "cxJSON1";
                                 relayContainer.s = false;
                                 relayContainer.tP = tP; // Preserve TransmitPref
+                                relayContainer.oD = nc.oD; // Preserve original sender
                                 // Use signedEventBytes to preserve original NetworkEvent signature
                                 OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
                                 connectX.queueEvent(relayBundle);
@@ -1096,6 +1327,7 @@ public class NodeMesh {
                             relayContainer.se = "cxJSON1";
                             relayContainer.s = false;
                             relayContainer.tP = tP; // Preserve TransmitPref
+                            relayContainer.oD = nc.oD; // Preserve original sender
                             // Use signedEventBytes to preserve original NetworkEvent signature
                             OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
                             connectX.queueEvent(relayBundle);
@@ -1116,6 +1348,7 @@ public class NodeMesh {
                             relayContainer.se = "cxJSON1";
                             relayContainer.s = false;
                             relayContainer.tP = tP; // Preserve TransmitPref
+                            relayContainer.oD = nc.oD; // Preserve original sender
                             // Use signedEventBytes to preserve original NetworkEvent signature
                             OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
                             connectX.queueEvent(relayBundle);
@@ -1131,7 +1364,7 @@ public class NodeMesh {
         if (ne.p != null && ne.p.scope != null && ne.p.scope.equalsIgnoreCase("CX")) {
             // CX scope requires authorization from CXNET backendSet or NMI
             if (nc != null && nc.iD != null) {
-                connectX.recordEvent(ne, nc.iD);
+                connectX.Event(ne, nc.iD);
             }
         }
 
@@ -1140,5 +1373,106 @@ public class NodeMesh {
     public boolean connectNetwork(CXNetwork cxnet) {
         //TODO implement network connection
         return false;
+    }
+
+    /**
+     * Initiate blockchain sync from a trusted peer (NMI/Backend)
+     * Compares local and remote chain heights and requests missing blocks
+     */
+    private void initiateSyncFromPeer(ConnectX connectX, CXNetwork network, String networkID,
+                                     java.util.Map<String, Number> remoteChainStatus, String peerID) {
+        try {
+            long remoteC1 = remoteChainStatus.get("c1").longValue();
+            long remoteC2 = remoteChainStatus.get("c2").longValue();
+            long remoteC3 = remoteChainStatus.get("c3").longValue();
+
+            long localC1 = network.c1.current != null ? network.c1.current.block : -1;
+            long localC2 = network.c2.current != null ? network.c2.current.block : -1;
+            long localC3 = network.c3.current != null ? network.c3.current.block : -1;
+
+            System.out.println("[CHAIN_SYNC] Local chain heights:");
+            System.out.println("  c1: " + localC1);
+            System.out.println("  c2: " + localC2);
+            System.out.println("  c3: " + localC3);
+
+            Node remotePeer = PeerDirectory.lookup(peerID, true, true);
+            if (remotePeer == null) {
+                System.err.println("[CHAIN_SYNC] Cannot sync - peer not found: " + peerID);
+                return;
+            }
+
+            // Sync c1 (Admin chain) first - most critical for state
+            if (remoteC1 > localC1) {
+                System.out.println("[CHAIN_SYNC] c1 is behind, requesting " + (remoteC1 - localC1) + " blocks");
+                requestMissingBlocks(connectX, networkID, network.networkDictionary.c1, localC1 + 1, remoteC1, remotePeer);
+            }
+
+            // Sync c2 (Resources chain)
+            if (remoteC2 > localC2) {
+                System.out.println("[CHAIN_SYNC] c2 is behind, requesting " + (remoteC2 - localC2) + " blocks");
+                requestMissingBlocks(connectX, networkID, network.networkDictionary.c2, localC2 + 1, remoteC2, remotePeer);
+            }
+
+            // Sync c3 (Events chain)
+            if (remoteC3 > localC3) {
+                System.out.println("[CHAIN_SYNC] c3 is behind, requesting " + (remoteC3 - localC3) + " blocks");
+                requestMissingBlocks(connectX, networkID, network.networkDictionary.c3, localC3 + 1, remoteC3, remotePeer);
+            }
+
+            if (remoteC1 <= localC1 && remoteC2 <= localC2 && remoteC3 <= localC3) {
+                System.out.println("[CHAIN_SYNC] Local chains are up to date!");
+            }
+        } catch (Exception e) {
+            System.err.println("[CHAIN_SYNC] Error initiating sync: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Request a range of missing blocks from a peer
+     * Sends BLOCK_REQUEST for each block in the range
+     */
+    private void requestMissingBlocks(ConnectX connectX, String networkID, Long chainID,
+                                     long startBlock, long endBlock, Node remotePeer) {
+        try {
+            for (long blockNum = startBlock; blockNum <= endBlock; blockNum++) {
+                // Create BLOCK_REQUEST event
+                java.util.Map<String, Object> request = new java.util.HashMap<>();
+                request.put("network", networkID);
+                request.put("chain", chainID);
+                request.put("block", blockNum);
+
+                String requestJson = ConnectX.serialize("cxJSON1", request);
+
+                NetworkEvent requestEvent = new NetworkEvent();
+                requestEvent.eT = EventType.BLOCK_REQUEST.name();
+                requestEvent.iD = java.util.UUID.randomUUID().toString();
+                requestEvent.d = requestJson.getBytes("UTF-8");
+
+                // Set path to target peer
+                requestEvent.p = new dev.droppinganvil.v3.network.CXPath();
+                requestEvent.p.cxID = remotePeer.cxID;
+                requestEvent.p.network = networkID;
+                requestEvent.p.scope = "CXS"; // Node-to-node
+                // Copy bridge info from peer if available
+                if (remotePeer.addr != null && remotePeer.addr.startsWith("cxHTTP1:")) {
+                    String[] parts = remotePeer.addr.split(":", 2);
+                    requestEvent.p.bridge = parts[0];
+                    requestEvent.p.bridgeArg = parts[1];
+                }
+
+                // Queue request
+                NetworkContainer requestContainer = new NetworkContainer();
+                requestContainer.se = "cxJSON1";
+                requestContainer.s = false;
+                OutputBundle requestBundle = new OutputBundle(requestEvent, remotePeer, null, null, requestContainer);
+                connectX.queueEvent(requestBundle);
+
+                System.out.println("[CHAIN_SYNC] Requested block " + blockNum + " from chain " + chainID);
+            }
+        } catch (Exception e) {
+            System.err.println("[CHAIN_SYNC] Error requesting blocks: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 }

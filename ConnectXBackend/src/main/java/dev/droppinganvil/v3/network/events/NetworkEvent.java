@@ -38,4 +38,13 @@ public class NetworkEvent implements Serializable {
      * Default: false (most events are realtime)
      */
     public boolean executeOnSync = false;
+
+    /**
+     * Record flag - determines if event should be recorded to blockchain when received
+     * TRUE = Event will be recorded to blockchain if sender has Record permission
+     * FALSE = Event is ephemeral and will not be recorded
+     *
+     * Default: false (most events are not recorded)
+     */
+    public boolean r = false;
 }

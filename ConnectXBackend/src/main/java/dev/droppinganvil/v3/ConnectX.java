@@ -516,6 +516,26 @@ public class ConnectX {
             return this;
         }
 
+        /**
+         * Set the auto-record flag
+         * When true, event will be automatically recorded to blockchain if sender has Record permission
+         * @param record True to enable automatic recording (default: false)
+         */
+        public EventBuilder withRecordFlag(boolean record) {
+            this.event.r = record;
+            return this;
+        }
+
+        /**
+         * Set the executeOnSync flag
+         * When true, event will be executed during blockchain sync to rebuild state
+         * @param executeOnSync True for state-modifying events (default: false)
+         */
+        public EventBuilder withExecuteOnSync(boolean executeOnSync) {
+            this.event.executeOnSync = executeOnSync;
+            return this;
+        }
+
         // ========== NetworkContainer Configuration Methods ==========
 
         /**
@@ -894,6 +914,9 @@ public class ConnectX {
 
             // Replay blockchain to restore state (registeredNodes, blockedNodes, etc.)
             replayBlockchain(network);
+
+            // Request chain status from NMI to trigger automatic blockchain sync
+            requestChainStatusFromNMI(network);
         }
 
         // Cache certificates
@@ -1082,19 +1105,19 @@ public class ConnectX {
         network.c1 = new dev.droppinganvil.v3.edge.NetworkRecord(networkID, 1L);
         network.c1.networkID = networkID;
         network.c1.chainID = 1L;
-        network.c1.current = new dev.droppinganvil.v3.edge.NetworkBlock(0L);
+        network.c1.current = new dev.droppinganvil.v3.edge.NetworkBlock(0L, 1L);
         network.c1.blockMap.put(0L, network.c1.current);
 
         network.c2 = new dev.droppinganvil.v3.edge.NetworkRecord(networkID, 2L);
         network.c2.networkID = networkID;
         network.c2.chainID = 2L;
-        network.c2.current = new dev.droppinganvil.v3.edge.NetworkBlock(0L);
+        network.c2.current = new dev.droppinganvil.v3.edge.NetworkBlock(0L, 2L);
         network.c2.blockMap.put(0L, network.c2.current);
 
         network.c3 = new dev.droppinganvil.v3.edge.NetworkRecord(networkID, 3L);
         network.c3.networkID = networkID;
         network.c3.chainID = 3L;
-        network.c3.current = new dev.droppinganvil.v3.edge.NetworkBlock(0L);
+        network.c3.current = new dev.droppinganvil.v3.edge.NetworkBlock(0L, 3L);
         network.c3.blockMap.put(0L, network.c3.current);
 
         // Setup network permissions
@@ -1290,6 +1313,9 @@ public class ConnectX {
 
         // Replay blockchain to restore state after loading from disk
         replayBlockchain(network);
+
+        // Request chain status from NMI to trigger automatic blockchain sync
+        requestChainStatusFromNMI(network);
 
         fis.close();
         baos.close();
@@ -1508,7 +1534,7 @@ public class ConnectX {
         }
     }
 
-    public boolean recordEvent(NetworkEvent ne, String senderID) {
+    public boolean Event(NetworkEvent ne, String senderID) {
         if (ne == null || ne.p == null) {
             return false;
         }
@@ -1574,7 +1600,7 @@ public class ConnectX {
             dev.droppinganvil.v3.edge.NetworkBlock currentBlock = targetChain.current;
             if (currentBlock == null) {
                 // Create genesis block if none exists
-                currentBlock = new dev.droppinganvil.v3.edge.NetworkBlock(0L);
+                currentBlock = new dev.droppinganvil.v3.edge.NetworkBlock(0L, chainID);
                 targetChain.current = currentBlock;
                 targetChain.blockMap.put(0L, currentBlock);
             }
@@ -1592,7 +1618,7 @@ public class ConnectX {
 
                 // Create new block
                 Long newBlockID = currentBlock.block + 1;
-                dev.droppinganvil.v3.edge.NetworkBlock newBlock = new dev.droppinganvil.v3.edge.NetworkBlock(newBlockID);
+                dev.droppinganvil.v3.edge.NetworkBlock newBlock = new dev.droppinganvil.v3.edge.NetworkBlock(newBlockID, chainID);
 
                 // Add to block map
                 targetChain.blockMap.put(newBlockID, newBlock);
@@ -1860,6 +1886,73 @@ public class ConnectX {
         }
 
         return eventsReplayed;
+    }
+
+    /**
+     * Automatically request chain status from NMI to trigger blockchain sync
+     * Called after loading a network to ensure fresh peers sync blockchain data
+     */
+    private void requestChainStatusFromNMI(CXNetwork network) {
+        if (network == null || network.configuration == null) {
+            return;
+        }
+
+        String networkID = network.configuration.netID;
+
+        try {
+            // Check if network has NMI/Backend configured
+            if (network.configuration.backendSet == null || network.configuration.backendSet.isEmpty()) {
+                System.out.println("[Auto-Sync] No NMI configured for network " + networkID + ", skipping auto-sync");
+                return;
+            }
+
+            // Get first NMI from backend set
+            String nmiID = network.configuration.backendSet.iterator().next();
+            Node nmiNode = PeerDirectory.lookup(nmiID, true, true);
+
+            if (nmiNode == null) {
+                System.out.println("[Auto-Sync] NMI " + nmiID + " not found in peer directory, cannot request sync");
+                return;
+            }
+
+            System.out.println("[Auto-Sync] Requesting chain status from NMI " + nmiID.substring(0, 8) + "...");
+
+            // Create CHAIN_STATUS_REQUEST
+            java.util.Map<String, Object> request = new java.util.HashMap<>();
+            request.put("network", networkID);
+            String requestJson = serialize("cxJSON1", request);
+
+            dev.droppinganvil.v3.network.events.NetworkEvent statusRequest =
+                new dev.droppinganvil.v3.network.events.NetworkEvent();
+            statusRequest.eT = dev.droppinganvil.v3.network.events.EventType.CHAIN_STATUS_REQUEST.name();
+            statusRequest.iD = java.util.UUID.randomUUID().toString();
+            statusRequest.d = requestJson.getBytes("UTF-8");
+
+            // Set path to NMI
+            dev.droppinganvil.v3.network.CXPath path = new dev.droppinganvil.v3.network.CXPath();
+            path.cxID = nmiID;
+            path.network = networkID;
+            path.scope = "CXS"; // Node-to-node scope
+            statusRequest.p = path;
+
+            // Create container
+            // NOTE: container.iD is NOT set here - OutConnectionController will automatically
+            // set it to self.cxID before signing, ensuring the signature matches the sender
+            dev.droppinganvil.v3.network.events.NetworkContainer container =
+                new dev.droppinganvil.v3.network.events.NetworkContainer();
+            container.se = "cxJSON1";
+            container.s = false;
+
+            // Queue request
+            OutputBundle bundle = new OutputBundle(statusRequest, nmiNode, null, null, container);
+            queueEvent(bundle);
+
+            System.out.println("[Auto-Sync] Chain status request queued for NMI");
+
+        } catch (Exception e) {
+            System.err.println("[Auto-Sync] Error requesting chain status: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     /**

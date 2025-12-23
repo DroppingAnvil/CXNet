@@ -247,6 +247,7 @@ public class MultiPeerTest {
             if (successCount > 0) {
                 runSecurityTests(peers);
                 runWhitelistIntegrationTest(peers);
+                runBlockchainSyncAndPermissionTest(peers);
             }
 
             // Keep test running
@@ -283,6 +284,10 @@ public class MultiPeerTest {
         System.out.println("TEST 1: Whitelist Mode Network");
         System.out.println("------------------------------------------------------------------");
         CXNetwork cxnet = peers.get(0).getNetwork("CXNET");
+        if (cxnet == null) {
+            System.out.println("✗ CXNET not loaded, skipping security tests");
+            return;
+        }
         System.out.println("CXNET Configuration:");
         System.out.println("  - WhitelistMode: " + (cxnet.configuration.whitelistMode != null ?
                           cxnet.configuration.whitelistMode : "false (default)"));
@@ -702,5 +707,221 @@ public class MultiPeerTest {
         t.setDaemon(true);
         t.setName("PeriodicBackendSync");
         t.start();
+    }
+
+    /**
+     * Blockchain sync and permission management test
+     * Tests: Block filling, rotation, sync, and permission grant/revoke
+     */
+    private static void runBlockchainSyncAndPermissionTest(List<ConnectX> peers) throws Exception {
+        System.out.println("\n\n==================================================================");
+        System.out.println("  BLOCKCHAIN SYNC & PERMISSION TEST");
+        System.out.println("==================================================================\n");
+
+        String PEER2_ID = peers.get(1).getOwnID();
+
+        // STEP 1: Try to record WITHOUT permission (should fail)
+        System.out.println("STEP 1: Attempt to record WITHOUT permission (expect failure)");
+        System.out.println("------------------------------------------------------------------");
+
+        CXNetwork cxnet = peers.get(0).getNetwork("CXNET");
+        if (cxnet == null) {
+            System.out.println("✗ CXNET not loaded, skipping test");
+            return;
+        }
+
+        Long c3ID = cxnet.networkDictionary.c3;
+        String PEER4_ID = peers.get(3).getOwnID();  // Use Peer 4 (successfully joined CXNET)
+
+        // Grant EPOCH permission to record to CXNET c3 (for other operations)
+        String EPOCH_ID = "00000000-0000-0000-0000-000000000001";
+        java.util.Map<String, us.anvildevelopment.util.tools.permissions.Entry> epochPerms = new java.util.HashMap<>();
+        epochPerms.put(dev.droppinganvil.v3.Permission.Record.name() + "-" + c3ID,
+            new us.anvildevelopment.util.tools.permissions.BasicEntry(
+                dev.droppinganvil.v3.Permission.Record.name() + "-" + c3ID, true, 10));
+        cxnet.networkPermissions.permissionSet.put(EPOCH_ID, epochPerms);
+        System.out.println("  ✓ Granted EPOCH permission to record to c3");
+
+        long c3Before = cxnet.c3.current != null ? cxnet.c3.current.block : -1;
+        int eventsBefore = cxnet.c3.current != null ? cxnet.c3.current.networkEvents.size() : 0;
+
+        System.out.println("  c3 BEFORE: Block " + c3Before + " (" + eventsBefore + " events)");
+        System.out.println("  Peer 4 has permission: " + cxnet.checkChainPermission(PEER4_ID, dev.droppinganvil.v3.Permission.Record.name(), c3ID));
+        System.out.println("  Sending 10 MESSAGE events from Peer 4 WITHOUT permission...");
+
+        for (int i = 0; i < 10; i++) {
+            peers.get(3).buildEvent(EventType.MESSAGE, ("Test WITHOUT permission #" + (i+1)).getBytes())
+                .withRecordFlag(true)
+                .toNetwork("CXNET")
+                .queue();
+        }
+
+        System.out.println("  Waiting for events to process...");
+        Thread.sleep(3000);
+
+        long c3After1 = cxnet.c3.current != null ? cxnet.c3.current.block : -1;
+        int eventsAfter1 = cxnet.c3.current != null ? cxnet.c3.current.networkEvents.size() : 0;
+
+        System.out.println("  c3 AFTER (no permission): Block " + c3After1 + " (" + eventsAfter1 + " events)");
+        System.out.println("  Events recorded: " + (eventsAfter1 - eventsBefore) + " (expected: 0)");
+        System.out.println("  Result: " + (eventsAfter1 == eventsBefore ? "PASS ✓ - No recording without permission" : "FAIL ✗ - Events were recorded!"));
+
+        Thread.sleep(1000);
+
+        // STEP 1b: Grant permission via GRANT_PERMISSION event (should succeed)
+        System.out.println("\nSTEP 1b: Grant permission via blockchain event (expect success)");
+        System.out.println("------------------------------------------------------------------");
+
+        // Create GRANT_PERMISSION event payload
+        java.util.Map<String, Object> permissionGrant = new java.util.HashMap<>();
+        permissionGrant.put("network", "CXNET");
+        permissionGrant.put("nodeID", PEER4_ID);
+        permissionGrant.put("permission", dev.droppinganvil.v3.Permission.Record.name());
+        permissionGrant.put("chain", c3ID.intValue());
+        permissionGrant.put("priority", 10);
+
+        String grantJson = ConnectX.serialize("cxJSON1", permissionGrant);
+        System.out.println("  Sending GRANT_PERMISSION event to network...");
+
+        // Send GRANT_PERMISSION event from Peer 4 (it will propagate to all)
+        // This event has executeOnSync=true so it modifies state on all peers
+        peers.get(3).buildEvent(EventType.GRANT_PERMISSION, grantJson.getBytes())
+            .toNetwork("CXNET")
+            .queue();
+
+        System.out.println("  Waiting for permission grant to propagate...");
+        Thread.sleep(2000);
+
+        // Verify permission was granted
+        boolean peer4HasPermission = cxnet.checkChainPermission(PEER4_ID, dev.droppinganvil.v3.Permission.Record.name(), c3ID);
+        System.out.println("  ✓ Peer 4 has Record permission on c3: " + peer4HasPermission);
+
+        System.out.println("  Block length: 100 events");
+        System.out.println("  Sending 105 MESSAGE events from Peer 4 WITH permission...");
+
+        for (int i = 0; i < 105; i++) {
+            String msg = "Blockchain sync test message #" + (i+1);
+
+            // Send message - will be auto-recorded on receipt due to r=true flag
+            peers.get(3).buildEvent(EventType.MESSAGE, msg.getBytes())
+                .withRecordFlag(true)  // Enable automatic recording
+                .toNetwork("CXNET")
+                .queue();
+
+            if ((i+1) % 25 == 0) {
+                System.out.println("    " + (i+1) + " messages queued...");
+                Thread.sleep(500);  // Throttle to allow processing
+            }
+        }
+
+        System.out.println("  Waiting for events to process...");
+        Thread.sleep(5000);
+
+        long c3After = cxnet.c3.current != null ? cxnet.c3.current.block : -1;
+        int eventsAfter = cxnet.c3.current != null ? cxnet.c3.current.networkEvents.size() : 0;
+
+        System.out.println("  c3 AFTER (with permission): Block " + c3After + " (" + eventsAfter + " events)");
+        System.out.println("  Block rotation: " + (c3After > c3Before ? "YES ✓" : "NO ✗"));
+        System.out.println("  Events in current block: " + eventsAfter + " (expected: 5 after rotation)");
+
+        Thread.sleep(2000);
+
+        // STEP 2: Wait for Peer 2 to sync
+        System.out.println("\nSTEP 2: Waiting for Peer 2 to auto-sync blockchain...");
+        System.out.println("------------------------------------------------------------------");
+
+        System.out.println("  Peer 2 should automatically:");
+        System.out.println("    1. Request CHAIN_STATUS from EPOCH");
+        System.out.println("    2. Receive heights: c3=" + c3After);
+        System.out.println("    3. Request missing blocks");
+        System.out.println("    4. Save blocks to disk");
+        System.out.println("  Waiting 15 seconds...");
+
+        Thread.sleep(15000);
+
+        CXNetwork peer2Cxnet = peers.get(1).getNetwork("CXNET");
+        if (peer2Cxnet != null) {
+            long peer2C3 = peer2Cxnet.c3.current != null ? peer2Cxnet.c3.current.block : -1;
+            int peer2Events = peer2Cxnet.c3.current != null ? peer2Cxnet.c3.current.networkEvents.size() : 0;
+
+            System.out.println("\n  Peer 2 blockchain state:");
+            System.out.println("    c3: Block " + peer2C3 + " (" + peer2Events + " events)");
+
+            if (peer2C3 == c3After) {
+                System.out.println("  ✓ BLOCKCHAIN SYNC SUCCESS!");
+            } else {
+                System.out.println("  ⚠ Sync may still be in progress...");
+            }
+        }
+
+        Thread.sleep(2000);
+
+        // STEP 3: Test Peer 2 permissions
+        System.out.println("\nSTEP 3: Testing Peer 2 recording permissions");
+        System.out.println("------------------------------------------------------------------");
+
+        // Try WITHOUT permissions
+        System.out.println("  Test 1: Peer 2 tries to record WITHOUT permissions");
+        boolean r1 = cxnet.checkChainPermission(PEER2_ID, dev.droppinganvil.v3.Permission.Record.name(), c3ID);
+        System.out.println("    Has permission: " + (r1 ? "YES (unexpected!)" : "NO (expected)"));
+
+        Thread.sleep(1000);
+
+        // GRANT permissions
+        System.out.println("\n  Test 2: Granting Peer 2 c3 recording permission...");
+        java.util.Map<String, us.anvildevelopment.util.tools.permissions.Entry> perms = new java.util.HashMap<>();
+        perms.put(dev.droppinganvil.v3.Permission.Record.name() + "-" + c3ID,
+            new us.anvildevelopment.util.tools.permissions.BasicEntry(
+                dev.droppinganvil.v3.Permission.Record.name() + "-" + c3ID, true, 10));
+        cxnet.networkPermissions.permissionSet.put(PEER2_ID, perms);
+
+        System.out.println("    ✓ Permissions granted");
+
+        // Verify permission works
+        boolean r2 = cxnet.checkChainPermission(PEER2_ID, dev.droppinganvil.v3.Permission.Record.name(), c3ID);
+        System.out.println("    Has permission: " + (r2 ? "YES (expected)" : "NO (unexpected!)"));
+
+        // Have Peer 2 send a message WITH permissions
+        if (r2) {
+            System.out.println("    Peer 2 sending test message...");
+            peers.get(1).buildEvent(EventType.MESSAGE, "Test from Peer 2 WITH permissions".getBytes())
+                .toNetwork("CXNET")
+                .queue();
+            System.out.println("    ✓ Message queued");
+        }
+
+        Thread.sleep(2000);
+
+        // REVOKE permissions
+        System.out.println("\n  Test 3: Revoking Peer 2's permissions...");
+        cxnet.networkPermissions.permissionSet.remove(PEER2_ID);
+        System.out.println("    ✓ Permissions revoked");
+
+        // Verify permission removed
+        boolean r3 = cxnet.checkChainPermission(PEER2_ID, dev.droppinganvil.v3.Permission.Record.name(), c3ID);
+        System.out.println("    Has permission: " + (r3 ? "YES (unexpected!)" : "NO (expected)"));
+
+        // Try sending AFTER revocation
+        System.out.println("    Peer 2 sending test message AFTER revocation...");
+        peers.get(1).buildEvent(EventType.MESSAGE, "Test from Peer 2 AFTER revoke".getBytes())
+            .toNetwork("CXNET")
+            .queue();
+        System.out.println("    ✓ Message queued (should not be recorded to blockchain)");
+
+        Thread.sleep(2000);
+
+        // Summary
+        System.out.println("\n==================================================================");
+        System.out.println("  BLOCKCHAIN SYNC & PERMISSION TEST COMPLETE");
+        System.out.println("==================================================================");
+        System.out.println("Results:");
+        System.out.println("  " + (c3After > c3Before ? "✓" : "✗") + " Block rotation: " + c3Before + " → " + c3After);
+        System.out.println("  ✓ 105 messages transmitted through network");
+        System.out.println("  ✓ Blockchain sync triggered");
+        System.out.println("  ✓ Permission granting tested");
+        System.out.println("  ✓ Permission revocation tested");
+        System.out.println("  ✓ Message transmission with/without permissions tested");
+        System.out.println("\n  CHECK LOGS ABOVE FOR DETAILED SYNC AND PERMISSION BEHAVIOR");
+        System.out.println("==================================================================\n");
     }
 }

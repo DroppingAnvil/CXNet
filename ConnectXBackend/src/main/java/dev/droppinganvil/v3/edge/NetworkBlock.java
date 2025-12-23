@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class NetworkBlock implements Serializable {
     public Long block;
+    public Long chain; // Chain ID (c1, c2, or c3) - needed for blockchain sync
     public Map<Integer, NetworkEvent> networkEvents;
 
     // Default constructor for Jackson deserialization
@@ -21,6 +22,12 @@ public class NetworkBlock implements Serializable {
 
     public NetworkBlock(Long block) {
         this.block = block;
+        networkEvents = new ConcurrentHashMap<>();
+    }
+
+    public NetworkBlock(Long block, Long chain) {
+        this.block = block;
+        this.chain = chain;
         networkEvents = new ConcurrentHashMap<>();
     }
 }

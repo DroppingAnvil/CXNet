@@ -123,5 +123,31 @@ public enum EventType {
      * - If not found and whitelist mode enabled: reject connection
      */
     REGISTER_NODE,
+    /**
+     * Grant permission to a node for a specific chain
+     * Payload format: JSON {"network": "NETWORKID", "nodeID": "UUID", "permission": "Record", "chain": 3, "priority": 10}
+     * Recorded to c1 (Admin) chain as the source of truth
+     * System reads c1 during blockchain replay to rebuild permission state
+     * Requires GrantPermission permission (NMI-only or designated admins)
+     * Sets executeOnSync = true (state-modifying event)
+     *
+     * When received (live or during sync):
+     * - Adds permission entry to network.networkPermissions.permissionSet
+     * - Permission key format: "PermissionName-ChainID"
+     * - Persists across restarts via blockchain replay
+     */
+    GRANT_PERMISSION,
+    /**
+     * Revoke permission from a node for a specific chain
+     * Payload format: JSON {"network": "NETWORKID", "nodeID": "UUID", "permission": "Record", "chain": 3}
+     * Recorded to c1 (Admin) chain as the source of truth
+     * Requires RevokePermission permission (NMI-only or designated admins)
+     * Sets executeOnSync = true (state-modifying event)
+     *
+     * When received (live or during sync):
+     * - Removes permission entry from network.networkPermissions.permissionSet
+     * - Persists across restarts via blockchain replay
+     */
+    REVOKE_PERMISSION,
     ;
 }

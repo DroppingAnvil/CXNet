@@ -26,7 +26,10 @@ public class OutConnectionController {
 
         cryptEvent = out.prev;
         if (cryptEvent == null) {
-            // New message (not a relay): ALWAYS generate unique event ID for security
+            // New message (not a relay): Set original sender ID and generate event ID
+            nc.oD = connectXAPI.getOwnID();  // We are the original sender
+
+            // ALWAYS generate unique event ID for security
             // Event IDs are MANDATORY for duplicate detection and replay prevention
             if (out.ne.iD == null || out.ne.iD.isEmpty()) {
                 out.ne.iD = java.util.UUID.randomUUID().toString();
@@ -43,6 +46,7 @@ public class OutConnectionController {
         }
         // If out.prev != null, we're relaying - use the preserved signed event bytes
         // This maintains the original sender's signature on the NetworkEvent
+        // Note: oD should already be set in the relay container, but if not set it from the event
         nc.e = cryptEvent;
 
         // Initialize TransmitPref if not set (defaults to peerBroad = true)

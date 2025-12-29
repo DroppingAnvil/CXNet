@@ -47,4 +47,13 @@ public class NetworkContainer implements Serializable {
     public Double v;
     public String tID;
 
+    /**
+     * Time To Live (TTL) - Remaining relay hops for this event
+     * Decremented by 1 on each relay. When reaches 0, event is dropped (not relayed).
+     * Prevents infinite loops and controls broadcast propagation scope.
+     *
+     * Value comes from network's Configuration.defaultTTL when event is created.
+     */
+    public Integer ttl;
+
 }

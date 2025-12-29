@@ -126,11 +126,16 @@ public class HTTPBridgeTest {
                 // Create new CXNET network (first run)
                 System.out.println("  No existing blockchain found - creating new CXNET");
                 cxnet = server.createNetwork(NETWORK_NAME);
+
+                // Set sync interval to 30 seconds for testing (BEFORE creating seed)
+                cxnet.configuration.syncIntervalSeconds = 30;
+
                 System.out.println("  ✓ CXNET created");
                 System.out.println("    Chain c1 (Admin): " + cxnet.networkDictionary.c1);
                 System.out.println("    Chain c2 (Resources): " + cxnet.networkDictionary.c2);
                 System.out.println("    Chain c3 (Events): " + cxnet.networkDictionary.c3);
                 System.out.println("    NMI: EPOCH");
+                System.out.println("    Sync interval: 30 seconds (testing mode)");
 
                 // Verify blockchain was persisted
                 ConnectX.BlockchainStats stats = server.getBlockchainStats(cxnet);
@@ -205,10 +210,12 @@ public class HTTPBridgeTest {
             // Enable whitelist mode
             testnet.configuration.whitelistMode = true;
             testnet.configuration.publicSeed = false;
+            testnet.configuration.syncIntervalSeconds = 30; // Testing mode
 
             System.out.println("  ✓ TESTNET created with whitelist mode");
             System.out.println("    Whitelist mode: ENABLED");
             System.out.println("    Backend/NMI: EPOCH");
+            System.out.println("    Sync interval: 30 seconds (testing mode)");
 
             // Create TESTNET seed
             dev.droppinganvil.v3.network.Seed testnetSeed = new dev.droppinganvil.v3.network.Seed();

@@ -101,9 +101,10 @@ public class NodeMesh {
         ByteArrayInputStream bais;
         String networkEvent = "";
 
-        // Store socket address for error handling (before socket might be closed)
+        // Store socket address for error handling and LAN discovery (before socket might be closed)
         String socketAddress = (socket != null && socket.getInetAddress() != null)
             ? socket.getInetAddress().getHostAddress() : null;
+        int socketPort = (socket != null) ? socket.getPort() : 0;
 
         Object o = connectX.encryptionProvider.decrypt(is, baos);
         String networkContainer = baos.toString("UTF-8");
@@ -138,23 +139,39 @@ public class NodeMesh {
                 // to avoid multiple signature operations (perhaps return signature data from strip).
                 // For production: Monitor if other event types need similar handling.
 
-                // SPECIAL HANDLING FOR NewNode EVENTS
+                // SPECIAL HANDLING FOR NewNode AND CXHELLO EVENTS
                 // Strip signature first to check event type
                 ByteArrayOutputStream stripBaos = new ByteArrayOutputStream();
                 connectX.encryptionProvider.stripSignature(bais, stripBaos);
                 String strippedEventJson = stripBaos.toString("UTF-8");
+                stripBaos.close(); // Close the strip stream
                 NetworkEvent parsedEvent = (NetworkEvent) ConnectX.deserialize(nc.se, strippedEventJson, NetworkEvent.class);
 
-                // Check if this is a NewNode event
-                if (parsedEvent.eT != null && parsedEvent.eT.equals("NewNode")) {
-                    System.out.println("[NodeMesh] Processing NewNode event from " + nc.iD);
+                // Check if this is a NewNode or CXHELLO event (both need public key import before verification)
+                if (parsedEvent.eT != null && (parsedEvent.eT.equals("NewNode") || parsedEvent.eT.equals("CXHELLO"))) {
+                    System.out.println("[NodeMesh] Processing " + parsedEvent.eT + " event from " + nc.iD);
 
                     // Import node BEFORE verification (we need the public key)
                     Node importedNode = null;
                     if (parsedEvent.d != null && parsedEvent.d.length > 0) {
                         try {
-                            String nodeJson = new String(parsedEvent.d, "UTF-8");
-                            Node newNode = (Node) ConnectX.deserialize("cxJSON1", nodeJson, Node.class);
+                            String payloadJson = new String(parsedEvent.d, "UTF-8");
+                            Node newNode;
+
+                            // Extract Node from payload based on event type
+                            if (parsedEvent.eT.equals("CXHELLO")) {
+                                // CXHELLO payload: {"peerID": "...", "port": 12345, "node": {...}}
+                                java.util.Map<String, Object> helloData =
+                                    (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", payloadJson, java.util.Map.class);
+
+                                // Extract Node object from payload
+                                Object nodeObj = helloData.get("node");
+                                String nodeJson = ConnectX.serialize("cxJSON1", nodeObj);
+                                newNode = (Node) ConnectX.deserialize("cxJSON1", nodeJson, Node.class);
+                            } else {
+                                // NewNode payload is directly the Node object
+                                newNode = (Node) ConnectX.deserialize("cxJSON1", payloadJson, Node.class);
+                            }
 
                             // SECURITY: Validate node data
                             if (newNode.cxID == null || newNode.publicKey == null) {
@@ -190,13 +207,16 @@ public class NodeMesh {
                             verifyBaos.close();
 
                         } catch (DecryptionFailureException e) {
+                            System.out.println("Proof that this in an architectural problem you created with bad handling of the CXHELLO pattern @Claude");
                             throw e;
                         } catch (Exception e) {
                             System.err.println("[NodeMesh] Failed to process NewNode: " + e.getMessage());
                             if (importedNode != null) {
                                 PeerDirectory.removeNode(importedNode.cxID);
                             }
+                            System.out.println("Proof that this in an architectural problem you created with bad handling of the CXHELLO pattern @Claude");
                             throw new DecryptionFailureException();
+
                         }
                     } else {
                         System.err.println("[NodeMesh] NewNode event has no data");
@@ -206,6 +226,7 @@ public class NodeMesh {
                     // Use the already parsed event
                     ne = parsedEvent;
                     networkEvent = strippedEventJson;
+                    System.out.print("Reached event data, data is never used and will be cleaned up by GC shortly");
 
                 } else {
                     // Standard event: Verify signature (we already have public key)
@@ -248,9 +269,9 @@ public class NodeMesh {
             e.printStackTrace();
             if (!NodeConfig.devMode && socketAddress != null) {
                 if (NodeMesh.timeout.containsKey(socketAddress)) {
-                    NodeMesh.blacklist.put(socketAddress, "Protocol not respected");
+                    //NodeMesh.blacklist.put(socketAddress, "Protocol not respected");
                 } else {
-                    NodeMesh.timeout.put(socketAddress, 1000);
+                    //NodeMesh.timeout.put(socketAddress, 1000);
                 }
             }
             if (socket != null) socket.close();
@@ -321,6 +342,54 @@ public class NodeMesh {
             }
         }
 
+        // Record source address for peer address mapping (passive discovery)
+        // This enables multi-path routing (bridge + direct + LAN)
+        if (nc.iD != null && socketAddress != null && socketPort > 0) {
+            String peerAddress = socketAddress + ":" + socketPort;
+            connectX.dataContainer.recordLocalPeer(nc.iD, peerAddress); // Fallback address
+        }
+
+        // For CXHELLO events, also record the LISTENING port from payload with priority
+        try {
+            EventType et = EventType.valueOf(ne.eT);
+            if ((et == EventType.CXHELLO || et == EventType.CXHELLO_RESPONSE) && ne.d != null) {
+                String helloJson = new String(ne.d, "UTF-8");
+                java.util.Map<String, Object> helloData =
+                    (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", helloJson, java.util.Map.class);
+
+                String requestPeerID = (String) helloData.get("peerID");
+                Object portObj = helloData.get("port");
+                int requestPort = portObj instanceof Integer ? (Integer) portObj : 0;
+
+                // Determine listening address: use port from payload, fallback to node addr, fallback to socket
+                String listeningAddress = null;
+                if (socketAddress != null && requestPort > 0) {
+                    // Use socket IP + port from payload (preferred)
+                    listeningAddress = socketAddress + ":" + requestPort;
+                } else if (helloData.containsKey("node")) {
+                    // Fallback: check if node has addr field
+                    Object nodeObj = helloData.get("node");
+                    String nodeJson = ConnectX.serialize("cxJSON1", nodeObj);
+                    Node node = (Node) ConnectX.deserialize("cxJSON1", nodeJson, Node.class);
+                    if (node.addr != null && !node.addr.isEmpty()) {
+                        listeningAddress = node.addr;
+                    }
+                }
+                // Final fallback: use socket remote address + port
+                if (listeningAddress == null && socketAddress != null && socketPort > 0) {
+                    listeningAddress = socketAddress + ":" + socketPort;
+                }
+
+                if (listeningAddress != null && requestPeerID != null) {
+                    connectX.dataContainer.recordLocalPeer(requestPeerID, listeningAddress, true); // Priority
+                    System.out.println("[processNetworkInput] " + et.name() + ": Recorded listening address " + listeningAddress + " for " + requestPeerID.substring(0, 8));
+                }
+            }
+        } catch (Exception e) {
+            // Ignore errors in CXHELLO/CXHELLO_RESPONSE parsing - event will still be processed normally
+            e.printStackTrace();
+        }
+
         synchronized (connectX.eventQueue) {
             connectX.eventQueue.add(new InputBundle(ne, nc));
         }
@@ -330,12 +399,16 @@ public class NodeMesh {
         synchronized (connectX.eventQueue) {
             InputBundle ib = connectX.eventQueue.poll();
             if (ib == null) return; // Queue is empty
+            System.out.print(ib.nc);
+            System.out.print(ib.ne);
+            System.out.print(ib.signedEventBytes);
             EventType et = null;
             try {
                 et = EventType.valueOf(ib.ne.eT);
             } catch (Exception ignored) {}
             if (et == null & !ConnectX.sendPluginEvent(ib.ne, ib.ne.eT)) {
                 Analytics.addData(AnalyticData.Tear, "Unsupported event - "+ib.ne.eT);
+                System.out.print("UNABLE TO PROCESS UNKNOWN EVENT");
                 if (NodeConfig.supportUnavailableServices) {
                     // Record unsupported events using the transmitter's ID from NetworkContainer
                     if (ib.nc != null && ib.nc.iD != null) {
@@ -362,6 +435,69 @@ public class NodeMesh {
                             System.out.println("[NodeMesh] Imported NewNode: " + node.cxID);
                             System.out.println("[NodeMesh] NewNode signature VERIFIED for " + node.cxID);
                             break;
+
+                        case CXHELLO:
+                            // CXHELLO sends full Node object (like NewNode) - already imported in processNetworkInput
+                            // Just send response back with our Node data
+                            System.out.println("[" + connectX.getOwnID() + "] CXHELLO request received from " + ib.nc.iD);
+                            Node requesterNode = PeerDirectory.lookup(ib.nc.iD, true, true);
+                            if (requesterNode != null) {
+                                System.out.println("[CXHELLO] Peer discovered from " + ib.nc.iD.substring(0, 8));
+
+                                // Send CXHELLO_RESPONSE with our peerID, port, and Node data
+                                java.util.Map<String, Object> responsePayload = new java.util.HashMap<>();
+                                responsePayload.put("peerID", connectX.getOwnID());
+                                int listeningPort = (in.serverSocket != null) ? in.serverSocket.getLocalPort() : 0;
+                                responsePayload.put("port", listeningPort);
+                                responsePayload.put("node", connectX.getSelf());
+
+                                String responsePayloadJson = ConnectX.serialize("cxJSON1", responsePayload);
+
+                                NetworkEvent responseEvent = new NetworkEvent();
+                                responseEvent.eT = EventType.CXHELLO_RESPONSE.name();
+                                responseEvent.iD = java.util.UUID.randomUUID().toString();
+                                responseEvent.d = responsePayloadJson.getBytes("UTF-8");
+
+                                // Set path to requester
+                                responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
+                                responseEvent.p.cxID = ib.nc.iD;
+                                responseEvent.p.scope = "CXS"; // Node-to-node
+
+                                NetworkContainer responseContainer = new NetworkContainer();
+                                responseContainer.se = "cxJSON1";
+                                responseContainer.s = false;
+
+                                // Queue response
+                                Node responderNode = requesterNode; // Send back to requester
+                                OutputBundle responseBundle = new OutputBundle(responseEvent, responderNode, null, null, responseContainer);
+                                connectX.queueEvent(responseBundle);
+
+                                System.out.println("[CXHELLO] Queued CXHELLO_RESPONSE to " + ib.nc.iD.substring(0, 8));
+                            }
+                            return; // Don't continue to fireEvent
+
+                        case CXHELLO_RESPONSE:
+                            // CXHELLO_RESPONSE payload: {"peerID": "...", "port": 12345, "node": {...}}
+                            System.out.println("[" + connectX.getOwnID() + "] CXHELLO_RESPONSE received from " + ib.nc.iD);
+                            String responsePayloadJson = new String(ib.ne.d, "UTF-8");
+                            java.util.Map<String, Object> responseData =
+                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", responsePayloadJson, java.util.Map.class);
+
+                            // Extract Node from response payload
+                            Object nodeObj = responseData.get("node");
+                            String respNodeJson = ConnectX.serialize("cxJSON1", nodeObj);
+                            Node responseNode = (Node) ConnectX.deserialize("cxJSON1", respNodeJson, Node.class);
+
+                            // Local address already recorded in processNetworkInput
+                            Node existingNode = PeerDirectory.lookup(responseNode.cxID, true, true, connectX.cxRoot, connectX);
+                            if (existingNode != null) {
+                                connectX.encryptionProvider.cacheCert(existingNode.cxID, true, false);
+                                System.out.println("[CXHELLO_RESPONSE] Updated existing node: " + existingNode.cxID.substring(0, 8));
+                                return;
+                            }
+                            PeerDirectory.addNode(responseNode);
+                            System.out.println("[CXHELLO_RESPONSE] Imported new node: " + responseNode.cxID.substring(0, 8));
+                            return; // Don't continue to fireEvent
                     }
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -485,66 +621,96 @@ public class NodeMesh {
                     case SEED_REQUEST:
                         System.out.println("[" + connectX.getOwnID() + "] Seed request received from " + nc.iD);
                         try {
-                            // Look up current official seed ID from network configuration
-                            CXNetwork cxnet = connectX.getNetwork("CXNET");
-                            if (cxnet != null && cxnet.configuration != null && cxnet.configuration.currentSeedID != null) {
-                                // Load versioned seed from seeds/ directory
-                                java.io.File seedsDir = new java.io.File(connectX.cxRoot, "seeds");
-                                java.io.File seedFile = new java.io.File(seedsDir, cxnet.configuration.currentSeedID + ".cxn");
-
-                                if (seedFile.exists()) {
-                                    // Load static seed for network configuration
-                                    dev.droppinganvil.v3.network.Seed staticSeed = dev.droppinganvil.v3.network.Seed.load(seedFile);
-
-                                    // Create dynamic seed from current PeerDirectory.hv
-                                    dev.droppinganvil.v3.network.Seed seed = dev.droppinganvil.v3.network.Seed.fromCurrentPeers();
-                                    seed.seedID = java.util.UUID.randomUUID().toString();
-                                    seed.timestamp = System.currentTimeMillis();
-                                    seed.networkID = staticSeed.networkID;
-                                    seed.networks = staticSeed.networks;
-
-                                    System.out.println("[SEED] Generated dynamic seed with " + seed.hvPeers.size() + " HV peers");
-
-                                    // Create response event with Seed as payload
-                                    NetworkEvent responseEvent = new NetworkEvent();
-                                    responseEvent.eT = EventType.SEED_RESPONSE.name();
-                                    responseEvent.iD = java.util.UUID.randomUUID().toString();
-
-                                    // Serialize Seed to JSON and include as data
-                                    String seedJson = ConnectX.serialize("cxJSON1", seed);
-                                    responseEvent.d = seedJson.getBytes("UTF-8");
-
-                                    // Set path to send back to requester
-                                    responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
-                                    responseEvent.p.cxID = nc.iD; // Send to requester
-                                    if (ne.p != null) {
-                                        responseEvent.p.network = ne.p.network;
-                                        responseEvent.p.scope = ne.p.scope;
-                                        responseEvent.p.bridge = ne.p.bridge; // Use same bridge as request
-                                        responseEvent.p.bridgeArg = ne.p.bridgeArg;
+                            // Parse request to get network ID
+                            String requestedNetwork = "CXNET";
+                            if (ne.d != null && ne.d.length > 0) {
+                                try {
+                                    String requestJson = new String(ne.d, "UTF-8");
+                                    java.util.Map<String, Object> req = (java.util.Map<String, Object>)
+                                        ConnectX.deserialize("cxJSON1", requestJson, java.util.Map.class);
+                                    if (req.containsKey("network")) {
+                                        requestedNetwork = (String) req.get("network");
                                     }
-
-                                    // Look up requester node
-                                    Node requesterNode = PeerDirectory.lookup(nc.iD, true, true);
-
-                                    // Create container for response
-                                    NetworkContainer responseContainer = new NetworkContainer();
-                                    responseContainer.se = "cxJSON1";
-                                    responseContainer.s = false;
-
-                                    // Create OutputBundle and queue for transmission
-                                    OutputBundle responseBundle = new OutputBundle(responseEvent, requesterNode, null, null, responseContainer);
-                                    connectX.queueEvent(responseBundle);
-
-                                    System.out.println("[SEED] Queued seed response (" + seedJson.length() + " bytes) for " + nc.iD);
-                                } else {
-                                    System.err.println("[SEED] Seed file not found: " + seedFile.getAbsolutePath());
+                                } catch (Exception e) {
+                                    // Use default CXNET
                                 }
+                            }
+
+                            CXNetwork network = connectX.getNetwork(requestedNetwork);
+                            if (network != null) {
+                                // Create dynamic seed from current peer state
+                                dev.droppinganvil.v3.network.Seed dynamicSeed = dev.droppinganvil.v3.network.Seed.fromCurrentPeers();
+                                dynamicSeed.seedID = java.util.UUID.randomUUID().toString();
+                                dynamicSeed.timestamp = System.currentTimeMillis();
+                                dynamicSeed.networkID = requestedNetwork;
+                                dynamicSeed.networks = new java.util.ArrayList<>();
+                                dynamicSeed.networks.add(network);
+
+                                // Try to load EPOCH's signed seed from disk
+                                dev.droppinganvil.v3.network.Seed epochSeed = null;
+                                if (network.configuration != null && network.configuration.currentSeedID != null) {
+                                    java.io.File seedsDir = new java.io.File(connectX.cxRoot, "seeds");
+                                    java.io.File seedFile = new java.io.File(seedsDir, network.configuration.currentSeedID + ".cxn");
+
+                                    if (seedFile.exists()) {
+                                        epochSeed = dev.droppinganvil.v3.network.Seed.load(seedFile);
+                                    }
+                                }
+
+                                // Determine if this peer is authoritative (NMI/backend)
+                                boolean isAuthoritative = false;
+                                if (network.configuration != null && network.configuration.backendSet != null) {
+                                    isAuthoritative = network.configuration.backendSet.contains(connectX.getOwnID());
+                                }
+
+                                // Build response with BOTH seeds
+                                java.util.Map<String, Object> response = new java.util.HashMap<>();
+                                response.put("dynamicSeed", dynamicSeed);           // Current peer state
+                                response.put("epochSeed", epochSeed);               // Signed seed from EPOCH (null if not available)
+                                response.put("authoritative", isAuthoritative);     // Is this EPOCH/NMI?
+                                response.put("senderID", connectX.getOwnID());
+
+                                // Add blockchain heights for consensus
+                                java.util.Map<String, Long> chainHeights = new java.util.HashMap<>();
+                                chainHeights.put("c1", network.c1.current != null ? network.c1.current.block : 0L);
+                                chainHeights.put("c2", network.c2.current != null ? network.c2.current.block : 0L);
+                                chainHeights.put("c3", network.c3.current != null ? network.c3.current.block : 0L);
+                                response.put("chainHeights", chainHeights);
+
+                                System.out.println("[SEED] Responding to " + nc.iD.substring(0, 8));
+                                System.out.println("[SEED]   Dynamic peers: " + dynamicSeed.hvPeers.size());
+                                System.out.println("[SEED]   EPOCH seed: " + (epochSeed != null ? "available" : "none"));
+                                System.out.println("[SEED]   Authoritative: " + isAuthoritative);
+
+                                String responseJson = ConnectX.serialize("cxJSON1", response);
+
+                                // Send response
+                                NetworkEvent responseEvent = new NetworkEvent();
+                                responseEvent.eT = EventType.SEED_RESPONSE.name();
+                                responseEvent.iD = java.util.UUID.randomUUID().toString();
+                                responseEvent.d = responseJson.getBytes("UTF-8");
+
+                                responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
+                                responseEvent.p.cxID = nc.iD;
+                                if (ne.p != null) {
+                                    responseEvent.p.network = ne.p.network;
+                                    responseEvent.p.scope = ne.p.scope;
+                                    responseEvent.p.bridge = ne.p.bridge;
+                                    responseEvent.p.bridgeArg = ne.p.bridgeArg;
+                                }
+
+                                Node requesterNode = PeerDirectory.lookup(nc.iD, true, true);
+                                NetworkContainer responseContainer = new NetworkContainer();
+                                responseContainer.se = "cxJSON1";
+                                responseContainer.s = false;
+                                OutputBundle responseBundle = new OutputBundle(responseEvent, requesterNode, null, null, responseContainer);
+                                connectX.queueEvent(responseBundle);
+
                             } else {
-                                System.err.println("[SEED] No current seed configured for CXNET");
+                                System.out.println("[SEED] Network " + requestedNetwork + " not found");
                             }
                         } catch (Exception e) {
-                            System.err.println("[SEED] Error handling seed request: " + e.getMessage());
+                            System.err.println("[SEED] Error: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
@@ -552,58 +718,89 @@ public class NodeMesh {
                     case SEED_RESPONSE:
                         System.out.println("[" + connectX.getOwnID() + "] Seed response received from " + nc.iD);
                         try {
-                            // Deserialize Seed from response data
-                            String seedJson = new String(ne.d, "UTF-8");
-                            dev.droppinganvil.v3.network.Seed seed =
-                                (dev.droppinganvil.v3.network.Seed) ConnectX.deserialize("cxJSON1", seedJson, dev.droppinganvil.v3.network.Seed.class);
+                            // Parse response with consensus metadata
+                            String responseJson = new String(ne.d, "UTF-8");
+                            java.util.Map<String, Object> response =
+                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", responseJson, java.util.Map.class);
 
-                            if (seed != null) {
-                                System.out.println("[SEED] Received seed " + seed.seedID);
-                                System.out.println("[SEED]   Networks: " + seed.networks.size());
-                                System.out.println("[SEED]   HV Peers: " + seed.hvPeers.size());
-                                System.out.println("[SEED]   Certificates: " + seed.certificates.size());
+                            // Extract and store response data
+                            ConnectX.SeedResponseData responseData = new ConnectX.SeedResponseData();
+                            responseData.dynamicSeed = (dev.droppinganvil.v3.network.Seed) response.get("dynamicSeed");
+                            responseData.epochSeed = (dev.droppinganvil.v3.network.Seed) response.get("epochSeed");
+                            responseData.authoritative = response.containsKey("authoritative") ?
+                                (Boolean) response.get("authoritative") : false;
+                            responseData.senderID = nc.iD;
+                            responseData.timestamp = System.currentTimeMillis();
+                            responseData.chainHeights = (java.util.Map<String, Number>) response.get("chainHeights");
 
-                                // Save seed to local seeds/ directory
-                                java.io.File seedsDir = new java.io.File(connectX.cxRoot, "seeds");
-                                if (!seedsDir.exists()) {
-                                    seedsDir.mkdirs();
-                                }
-                                java.io.File seedFile = new java.io.File(seedsDir, seed.seedID + ".cxn");
-                                seed.save(seedFile);
-                                System.out.println("[SEED] Saved to: " + seedFile.getAbsolutePath());
-
-                                // Apply seed (loads networks, peers, certificates)
-                                // Add hv peers to directory
-                                for (dev.droppinganvil.v3.network.nodemesh.Node peer : seed.hvPeers) {
-                                    try {
-                                        PeerDirectory.addNode(peer);
-                                        System.out.println("[SEED] Added peer: " + peer.cxID);
-                                    } catch (Exception e) {
-                                        System.err.println("[SEED] Failed to add peer " + peer.cxID + ": " + e.getMessage());
-                                    }
-                                }
-
-                                // Apply seed properly using ConnectX.applySeed() method
-                                // This registers networks with the instance's networkMap
-                                seed.apply(connectX);
-                                System.out.println("[SEED] Applied seed to ConnectX instance");
-
-                                // Cache certificates
-                                for (java.util.Map.Entry<String, String> cert : seed.certificates.entrySet()) {
-                                    try {
-                                        connectX.encryptionProvider.cacheCert(cert.getKey(), false, false);
-                                        System.out.println("[SEED] Cached certificate: " + cert.getKey());
-                                    } catch (Exception e) {
-                                        System.err.println("[SEED] Failed to cache certificate for " + cert.getKey() + ": " + e.getMessage());
-                                    }
-                                }
-
-                                System.out.println("[SEED] Seed application complete");
-                            } else {
-                                System.err.println("[SEED] Failed to deserialize seed");
+                            // Determine target network
+                            String targetNetwork = "CXNET";
+                            if (responseData.epochSeed != null && responseData.epochSeed.networkID != null) {
+                                targetNetwork = responseData.epochSeed.networkID;
+                            } else if (responseData.dynamicSeed != null && responseData.dynamicSeed.networkID != null) {
+                                targetNetwork = responseData.dynamicSeed.networkID;
                             }
+
+                            System.out.println("[SEED CONSENSUS] Received response for " + targetNetwork);
+                            System.out.println("  From: " + nc.iD.substring(0, 8));
+                            System.out.println("  Authoritative (EPOCH): " + responseData.authoritative);
+                            System.out.println("  Has EPOCH seed: " + (responseData.epochSeed != null));
+                            System.out.println("  Has dynamic seed: " + (responseData.dynamicSeed != null));
+
+                            // PRIORITY 1: If this is EPOCH with signed seed, trust immediately
+                            if (responseData.authoritative && responseData.epochSeed != null) {
+                                System.out.println("[SEED CONSENSUS] ✓ EPOCH responded with signed seed - IMMEDIATE TRUST");
+                                applySeedConsensus(connectX, responseData.epochSeed, true,
+                                    "EPOCH signed seed (direct from NMI)", targetNetwork);
+                                handledLocally = true;
+                                break;
+                            }
+
+                            // PRIORITY 2: If peer forwarded EPOCH's signed seed, trust it
+                            if (responseData.epochSeed != null) {
+                                System.out.println("[SEED CONSENSUS] ✓ Peer forwarded EPOCH signed seed - HIGH TRUST");
+                                applySeedConsensus(connectX, responseData.epochSeed, true,
+                                    "EPOCH signed seed (peer-forwarded by " + nc.iD.substring(0, 8) + ")", targetNetwork);
+                                handledLocally = true;
+                                break;
+                            }
+
+                            // PRIORITY 3: Multi-peer consensus for dynamic seeds
+                            // Store response in consensus map
+                            if (!connectX.seedConsensusMap.containsKey(targetNetwork)) {
+                                connectX.seedConsensusMap.put(targetNetwork, new java.util.concurrent.ConcurrentHashMap<>());
+                            }
+                            connectX.seedConsensusMap.get(targetNetwork).put(nc.iD, responseData);
+
+                            System.out.println("[SEED CONSENSUS] Stored response from " + nc.iD.substring(0, 8));
+                            System.out.println("[SEED CONSENSUS] Responses collected: " +
+                                connectX.seedConsensusMap.get(targetNetwork).size());
+
+                            // Trigger consensus if we have enough responses (3) or if EPOCH responded
+                            java.util.concurrent.ConcurrentHashMap<String, ConnectX.SeedResponseData> responses =
+                                connectX.seedConsensusMap.get(targetNetwork);
+
+                            boolean hasEpochResponse = false;
+                            for (ConnectX.SeedResponseData r : responses.values()) {
+                                if (r.authoritative) {
+                                    hasEpochResponse = true;
+                                    break;
+                                }
+                            }
+
+                            if (responses.size() >= 3 || hasEpochResponse) {
+                                System.out.println("[SEED CONSENSUS] Triggering consensus vote...");
+                                performSeedConsensus(connectX, targetNetwork, responses);
+
+                                // Clear consensus map after applying
+                                connectX.seedConsensusMap.remove(targetNetwork);
+                            } else {
+                                System.out.println("[SEED CONSENSUS] Waiting for more responses... (" +
+                                    responses.size() + "/3)");
+                            }
+
                         } catch (Exception e) {
-                            System.err.println("[SEED] Error handling seed response: " + e.getMessage());
+                            System.err.println("[SEED CONSENSUS] Error: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
@@ -1265,7 +1462,7 @@ public class NodeMesh {
 
         // Step 4c: Handle peerBroad mode - global cross-network transmission
         if (tP.peerBroad) {
-            System.out.println("[RELAY DEBUG] peerBroad=true, broadcasting to " + PeerDirectory.hv.size() + " peers");
+            //System.out.println("[RELAY DEBUG] peerBroad=true, broadcasting to " + PeerDirectory.hv.size() + " peers");
             // Broadcast to all peers across all networks
             for (Node peer : PeerDirectory.hv.values()) {
                 if (!peer.cxID.equals(connectX.getOwnID()) && !peer.cxID.equals(transmitterID)) {
@@ -1472,6 +1669,175 @@ public class NodeMesh {
             }
         } catch (Exception e) {
             System.err.println("[CHAIN_SYNC] Error requesting blocks: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Apply a seed after consensus decision
+     * Saves EPOCH seeds to disk, adds peers, caches certificates, registers networks
+     */
+    private static void applySeedConsensus(ConnectX connectX, dev.droppinganvil.v3.network.Seed seed,
+                                          boolean isEpochSeed, String consensusReason, String targetNetwork) {
+        try {
+            System.out.println("[SEED CONSENSUS] Applying seed: " + seed.seedID);
+            System.out.println("[SEED CONSENSUS] Reason: " + consensusReason);
+            System.out.println("[SEED CONSENSUS] Networks: " + seed.networks.size());
+            System.out.println("[SEED CONSENSUS] Peers: " + seed.hvPeers.size());
+            System.out.println("[SEED CONSENSUS] Certificates: " + seed.certificates.size());
+
+            // Save EPOCH signed seeds to disk so this peer can forward them
+            if (isEpochSeed) {
+                java.io.File seedsDir = new java.io.File(connectX.cxRoot, "seeds");
+                if (!seedsDir.exists()) {
+                    seedsDir.mkdirs();
+                }
+                java.io.File seedFile = new java.io.File(seedsDir, seed.seedID + ".cxn");
+                seed.save(seedFile);
+                System.out.println("[SEED CONSENSUS] ✓ Saved EPOCH seed: " + seedFile.getName());
+                System.out.println("[SEED CONSENSUS] ✓ This peer can now forward EPOCH seed to others!");
+            }
+
+            // Add peers to directory
+            int peersAdded = 0;
+            for (dev.droppinganvil.v3.network.nodemesh.Node peer : seed.hvPeers) {
+                try {
+                    PeerDirectory.addNode(peer);
+                    peersAdded++;
+                } catch (Exception e) {
+                    // Ignore duplicate peer errors
+                }
+            }
+            System.out.println("[SEED CONSENSUS] ✓ Added " + peersAdded + " peers to directory");
+
+            // Apply seed to ConnectX (registers networks)
+            seed.apply(connectX);
+            System.out.println("[SEED CONSENSUS] ✓ Networks registered");
+
+            // Cache certificates
+            int certsAdded = 0;
+            for (java.util.Map.Entry<String, String> cert : seed.certificates.entrySet()) {
+                try {
+                    connectX.encryptionProvider.cacheCert(cert.getKey(), false, false);
+                    certsAdded++;
+                } catch (Exception e) {
+                    // Ignore cert errors
+                }
+            }
+            System.out.println("[SEED CONSENSUS] ✓ Cached " + certsAdded + " certificates");
+            System.out.println("[SEED CONSENSUS] ✓✓✓ Network " + targetNetwork + " is READY!");
+
+        } catch (Exception e) {
+            System.err.println("[SEED CONSENSUS] Error applying seed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Perform multi-peer consensus voting on dynamic seeds
+     * Compares chain heights, detects conflicts, applies majority consensus
+     * If conflicts detected, requests fresh seed from EPOCH as tiebreaker
+     */
+    private static void performSeedConsensus(ConnectX connectX, String targetNetwork,
+                                            java.util.concurrent.ConcurrentHashMap<String, ConnectX.SeedResponseData> responses) {
+        try {
+            System.out.println("[SEED CONSENSUS] === MULTI-PEER VOTING ===");
+            System.out.println("[SEED CONSENSUS] Responses: " + responses.size());
+
+            // Priority 1: Check if EPOCH responded (always trust EPOCH)
+            for (ConnectX.SeedResponseData r : responses.values()) {
+                if (r.authoritative && r.dynamicSeed != null) {
+                    System.out.println("[SEED CONSENSUS] ✓ EPOCH dynamic seed found - TRUSTING");
+                    applySeedConsensus(connectX, r.dynamicSeed, false,
+                        "EPOCH dynamic seed (authoritative)", targetNetwork);
+                    return;
+                }
+            }
+
+            // Priority 2: Compare chain heights across peers for consensus
+            java.util.Map<String, Integer> heightVotes = new java.util.HashMap<>();
+            for (ConnectX.SeedResponseData r : responses.values()) {
+                if (r.chainHeights != null) {
+                    // Create signature from chain heights
+                    String heightSig = "c1:" + r.chainHeights.get("c1") +
+                                     ",c2:" + r.chainHeights.get("c2") +
+                                     ",c3:" + r.chainHeights.get("c3");
+                    heightVotes.put(heightSig, heightVotes.getOrDefault(heightSig, 0) + 1);
+                }
+            }
+
+            System.out.println("[SEED CONSENSUS] Chain height voting:");
+            for (java.util.Map.Entry<String, Integer> vote : heightVotes.entrySet()) {
+                System.out.println("[SEED CONSENSUS]   " + vote.getKey() + " → " + vote.getValue() + " votes");
+            }
+
+            // Find majority consensus (>50% agreement)
+            String majorityHeights = null;
+            int maxVotes = 0;
+            for (java.util.Map.Entry<String, Integer> vote : heightVotes.entrySet()) {
+                if (vote.getValue() > maxVotes) {
+                    maxVotes = vote.getValue();
+                    majorityHeights = vote.getKey();
+                }
+            }
+
+            double consensusPercent = (double) maxVotes / responses.size();
+            System.out.println("[SEED CONSENSUS] Majority: " + maxVotes + "/" + responses.size() +
+                             " (" + String.format("%.0f%%", consensusPercent * 100) + ")");
+
+            if (consensusPercent >= 0.51) {
+                // Majority consensus achieved - use seed from majority peer
+                System.out.println("[SEED CONSENSUS] ✓ CONSENSUS REACHED (" +
+                                 String.format("%.0f%%", consensusPercent * 100) + " agreement)");
+
+                for (ConnectX.SeedResponseData r : responses.values()) {
+                    if (r.chainHeights != null) {
+                        String heightSig = "c1:" + r.chainHeights.get("c1") +
+                                         ",c2:" + r.chainHeights.get("c2") +
+                                         ",c3:" + r.chainHeights.get("c3");
+                        if (heightSig.equals(majorityHeights) && r.dynamicSeed != null) {
+                            applySeedConsensus(connectX, r.dynamicSeed, false,
+                                "Peer consensus (" + String.format("%.0f%%", consensusPercent * 100) +
+                                " agreement) from " + r.senderID.substring(0, 8), targetNetwork);
+                            return;
+                        }
+                    }
+                }
+            } else {
+                // No consensus - conflict detected
+                System.out.println("[SEED CONSENSUS] ✗ CONSENSUS FAILED - Peer conflict detected");
+                System.out.println("[SEED CONSENSUS] No majority agreement (only " +
+                                 String.format("%.0f%%", consensusPercent * 100) + "%)");
+                System.out.println("[SEED CONSENSUS] → Requesting authoritative seed from EPOCH...");
+
+                // TODO: Send SEED_REQUEST directly to EPOCH as tiebreaker
+                // For now, use fallback: load signed EPOCH seed from disk if available
+                java.io.File seedsDir = new java.io.File(connectX.cxRoot, "seeds");
+                if (seedsDir.exists()) {
+                    java.io.File[] seedFiles = seedsDir.listFiles((dir, name) -> name.endsWith(".cxn"));
+                    if (seedFiles != null && seedFiles.length > 0) {
+                        // Load most recent seed
+                        java.io.File latestSeed = seedFiles[0];
+                        for (java.io.File f : seedFiles) {
+                            if (f.lastModified() > latestSeed.lastModified()) {
+                                latestSeed = f;
+                            }
+                        }
+                        System.out.println("[SEED CONSENSUS] Using fallback: Signed EPOCH seed from disk");
+                        dev.droppinganvil.v3.network.Seed epochSeed =
+                            dev.droppinganvil.v3.network.Seed.load(latestSeed);
+                        applySeedConsensus(connectX, epochSeed, true,
+                            "EPOCH signed seed (disk fallback - peer conflict)", targetNetwork);
+                        return;
+                    }
+                }
+
+                System.err.println("[SEED CONSENSUS] ✗ Cannot resolve - no EPOCH seed available");
+                System.err.println("[SEED CONSENSUS] Network may be compromised or EPOCH offline");
+            }
+
+        } catch (Exception e) {
+            System.err.println("[SEED CONSENSUS] Voting error: " + e.getMessage());
             e.printStackTrace();
         }
     }

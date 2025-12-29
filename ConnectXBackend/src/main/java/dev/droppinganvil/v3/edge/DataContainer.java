@@ -22,6 +22,23 @@ public class DataContainer implements Serializable {
     public Map<String, Node> LAN = new HashMap<>();
 
     /**
+     * Local peer address mapping for LAN discovery
+     * Map: peerID -> List of local IP:port addresses (in priority order)
+     *
+     * Populated by:
+     * - LAN scanner finding peers on local network
+     * - Recording source addresses when events are received
+     * - CXHELLO/CXHELLO_RESPONSE events
+     *
+     * Multiple addresses stored per peer for fallback routing:
+     * - Primary: Listening port from CXHELLO payload
+     * - Fallback: Ephemeral socket ports from passive discovery
+     *
+     * Used for direct local communication to bypass firewalls and improve performance
+     */
+    public Map<String, List<String>> localPeerAddresses = new ConcurrentHashMap<>();
+
+    /**
      * Whitelist: Registered nodes per network (for whitelist mode)
      * Map: networkID -> Set of registered node UUIDs
      *
@@ -102,4 +119,67 @@ public class DataContainer implements Serializable {
         registrationTokens.put(token, nodeID);
         return token;
     }
+
+    /**
+     * Record a local peer address for LAN communication
+     * @param peerID Peer UUID
+     * @param address Local IP:port address (e.g., "192.168.1.100:49152")
+     * @param priority If true, add as first address (from CXHELLO payload); if false, append (passive discovery)
+     */
+    public void recordLocalPeer(String peerID, String address, boolean priority) {
+        if (peerID != null && address != null && !address.isEmpty()) {
+            List<String> addresses = localPeerAddresses.computeIfAbsent(peerID, k -> new java.util.ArrayList<>());
+            // Don't add duplicates
+            if (!addresses.contains(address)) {
+                if (priority) {
+                    addresses.add(0, address); // Prepend for priority
+                } else {
+                    addresses.add(address); // Append as fallback
+                }
+            }
+        }
+    }
+
+    /**
+     * Record a local peer address (non-priority fallback)
+     */
+    public void recordLocalPeer(String peerID, String address) {
+        recordLocalPeer(peerID, address, false);
+    }
+
+    /**
+     * Get local address for a peer if available (returns first/priority address)
+     * @param peerID Peer UUID
+     * @return Local IP:port address, or null if not found
+     */
+    public String getLocalPeerAddress(String peerID) {
+        List<String> addresses = localPeerAddresses.get(peerID);
+        return (addresses != null && !addresses.isEmpty()) ? addresses.get(0) : null;
+    }
+
+    /**
+     * Get all addresses for a peer (in priority order)
+     * @param peerID Peer UUID
+     * @return List of addresses, or empty list if not found
+     */
+    public List<String> getLocalPeerAddresses(String peerID) {
+        List<String> addresses = localPeerAddresses.get(peerID);
+        return (addresses != null) ? new java.util.ArrayList<>(addresses) : new java.util.ArrayList<>();
+    }
+
+    /**
+     * Remove a local peer address
+     * @param peerID Peer UUID
+     */
+    public void removeLocalPeer(String peerID) {
+        localPeerAddresses.remove(peerID);
+    }
+
+    /**
+     * Get all local peer addresses (map of peerID -> address list)
+     */
+    public Map<String, List<String>> getAllLocalPeerAddresses() {
+        return new HashMap<>(localPeerAddresses);
+    }
 }
+

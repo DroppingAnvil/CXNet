@@ -27,6 +27,7 @@ dev\droppinganvil\v3\network\nodemesh\TransmitPref.class
 dev\droppinganvil\v3\io\NetworkInputIOJob.class
 dev\droppinganvil\v3\edge\DataContainer.class
 dev\droppinganvil\v3\annotations\Accessible.class
+dev\droppinganvil\v3\test\LANScannerTest.class
 dev\droppinganvil\v3\network\NetworkDictionary.class
 dev\droppinganvil\v3\crypt\core\exceptions\CryptInternalVerificationException.class
 dev\droppinganvil\v3\io\IOThread.class
@@ -46,6 +47,7 @@ dev\droppinganvil\v3\Permission.class
 dev\droppinganvil\v3\utils\obj\IPXException.class
 dev\droppinganvil\v3\network\nodemesh\CXNode.class
 dev\droppinganvil\v3\network\nodemesh\NodeConfig.class
+dev\droppinganvil\v3\ConnectX$SeedResponseData.class
 dev\droppinganvil\v3\network\nodemesh\PeerDirectory.class
 dev\droppinganvil\v3\io\TransferType.class
 dev\droppinganvil\v3\JSONProduct.class
@@ -63,6 +65,7 @@ dev\droppinganvil\v3\utils\obj\LockOwnerException.class
 dev\droppinganvil\v3\ConnectX$EventBuilder.class
 dev\droppinganvil\v3\resourcecore\ResourceType.class
 dev\droppinganvil\v3\test\BlockchainPersistenceTest.class
+dev\droppinganvil\v3\network\nodemesh\LANScanner.class
 dev\droppinganvil\v3\network\BlockchainPersistence.class
 dev\droppinganvil\v3\utils\obj\LockedStateException.class
 dev\droppinganvil\v3\crypt\core\exceptions\TempDirectoryPermissions.class

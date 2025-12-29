@@ -46,6 +46,7 @@ C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\dropp
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\nodemesh\Connections.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\nodemesh\CXNode.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\nodemesh\InConnectionManager.java
+C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\nodemesh\LANScanner.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\nodemesh\MessageHandler.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\nodemesh\Node.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\nodemesh\NodeConfig.java
@@ -77,6 +78,7 @@ C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\dropp
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\test\BlockSyncTest.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\test\BootstrapTest.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\test\HTTPBridgeTest.java
+C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\test\LANScannerTest.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\test\MultiPeerTest.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\test\StatePersistenceTest.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\test\TwoPeerTest.java

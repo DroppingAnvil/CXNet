@@ -24,6 +24,10 @@ public class MultiPeerTest {
     // EPOCH NMI location (for seed download)
     private static final String EPOCH_DIR = "C:\\Users\\Alexw\\Documents\\AD\\CXNET";
 
+    // TEST CONFIGURATION
+    private static final boolean SEND_MESSAGES = false;  // Set to true to send 105 test messages
+    private static final int MESSAGE_COUNT = 105;        // Number of messages to send if enabled
+
     public static void main(String[] args) {
         System.out.println("=== CXNET Multi-Peer Mesh Network Test ===\n");
         System.out.println("This test demonstrates 5 peers bootstrapping into CXNET");
@@ -54,15 +58,16 @@ public class MultiPeerTest {
             }
             System.out.println("  Found EPOCH seed: " + latestEpochSeed.getName());
 
-            // Step 2: Create and initialize all peers with one constructor call each
-            System.out.println("\nStep 2: Creating and initializing " + numPeers + " CXNET peers...");
+            // Step 2: Create and initialize FIRST 4 peers (Peer 5 will join late)
+            System.out.println("\nStep 2: Creating and initializing 4 CXNET peers (Peer 5 will join late for sync test)...");
             List<ConnectX> peers = new ArrayList<>();
 
-            for (int i = 1; i <= numPeers; i++) {
+            for (int i = 1; i <= 4; i++) {  // Only create 4 peers initially
                 String peerDir = "ConnectX-Peer" + i;
                 int port = basePort + (i - 1);
 
                 // Create peer with full initialization
+                // Note: Constructor already calls connect(port) internally
                 System.out.println("  Creating Peer " + i + " on port " + port + "...");
                 ConnectX peer = new ConnectX(peerDir, port, null, "password" + i);
 
@@ -78,6 +83,7 @@ public class MultiPeerTest {
                     publicEndpoint = "https://cx" + i + ".anvildevelopment.us/cx";
                 } else {
                     // Fallback for peers 4-5 (use localhost for now)
+                    //TODO MultiAddress support per node
                     publicEndpoint = "http://localhost:" + httpPort + "/cx";
                 }
 
@@ -105,6 +111,20 @@ public class MultiPeerTest {
                 System.out.println("    UUID: " + peer.getOwnID());
                 Thread.sleep(500); // Stagger initialization
             }
+
+            // Step 2b: Wait for P2P discovery and connections
+            System.out.println("\nStep 2b: Waiting 30 seconds for P2P discovery to complete...");
+            System.out.println("  This allows:");
+            System.out.println("    - LAN scanner to find all peers");
+            System.out.println("    - CXHELLO events to be sent and received");
+            System.out.println("    - P2P connections to establish");
+            for (int i = 30; i > 0; i--) {
+                if (i % 5 == 0 || i <= 3) {
+                    System.out.println("  " + i + " seconds remaining...");
+                }
+                Thread.sleep(1000);
+            }
+            System.out.println("  ✓ P2P discovery period complete!");
 
             // Step 3: Wait for bootstrap to complete (with periodic checks)
             System.out.println("\nStep 3: Waiting for bootstrap to complete...");
@@ -223,12 +243,7 @@ public class MultiPeerTest {
 
                 Thread.sleep(2000);
 
-                // Test 2: Send message from Peer5 to network
-                System.out.println("\n=== Test 2: Peer 5 broadcasts message ===");
-                peers.get(4).buildEvent(EventType.MESSAGE, "Hello from Peer 5 to CXNET!".getBytes())
-                    .toNetwork("CXNET")
-                    .queue();
-                System.out.println("Message queued from Peer 5 (" + peers.get(4).getOwnID() + ")");
+                // Test 2: Peer 5 will join later (after blockchain has data) to test sync
 
                 Thread.sleep(2000);
 
@@ -346,7 +361,7 @@ public class MultiPeerTest {
 
         java.util.Map<String, Object> blockPayload = new java.util.HashMap<>();
         blockPayload.put("network", "CXNET");
-        blockPayload.put("nodeID", peers.get(4).getOwnID());
+        blockPayload.put("nodeID", peers.get(3).getOwnID());  // Peer 4 (index 3)
         blockPayload.put("reason", "testing block mechanism");
 
         String blockJson = ConnectX.serialize("cxJSON1", blockPayload);
@@ -571,6 +586,7 @@ public class MultiPeerTest {
         String regJson = ConnectX.serialize("cxJSON1", regPayload);
 
         peers.get(3).buildEvent(EventType.REGISTER_NODE, regJson.getBytes())
+            .withRecordFlag(true)  // Record admin event to c1 (Admin chain)
             .toPeer(peers.get(0).getOwnID())
             .toNetwork("TESTNET")
             .queue();
@@ -617,16 +633,17 @@ public class MultiPeerTest {
 
         java.util.Map<String, Object> reusePayload = new java.util.HashMap<>();
         reusePayload.put("network", "TESTNET");
-        reusePayload.put("nodeID", peers.get(4).getOwnID());
+        reusePayload.put("nodeID", peers.get(3).getOwnID());  // Peer 4 (index 3)
         reusePayload.put("token", token);  // Reuse consumed token
         String reuseJson = ConnectX.serialize("cxJSON1", reusePayload);
 
-        peers.get(4).buildEvent(EventType.REGISTER_NODE, reuseJson.getBytes())
+        peers.get(3).buildEvent(EventType.REGISTER_NODE, reuseJson.getBytes())  // Peer 4 (index 3)
+            .withRecordFlag(true)  // Record admin event to c1 (Admin chain)
             .toPeer(peers.get(0).getOwnID())
             .toNetwork("TESTNET")
             .queue();
 
-        System.out.println("  ✓ Peer 5 sent REGISTER_NODE with used token");
+        System.out.println("  ✓ Peer 4 sent REGISTER_NODE with used token");
         System.out.println("  ⚠ Should be REJECTED (token already consumed)");
 
         Thread.sleep(4000);
@@ -660,11 +677,24 @@ public class MultiPeerTest {
 
     private static void startPeriodicBackendSync(List<ConnectX> peers) {
         Thread t = new Thread(() -> {
+            // Get sync interval from first peer's CXNET configuration
+            int syncIntervalSeconds = 600; // Default 10 minutes
+            try {
+                CXNetwork cxnet = peers.get(0).getNetwork("CXNET");
+                if (cxnet != null && cxnet.configuration != null && cxnet.configuration.syncIntervalSeconds != null) {
+                    syncIntervalSeconds = cxnet.configuration.syncIntervalSeconds;
+                }
+            } catch (Exception e) {
+                // Use default
+            }
+
+            System.out.println("[PERIODIC SYNC] Configured interval: " + syncIntervalSeconds + " seconds");
+
             while (true) {
                 try {
-                    Thread.sleep(10 * 60 * 1000);  // 10 minutes
+                    Thread.sleep(syncIntervalSeconds * 1000L);
 
-                    System.out.println("\n[PERIODIC SYNC] Starting 10-minute sync...");
+                    System.out.println("\n[PERIODIC SYNC] Starting " + syncIntervalSeconds + "-second sync...");
 
                     for (ConnectX peer : peers) {
                         for (String netID : new String[]{"CXNET", "TESTNET"}) {
@@ -786,6 +816,7 @@ public class MultiPeerTest {
         // Send GRANT_PERMISSION event from Peer 4 (it will propagate to all)
         // This event has executeOnSync=true so it modifies state on all peers
         peers.get(3).buildEvent(EventType.GRANT_PERMISSION, grantJson.getBytes())
+            .withRecordFlag(true)  // Record admin event to c1 (Admin chain)
             .toNetwork("CXNET")
             .queue();
 
@@ -797,25 +828,32 @@ public class MultiPeerTest {
         System.out.println("  ✓ Peer 4 has Record permission on c3: " + peer4HasPermission);
 
         System.out.println("  Block length: 100 events");
-        System.out.println("  Sending 105 MESSAGE events from Peer 4 WITH permission...");
 
-        for (int i = 0; i < 105; i++) {
-            String msg = "Blockchain sync test message #" + (i+1);
+        if (SEND_MESSAGES) {
+            System.out.println("  Sending " + MESSAGE_COUNT + " MESSAGE events from Peer 4 WITH permission...");
 
-            // Send message - will be auto-recorded on receipt due to r=true flag
-            peers.get(3).buildEvent(EventType.MESSAGE, msg.getBytes())
-                .withRecordFlag(true)  // Enable automatic recording
-                .toNetwork("CXNET")
-                .queue();
+            for (int i = 0; i < MESSAGE_COUNT; i++) {
+                String msg = "Blockchain sync test message #" + (i+1);
 
-            if ((i+1) % 25 == 0) {
-                System.out.println("    " + (i+1) + " messages queued...");
-                Thread.sleep(500);  // Throttle to allow processing
+                // Send message - will be auto-recorded on receipt due to r=true flag
+                peers.get(3).buildEvent(EventType.MESSAGE, msg.getBytes())
+                    .withRecordFlag(true)  // Enable automatic recording
+                    .toNetwork("CXNET")
+                    .queue();
+
+                if ((i+1) % 25 == 0) {
+                    System.out.println("    " + (i+1) + " messages queued...");
+                    Thread.sleep(500);  // Throttle to allow processing
+                }
             }
-        }
 
-        System.out.println("  Waiting for events to process...");
-        Thread.sleep(5000);
+            System.out.println("  Waiting for events to process...");
+            Thread.sleep(5000);
+        } else {
+            System.out.println("  MESSAGE sending DISABLED (SEND_MESSAGES=false)");
+            System.out.println("  Ready to test late-joining peer sync...");
+            Thread.sleep(2000);
+        }
 
         long c3After = cxnet.c3.current != null ? cxnet.c3.current.block : -1;
         int eventsAfter = cxnet.c3.current != null ? cxnet.c3.current.networkEvents.size() : 0;

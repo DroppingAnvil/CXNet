@@ -12,7 +12,7 @@ import java.io.*;
 import java.net.ServerSocket;
 
 public class InConnectionManager {
-    public static ServerSocket serverSocket;
+    public ServerSocket serverSocket;  // Instance-specific (removed static to support multiple peers)
     private NodeMesh nodeMesh;
 
     public InConnectionManager(Integer port, NodeMesh nodeMesh) throws IOException {

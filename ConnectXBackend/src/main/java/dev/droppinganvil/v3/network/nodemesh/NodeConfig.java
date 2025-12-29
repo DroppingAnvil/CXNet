@@ -31,6 +31,7 @@ public class NodeConfig {
     public static boolean autoUpdate = true;
     public static boolean revealVersion = true;
     public static boolean supportUnavailableServices = false;
-    public static boolean devMode = false;
+    //WHEN GETTING LOW LEVEL PROTOCOL ERRORS TRY THIS
+    public static boolean devMode = true;
     public static Double cxV = 0.1;
 }

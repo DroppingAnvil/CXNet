@@ -54,4 +54,38 @@ public class Configuration implements Serializable {
      */
     public Boolean publicSeed = true;
 
+    /**
+     * Blockchain sync interval in seconds
+     * Determines how often peers request chain status updates from the network
+     *
+     * Default: 600 (10 minutes)
+     *
+     * Considerations:
+     * - Lower values = more frequent syncs, better consistency, higher traffic
+     * - Higher values = less traffic but slower to detect missing blocks
+     * - For testing: 30 seconds
+     * - For production: 600 seconds (10 minutes)
+     */
+    public Integer syncIntervalSeconds = 600;
+
+    /**
+     * Time To Live (TTL) - Maximum number of relay hops for network events
+     * Prevents infinite loops and controls broadcast scope
+     *
+     * Default: 16 hops
+     *
+     * When a peer relays an event:
+     * 1. TTL is decremented by 1
+     * 2. If TTL reaches 0, event is NOT relayed further (dropped)
+     * 3. Prevents network flooding and relay storms
+     *
+     * Considerations:
+     * - Lower values = smaller network reach, less traffic, faster propagation stop
+     * - Higher values = larger network reach, more traffic, deeper propagation
+     * - For small networks (< 10 nodes): 8-10 hops
+     * - For medium networks (10-100 nodes): 12-16 hops
+     * - For large networks (100+ nodes): 20+ hops
+     */
+    public Integer defaultTTL = 16;
+
 }

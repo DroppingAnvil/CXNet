@@ -20,6 +20,19 @@ public enum EventType {
      */
     HELLOWORLD,
     /**
+     * LAN peer discovery request
+     * Sent to local IP range to discover peers on same network
+     * Response includes peer ID and listening port for direct local communication
+     * Enables firewall traversal and performance optimization
+     */
+    CXHELLO,
+    /**
+     * Response to CXHELLO request
+     * Payload format: JSON {"peerID": "UUID", "port": 49152, "networks": ["CXNET"]}
+     * Allows peers to map peer IDs to local IP addresses for direct communication
+     */
+    CXHELLO_RESPONSE,
+    /**
      * Internal Messaging
      */
     MESSAGE,

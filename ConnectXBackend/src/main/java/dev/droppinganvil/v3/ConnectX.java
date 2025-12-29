@@ -92,6 +92,21 @@ public class ConnectX {
     public BlockchainPersistence blockchainPersistence;
     public dev.droppinganvil.v3.edge.DataContainer dataContainer;
 
+    /**
+     * Seed consensus collection for multi-peer verification
+     * Stores SEED_RESPONSE messages from multiple peers for consensus voting
+     * Key: Network ID (e.g., "CXNET")
+     * Value: Map of peer ID -> SeedResponseData
+     */
+    public static class SeedResponseData {
+        public dev.droppinganvil.v3.network.Seed dynamicSeed;
+        public dev.droppinganvil.v3.network.Seed epochSeed;
+        public boolean authoritative;
+        public String senderID;
+        public long timestamp;
+        public java.util.Map<String, Number> chainHeights;
+    }
+    public final ConcurrentHashMap<String, ConcurrentHashMap<String, SeedResponseData>> seedConsensusMap = new ConcurrentHashMap<>();
 
     public ConnectX() throws IOException {
         this("ConnectX");
@@ -125,6 +140,7 @@ public class ConnectX {
 
         // Initialize crypto with provided or generated UUID
         String actualID = cxID != null ? cxID : java.util.UUID.randomUUID().toString();
+        //TODO Fix logic from testing localhost
         String address = "127.0.0.1:" + port;
         initializeCrypto(actualID, password, address);
 
@@ -272,8 +288,17 @@ public class ConnectX {
      * @param bundle OutputBundle to queue
      */
     public void queueEvent(OutputBundle bundle) {
+        // Debug logging for CXHELLO
+        if (bundle != null && bundle.ne != null && bundle.ne.eT != null && bundle.ne.eT.contains("HELLO")) {
+            System.out.println("[queueEvent-DEBUG] Queuing " + bundle.ne.eT +
+                " to peer " + getOwnID().substring(0, 8) +
+                ", queue size before: " + outputQueue.size());
+        }
         synchronized (outputQueue) {
             outputQueue.add(bundle);
+        }
+        if (bundle != null && bundle.ne != null && bundle.ne.eT != null && bundle.ne.eT.contains("HELLO")) {
+            System.out.println("[queueEvent-DEBUG] Queue size after: " + outputQueue.size());
         }
     }
 
@@ -906,17 +931,18 @@ public class ConnectX {
             System.out.println("[Seed] Added peer: " + peer.cxID);
         }
 
-        // Import networks
+        // Import networks using shared registration logic
         for (dev.droppinganvil.v3.network.CXNetwork network : seed.networks) {
             String networkID = network.configuration.netID;
-            networkMap.put(networkID, network);
-            System.out.println("[Seed] Loaded network: " + networkID);
+            System.out.println("[Seed] Importing network: " + networkID);
 
-            // Replay blockchain to restore state (registeredNodes, blockedNodes, etc.)
-            replayBlockchain(network);
-
-            // Request chain status from NMI to trigger automatic blockchain sync
-            requestChainStatusFromNMI(network);
+            try {
+                // Use shared network registration (handles persistence, replay, sync)
+                registerNetwork(network);
+            } catch (Exception e) {
+                System.err.println("[Seed] Failed to register network " + networkID + ": " + e.getMessage());
+                e.printStackTrace();
+            }
         }
 
         // Cache certificates
@@ -1052,6 +1078,31 @@ public class ConnectX {
 
         // Attempt automatic CXNET bootstrap after network layer is ready
         attemptCXNETBootstrap();
+
+        // Initialize LAN scanner for local peer discovery
+        // Delay scan to allow network to fully initialize
+        Thread lanScanThread = new Thread(() -> {
+            try {
+                // Wait for socket to be ready
+                Thread.sleep(10000); // Wait 10 seconds for network to stabilize and peers to bootstrap
+
+                // Verify socket is listening before scanning
+                if (nodeMesh != null && nodeMesh.in != null && nodeMesh.in.serverSocket != null &&
+                    nodeMesh.in.serverSocket.isBound() && !nodeMesh.in.serverSocket.isClosed()) {
+
+                    dev.droppinganvil.v3.network.nodemesh.LANScanner scanner =
+                        new dev.droppinganvil.v3.network.nodemesh.LANScanner(this, port);
+                    scanner.scanNetwork();
+                } else {
+                    System.err.println("[LAN Scanner] Socket not ready, skipping scan");
+                }
+            } catch (Exception e) {
+                System.err.println("[LAN Scanner] Failed to start: " + e.getMessage());
+            }
+        });
+        lanScanThread.setName("LAN-Scanner-Initializer");
+        lanScanThread.setDaemon(true);
+        lanScanThread.start();
     }
 
     public void connect() throws IOException {
@@ -1277,6 +1328,28 @@ public class ConnectX {
             throw new IllegalStateException("Invalid network - missing network ID");
         }
 
+        // Register network (shared logic for both import and seed application)
+        registerNetwork(network);
+
+        fis.close();
+        baos.close();
+        bais.close();
+        networkBaos.close();
+
+        return network;
+    }
+
+    /**
+     * Register a network in this ConnectX instance
+     * Handles blockchain persistence, replay, and sync for both network creation and import
+     * Shared logic used by createNetwork(), importNetwork(), and applySeed()
+     *
+     * @param network Network to register
+     * @throws Exception if registration fails
+     */
+    private void registerNetwork(CXNetwork network) throws Exception {
+        String networkID = network.configuration.netID;
+
         // Add to network map
         networkMap.put(networkID, network);
 
@@ -1305,6 +1378,27 @@ public class ConnectX {
                 }
             } else {
                 System.out.println("[Blockchain] No persisted blockchain found for network " + networkID);
+                System.out.println("[Blockchain] Persisting genesis blocks from network configuration...");
+
+                // Persist the genesis blocks that came with the network configuration
+                // This ensures peers have blockchain data on disk for future restarts
+                try {
+                    if (network.c1 != null && network.c1.current != null) {
+                        blockchainPersistence.saveBlock(networkID, 1L, network.c1.current);
+                        blockchainPersistence.saveChainMetadata(network.c1, networkID);
+                    }
+                    if (network.c2 != null && network.c2.current != null) {
+                        blockchainPersistence.saveBlock(networkID, 2L, network.c2.current);
+                        blockchainPersistence.saveChainMetadata(network.c2, networkID);
+                    }
+                    if (network.c3 != null && network.c3.current != null) {
+                        blockchainPersistence.saveBlock(networkID, 3L, network.c3.current);
+                        blockchainPersistence.saveChainMetadata(network.c3, networkID);
+                    }
+                    System.out.println("[Blockchain] Genesis blocks persisted to disk");
+                } catch (Exception saveEx) {
+                    System.err.println("[Blockchain] Failed to persist genesis blocks: " + saveEx.getMessage());
+                }
             }
         } catch (Exception e) {
             System.err.println("[Blockchain] Failed to load persisted chains for " + networkID + ": " + e.getMessage());
@@ -1316,13 +1410,6 @@ public class ConnectX {
 
         // Request chain status from NMI to trigger automatic blockchain sync
         requestChainStatusFromNMI(network);
-
-        fis.close();
-        baos.close();
-        bais.close();
-        networkBaos.close();
-
-        return network;
     }
 
     /**

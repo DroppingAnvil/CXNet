@@ -76,10 +76,12 @@ public class HTTPBridgeProvider implements BridgeProvider {
     @Override
     public void initialize(ConnectX connectX) {
         this.connectX = connectX;
+        // Reduced timeouts for faster failure detection and retry queue processing
+        // Failed requests (e.g., offline EPOCH) move to retry queue instead of blocking output queue
         this.httpClient = new OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(2, TimeUnit.SECONDS)
+            .readTimeout(2, TimeUnit.SECONDS)
+            .writeTimeout(2, TimeUnit.SECONDS)
             .build();
     }
 

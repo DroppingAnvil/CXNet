@@ -84,8 +84,20 @@ public class OutputProcessor implements Runnable {
                     try {
                         outController.transmitEvent(bundle);
                     } catch (Exception e) {
-                        System.err.println("[OUT-ERROR] " + eventType + ": " + e.getMessage());
-                        e.printStackTrace();
+                        // Move failed event to retry queue instead of dropping it
+                        // This prevents failed events (e.g., to offline EPOCH) from blocking the output queue
+                        dev.droppinganvil.v3.network.nodemesh.RetryBundle retryBundle =
+                            new dev.droppinganvil.v3.network.nodemesh.RetryBundle(bundle);
+                        retryBundle.scheduleNextRetry(e.getMessage());
+
+                        synchronized (outController.connectXAPI.retryQueue) {
+                            outController.connectXAPI.retryQueue.add(retryBundle);
+                        }
+
+                        System.err.println("[OUT-ERROR] " + eventType + " to " + nodeAddr + " failed: " + e.getMessage());
+                        System.err.println("[RETRY-QUEUE] Added to retry queue (retry 1/" +
+                            dev.droppinganvil.v3.network.nodemesh.RetryBundle.MAX_RETRIES +
+                            " in " + (dev.droppinganvil.v3.network.nodemesh.RetryBundle.INITIAL_RETRY_DELAY_MS / 1000) + "s)");
                     }
                 }
 

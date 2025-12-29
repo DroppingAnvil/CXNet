@@ -25,7 +25,7 @@ public class MultiPeerTest {
     private static final String EPOCH_DIR = "C:\\Users\\Alexw\\Documents\\AD\\CXNET";
 
     // TEST CONFIGURATION
-    private static final boolean SEND_MESSAGES = false;  // Set to true to send 105 test messages
+    private static boolean SEND_MESSAGES = false;  // Will be enabled if P2P discovery succeeds
     private static final int MESSAGE_COUNT = 105;        // Number of messages to send if enabled
 
     public static void main(String[] args) {
@@ -126,13 +126,118 @@ public class MultiPeerTest {
             }
             System.out.println("  ✓ P2P discovery period complete!");
 
+            // Step 2c: Wait for all peers to reach READY state (using separate monitoring thread)
+            System.out.println("\nStep 2c: Waiting for all peers to reach READY state...");
+
+            final boolean[] allReady = {false};
+            final long startTime = System.currentTimeMillis();
+            final int maxWaitSeconds = 120;  // 2 minute timeout
+
+            // Create monitoring thread (non-blocking)
+            Thread stateMonitor = new Thread(() -> {
+                int checkCount = 0;
+                while (!allReady[0] && checkCount < maxWaitSeconds) {
+                    try {
+                        Thread.sleep(3000);  // Check every 3 seconds
+                        checkCount += 3;
+
+                        // Check if all peers are READY
+                        int readyCount = 0;
+                        for (ConnectX peer : peers) {
+                            if (peer.state == dev.droppinganvil.v3.State.READY) {
+                                readyCount++;
+                            }
+                        }
+
+                        if (readyCount == peers.size()) {
+                            long elapsed = (System.currentTimeMillis() - startTime) / 1000;
+                            System.out.println("  ✓ All peers READY after " + elapsed + " seconds!");
+
+                            // Log discovered peer counts
+                            int totalDiscovered = 0;
+                            for (ConnectX peer : peers) {
+                                int peerCount = peer.dataContainer.getLocalPeerCount();
+                                totalDiscovered += peerCount;
+                                if (peerCount > 0) {
+                                    System.out.println("    Peer " + peer.getOwnID().substring(0, 8) + " discovered " + peerCount + " local peers");
+                                }
+                            }
+                            System.out.println("  Total P2P peers discovered: " + totalDiscovered);
+
+                            allReady[0] = true;
+                            SEND_MESSAGES = true;  // Enable message test
+                        } else if (checkCount % 15 == 0) {
+                            // Log progress every 15 seconds
+                            System.out.println("  [" + checkCount + "s] " + readyCount + "/" + peers.size() + " peers READY...");
+                        }
+                    } catch (InterruptedException e) {
+                        break;
+                    }
+                }
+
+                if (!allReady[0]) {
+                    System.out.println("  ⚠ Timeout: Not all peers reached READY state after " + maxWaitSeconds + "s");
+                    System.out.println("  Skipping message test...");
+                }
+            });
+
+            stateMonitor.setName("State-Monitor-Thread");
+            stateMonitor.setDaemon(false);  // Not daemon - we need to wait for it
+            stateMonitor.start();
+
+            // Wait for monitoring thread to complete
+            try {
+                stateMonitor.join();
+            } catch (InterruptedException e) {
+                System.err.println("  ✗ State monitoring interrupted");
+            }
+
+            // Step 2d: P2P Message Test using TESTNET (CXN scope broadcast)
+            System.out.println("\nStep 2d: Testing P2P message delivery via CXN broadcast...");
+            System.out.println("  HV Peers discovered: " + PeerDirectory.hv.size());
+
+            // Check if peers have TESTNET loaded (should be from bootstrap seed)
+            int testnetCount = 0;
+            for (ConnectX peer : peers) {
+                if (peer.getNetwork("TESTNET") != null) {
+                    testnetCount++;
+                }
+            }
+            System.out.println("  Peers with TESTNET loaded: " + testnetCount + "/" + peers.size());
+
+            if (SEND_MESSAGES && testnetCount > 0) {
+                System.out.println("  Sending " + MESSAGE_COUNT + " CXN messages to TESTNET...");
+
+                for (int i = 0; i < MESSAGE_COUNT; i++) {
+                    String msg = "P2P CXN test message #" + (i+1);
+
+                    // Send CXN scope message (broadcasts to all peers in network)
+                    peers.get(0).buildEvent(EventType.MESSAGE, msg.getBytes())
+                        .toNetwork("TESTNET")
+                        .queue();
+
+                    if ((i+1) % 25 == 0) {
+                        System.out.println("    " + (i+1) + " CXN messages queued...");
+                        Thread.sleep(500);
+                    }
+                }
+
+                System.out.println("  Waiting for P2P CXN message delivery...");
+                Thread.sleep(5000);
+                System.out.println("  ✓ P2P CXN message test complete (check logs for RECEIVED MESSAGE entries)");
+            } else if (!SEND_MESSAGES) {
+                System.out.println("  ⚠ P2P message test skipped (SEND_MESSAGES=false)");
+            } else {
+                System.out.println("  ⚠ P2P message test skipped (TESTNET not loaded on any peers)");
+            }
+
             // Step 3: Wait for bootstrap to complete (with periodic checks)
             System.out.println("\nStep 3: Waiting for bootstrap to complete...");
             int successCount = 0;
-            int maxWaitSeconds = 30;
+            int bootstrapMaxWaitSeconds = 30;
             int checkIntervalSeconds = 3;
 
-            for (int elapsed = 0; elapsed < maxWaitSeconds; elapsed += checkIntervalSeconds) {
+            for (int elapsed = 0; elapsed < bootstrapMaxWaitSeconds; elapsed += checkIntervalSeconds) {
                 Thread.sleep(checkIntervalSeconds * 1000);
 
                 // Count how many peers have CXNET

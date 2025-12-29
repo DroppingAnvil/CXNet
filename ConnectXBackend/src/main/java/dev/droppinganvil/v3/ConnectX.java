@@ -69,6 +69,9 @@ public class ConnectX {
     // Each instance has its own queues and processors to avoid cross-instance contamination
     public final Queue<InputBundle> eventQueue = new ConcurrentLinkedQueue<>();
     public final Queue<OutputBundle> outputQueue = new ConcurrentLinkedQueue<>();
+    // Retry queue for failed events that need to be retried with exponential backoff
+    // This prevents failed events (e.g., to offline EPOCH) from blocking the main output queue
+    public final Queue<dev.droppinganvil.v3.network.nodemesh.RetryBundle> retryQueue = new ConcurrentLinkedQueue<>();
     public File cxRoot = new File("ConnectX");
     public File nodemesh;
     public File resources;

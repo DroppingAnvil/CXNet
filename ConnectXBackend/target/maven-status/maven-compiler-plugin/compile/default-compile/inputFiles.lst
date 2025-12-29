@@ -54,6 +54,7 @@ C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\dropp
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\nodemesh\OutConnectionController.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\nodemesh\OutputBundle.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\nodemesh\PeerDirectory.java
+C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\nodemesh\RetryBundle.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\nodemesh\TransmitPref.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\remotedirectory\ReadOnlyException.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\remotedirectory\RemoteDirectory.java
@@ -64,6 +65,7 @@ C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\dropp
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\services\messagex\MessageXContainer.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\threads\EventProcessor.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\threads\OutputProcessor.java
+C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\threads\RetryProcessor.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\threads\SocketWatcher.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\UnauthorizedNetworkConnectivityException.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\Permission.java

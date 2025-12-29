@@ -176,6 +176,14 @@ public class DataContainer implements Serializable {
     }
 
     /**
+     * Get count of discovered local peers
+     * @return Number of peers discovered via LAN/P2P
+     */
+    public int getLocalPeerCount() {
+        return localPeerAddresses.size();
+    }
+
+    /**
      * Get all local peer addresses (map of peerID -> address list)
      */
     public Map<String, List<String>> getAllLocalPeerAddresses() {

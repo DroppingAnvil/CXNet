@@ -149,4 +149,51 @@ public class PeerDirectory implements Serializable {
     public static boolean stableConnection() {
         return true;
     }
+
+    /**
+     * Get all known addresses for a peer from all available sources:
+     * - Node addresses from PeerDirectory (hv, seen, lan, peerCache)
+     * - CXHELLO discovered addresses from DataContainer
+     * - Bridge addresses
+     *
+     * Returns addresses in priority order (direct/LAN first, then bridges)
+     *
+     * @param cxID The peer ID to look up
+     * @param connectX ConnectX instance (for DataContainer access)
+     * @return List of all known addresses for this peer, empty list if none found
+     */
+    public static java.util.List<String> getAllAddresses(String cxID, ConnectX connectX) {
+        java.util.List<String> addresses = new java.util.ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>(); // Track duplicates
+
+        if (cxID == null) return addresses;
+
+        // PRIORITY 1: CXHELLO discovered LAN addresses (highest priority for P2P)
+        if (connectX != null && connectX.dataContainer != null) {
+            java.util.List<String> lanAddresses = connectX.dataContainer.getLocalPeerAddresses(cxID);
+            for (String addr : lanAddresses) {
+                if (addr != null && !addr.isEmpty() && !seen.contains(addr)) {
+                    addresses.add(addr);
+                    seen.add(addr);
+                }
+            }
+        }
+
+        // PRIORITY 2: Check all PeerDirectory maps for Node.addr
+        Node[] nodesToCheck = new Node[] {
+            lan.get(cxID),      // LAN discovered nodes
+            hv.get(cxID),       // High-value peers (seeds, registered)
+            PeerDirectory.seen.get(cxID), // Recently seen peers
+            peerCache.get(cxID) // Cached peer info
+        };
+
+        for (Node node : nodesToCheck) {
+            if (node != null && node.addr != null && !node.addr.isEmpty() && !seen.contains(node.addr)) {
+                addresses.add(node.addr);
+                seen.add(node.addr);
+            }
+        }
+
+        return addresses;
+    }
 }

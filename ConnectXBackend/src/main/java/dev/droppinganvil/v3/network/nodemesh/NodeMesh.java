@@ -89,6 +89,11 @@ public class NodeMesh {
         outputProcessor.setName("OutputProcessor");
         outputProcessor.start();
 
+        // Start RetryProcessor for handling failed events with exponential backoff
+        Thread retryProcessor = new Thread(new dev.droppinganvil.v3.network.threads.RetryProcessor(outController));
+        retryProcessor.setName("RetryProcessor");
+        retryProcessor.start();
+
         return nodeMesh;
     }
     public void processNetworkInput(InputStream is, Socket socket) throws IOException, DecryptionFailureException, ClassNotFoundException, UnauthorizedNetworkConnectivityException {

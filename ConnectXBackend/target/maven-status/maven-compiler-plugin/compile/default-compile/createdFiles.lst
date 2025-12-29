@@ -14,6 +14,7 @@ dev\droppinganvil\v3\network\nodemesh\Connections.class
 dev\droppinganvil\v3\crypt\core\exceptions\CryptException.class
 dev\droppinganvil\v3\edge\ProductPackage.class
 dev\droppinganvil\v3\crypt\core\exceptions\DecryptionFailureException.class
+dev\droppinganvil\v3\network\nodemesh\RetryBundle.class
 dev\droppinganvil\v3\network\nodemesh\bridge\http\HTTPBridgeProvider$CXMessageHandler.class
 dev\droppinganvil\v3\network\events\NetworkContainer.class
 dev\droppinganvil\v3\utils\obj\AuditableLong.class
@@ -41,6 +42,7 @@ dev\droppinganvil\v3\network\BlockchainPersistence$ChainMetadata.class
 dev\droppinganvil\v3\network\threads\EventProcessor.class
 dev\droppinganvil\v3\test\BlockSyncTest.class
 dev\droppinganvil\v3\ConnectX$1.class
+dev\droppinganvil\v3\network\threads\RetryProcessor.class
 dev\droppinganvil\v3\network\UnauthorizedNetworkConnectivityException.class
 dev\droppinganvil\v3\test\BlockRotationTest.class
 dev\droppinganvil\v3\Permission.class

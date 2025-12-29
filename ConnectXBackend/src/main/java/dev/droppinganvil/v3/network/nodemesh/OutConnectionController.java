@@ -62,23 +62,7 @@ public class OutConnectionController {
 
         // Sign the NetworkContainer (outer layer) with our signature as the transmitter
         byte[] cryptNetworkContainer = connectXAPI.signObject(nc, NetworkContainer.class, nc.se).toByteArray();
-        if (out.ne.p != null && out.ne.p.scope != null && out.ne.p.scope.equalsIgnoreCase("CXNET")) {
-            for (Node n : PeerDirectory.hv.values()) {
-                try {
-                    if (n.addr != null) {
-                        String[] addr = n.addr.split(":");
-                        Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
-                        s.getOutputStream().write(cryptNetworkContainer);
-                        s.close();
-                    }
-                    if (n.path != null) {
-                        //TODO
-                    }
-                } catch (Exception e) {
-                    continue;
-                }
-            }
-        } else if (out.ne.p != null && out.ne.p.scope != null) {
+        if (out.ne.p != null && out.ne.p.scope != null) {
             if (out.ne.p.scope.equalsIgnoreCase("CXS")) {
                 // Single peer transmission using CXPath.cxID
                 // MULTI-PATH ROUTING: Try ALL available routes for redundancy
@@ -197,55 +181,37 @@ public class OutConnectionController {
                     for (Node n : PeerDirectory.hv.values()) {
                         // Don't send to ourselves
                         if (n.cxID != null && !n.cxID.equals(connectXAPI.getOwnID())) {
-                            // MULTI-PATH ROUTING: Try ALL routes for this peer
+                            // MULTI-PATH ROUTING: Use getAllAddresses() to check all sources
+                            java.util.List<String> addresses = PeerDirectory.getAllAddresses(n.cxID, connectXAPI);
                             StringBuilder routes = new StringBuilder();
 
-                            // ROUTE 1: Try bridge if available
-                            if (n.addr != null && !n.addr.isEmpty() && n.addr.contains(":") &&
-                                !n.addr.matches("^\\d+\\.\\d+\\.\\d+\\.\\d+:.*")) {
+                            for (String address : addresses) {
                                 try {
-                                    // This is a bridge address like "cxHTTP1:https://..."
-                                    String[] parts = n.addr.split(":", 2);
-                                    String bridgeProtocol = parts[0];
-                                    String bridgeEndpoint = parts[1];
+                                    // Check if this is a bridge address (contains protocol prefix)
+                                    if (address.contains(":") && !address.matches("^\\d+\\.\\d+\\.\\d+\\.\\d+:.*")) {
+                                        // Bridge address like "cxHTTP1:https://..."
+                                        String[] parts = address.split(":", 2);
+                                        String bridgeProtocol = parts[0];
+                                        String bridgeEndpoint = parts[1];
 
-                                    dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =
-                                        connectXAPI.getBridgeProvider(bridgeProtocol);
-                                    if (bridge != null) {
-                                        dev.droppinganvil.v3.network.CXPath peerPath = new dev.droppinganvil.v3.network.CXPath();
-                                        peerPath.bridgeArg = bridgeEndpoint;
-                                        bridge.transmitEvent(peerPath, cryptNetworkContainer);
-                                        routes.append(bridgeProtocol).append("+");
+                                        dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =
+                                            connectXAPI.getBridgeProvider(bridgeProtocol);
+                                        if (bridge != null) {
+                                            dev.droppinganvil.v3.network.CXPath peerPath = new dev.droppinganvil.v3.network.CXPath();
+                                            peerPath.bridgeArg = bridgeEndpoint;
+                                            bridge.transmitEvent(peerPath, cryptNetworkContainer);
+                                            routes.append(bridgeProtocol).append("+");
+                                        }
+                                    } else {
+                                        // Direct/LAN address (IP:port)
+                                        String[] addr = address.split(":");
+                                        Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
+                                        s.getOutputStream().write(cryptNetworkContainer);
+                                        s.close();
+                                        routes.append("LAN-Direct+");
                                     }
                                 } catch (Exception e) {
-                                    // Route failed
-                                }
-                            }
-
-                            // ROUTE 2: Try standard P2P address if available
-                            if (n.addr != null && !n.addr.isEmpty() && n.addr.matches("^\\d+\\.\\d+\\.\\d+\\.\\d+:.*")) {
-                                try {
-                                    String[] addr = n.addr.split(":");
-                                    Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
-                                    s.getOutputStream().write(cryptNetworkContainer);
-                                    s.close();
-                                    routes.append("P2P+");
-                                } catch (Exception e) {
-                                    // Route failed
-                                }
-                            }
-
-                            // ROUTE 3: Try local address from DataContainer
-                            String localAddr = connectXAPI.dataContainer.getLocalPeerAddress(n.cxID);
-                            if (localAddr != null && !localAddr.isEmpty()) {
-                                try {
-                                    String[] addr = localAddr.split(":");
-                                    Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
-                                    s.getOutputStream().write(cryptNetworkContainer);
-                                    s.close();
-                                    routes.append("LAN+");
-                                } catch (Exception e) {
-                                    // Route failed
+                                    // This route failed, try next
                                 }
                             }
 

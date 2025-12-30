@@ -179,6 +179,10 @@ public class ConnectX {
         }
         nodemesh = new File(cxRoot, "nodemesh");
         if (!nodemesh.exists()) if (!nodemesh.mkdir()) throw new IOException();
+
+        // Initialize PeerDirectory.peers for signed node persistence
+        dev.droppinganvil.v3.network.nodemesh.PeerDirectory.peers = nodemesh;
+
         resources = new File(nodemesh, "nodemesh-resources");
         if (!resources.exists()) if (!resources.mkdir()) throw new IOException();
 
@@ -868,6 +872,9 @@ public class ConnectX {
 
                 System.out.println("[Bootstrap] Successfully bootstrapped from local seed");
 
+                // Initiate P2P discovery with peers from seed (works even if EPOCH is offline)
+                initiateP2PDiscovery();
+
                 // Request updated seed from EPOCH (local seed may be outdated)
                 requestSeedUpdateFromEpoch();
                 return;
@@ -1065,6 +1072,53 @@ public class ConnectX {
         } catch (Exception e) {
             System.err.println("[Bootstrap] Failed to request seed from EPOCH: " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+
+    /**
+     * Initiate P2P discovery with all peers from seed
+     * Sends NewNode and PeerFinding to establish crypto and discover more peers
+     * This allows bootstrap to work even when EPOCH is offline
+     */
+    private void initiateP2PDiscovery() {
+        try {
+            System.out.println("[P2P Discovery] Contacting " + PeerDirectory.hv.size() + " peers from seed...");
+
+            int contactAttempts = 0;
+            for (Node peer : PeerDirectory.hv.values()) {
+                if (peer.cxID == null || peer.cxID.equals(getOwnID())) {
+                    continue; // Skip invalid or self
+                }
+
+                try {
+                    // Send NewNode to establish cryptography
+                    System.out.println("[P2P Discovery] Sending NewNode to " + peer.cxID.substring(0, 8));
+                    String selfJson = serialize("cxJSON1", self);
+                    buildEvent(EventType.NewNode, selfJson.getBytes("UTF-8"))
+                        .toPeer(peer.cxID)
+                        .queue();
+
+                    // Send PeerFinding request to discover more peers
+                    System.out.println("[P2P Discovery] Sending PeerFinding to " + peer.cxID.substring(0, 8));
+                    dev.droppinganvil.v3.network.events.PeerFinding peerFindingReq =
+                        new dev.droppinganvil.v3.network.events.PeerFinding();
+                    peerFindingReq.t = "request";
+                    peerFindingReq.network = "CXNET"; // Request CXNET peers
+                    String peerFindingJson = serialize("cxJSON1", peerFindingReq);
+                    buildEvent(EventType.PeerFinding, peerFindingJson.getBytes("UTF-8"))
+                        .toPeer(peer.cxID)
+                        .queue();
+
+                    contactAttempts++;
+
+                } catch (Exception e) {
+                    System.out.println("[P2P Discovery] Failed to contact " + peer.cxID.substring(0, 8) + ": " + e.getMessage());
+                }
+            }
+
+            System.out.println("[P2P Discovery] Initial discovery requests queued to " + contactAttempts + " peers");
+        } catch (Exception e) {
+            System.err.println("[P2P Discovery] Discovery failed: " + e.getMessage());
         }
     }
 

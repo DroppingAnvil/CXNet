@@ -121,12 +121,80 @@ public class PeerDirectory implements Serializable {
         }
     }
 
+    // Cache of signed node blobs for relaying without re-signing
+    public static ConcurrentHashMap<String, byte[]> signedNodeCache = new ConcurrentHashMap<>();
+
     public static void addNode(Node n, byte[] signed) {
         if (Node.validate(n)) {
-            //TODO implement node persistence with signed bytes
+            // Add to in-memory directories (same as regular addNode)
+            addNode(n);
+
+            // Cache the signed blob for relaying
+            if (signed != null) {
+                signedNodeCache.put(n.cxID, signed);
+
+                // Persist to disk (nodemesh/{first_char}/{cxID}.cxi)
+                try {
+                    if (peers != null) {
+                        char firstChar = n.cxID.charAt(0);
+                        File peerGroup = new File(peers, String.valueOf(firstChar));
+                        if (!peerGroup.exists()) {
+                            peerGroup.mkdirs();
+                        }
+
+                        File peerFile = new File(peerGroup, n.cxID + ".cxi");
+                        java.io.FileOutputStream fos = new java.io.FileOutputStream(peerFile);
+                        fos.write(signed);
+                        fos.flush();
+                        fos.close();
+
+                        System.out.println("[PeerDirectory] Persisted signed node: " + n.cxID.substring(0, 8) + " (" + signed.length + " bytes)");
+                    }
+                } catch (Exception e) {
+                    System.err.println("[PeerDirectory] Failed to persist node " + n.cxID + ": " + e.getMessage());
+                }
+            }
         } else {
             throw new IllegalStateException();
         }
+    }
+
+    /**
+     * Get signed node blob from cache or disk
+     * Returns the original signed bytes for relaying without re-signing
+     * @param cxID The node ID to get signed blob for
+     * @return Signed node bytes, or null if not available
+     */
+    public static byte[] getSignedNode(String cxID) {
+        // Check memory cache first
+        if (signedNodeCache != null && signedNodeCache.containsKey(cxID)) {
+            return signedNodeCache.get(cxID);
+        }
+
+        // Try loading from disk
+        if (peers != null) {
+            try {
+                char firstChar = cxID.charAt(0);
+                File peerGroup = new File(peers, String.valueOf(firstChar));
+                File peerFile = new File(peerGroup, cxID + ".cxi");
+
+                if (peerFile.exists()) {
+                    java.io.FileInputStream fis = new java.io.FileInputStream(peerFile);
+                    byte[] signedBytes = fis.readAllBytes();
+                    fis.close();
+
+                    // Cache for future use
+                    if (signedNodeCache == null) signedNodeCache = new ConcurrentHashMap<>();
+                    signedNodeCache.put(cxID, signedBytes);
+
+                    return signedBytes;
+                }
+            } catch (Exception e) {
+                System.err.println("[PeerDirectory] Failed to load signed node " + cxID + ": " + e.getMessage());
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -142,6 +210,7 @@ public class PeerDirectory implements Serializable {
         if (seen != null) seen.remove(cxID);
         if (lan != null) lan.remove(cxID);
         if (peerCache != null) peerCache.remove(cxID);
+        if (signedNodeCache != null) signedNodeCache.remove(cxID);
 
         System.out.println("[PeerDirectory] Removed node: " + cxID);
     }
@@ -171,10 +240,12 @@ public class PeerDirectory implements Serializable {
         // PRIORITY 1: CXHELLO discovered LAN addresses (highest priority for P2P)
         if (connectX != null && connectX.dataContainer != null) {
             java.util.List<String> lanAddresses = connectX.dataContainer.getLocalPeerAddresses(cxID);
+            System.out.println("[getAllAddresses] Peer " + cxID.substring(0, 8) + ": Found " + lanAddresses.size() + " LAN addresses in DataContainer");
             for (String addr : lanAddresses) {
                 if (addr != null && !addr.isEmpty() && !seen.contains(addr)) {
                     addresses.add(addr);
                     seen.add(addr);
+                    System.out.println("[getAllAddresses]   - LAN: " + addr);
                 }
             }
         }
@@ -191,9 +262,11 @@ public class PeerDirectory implements Serializable {
             if (node != null && node.addr != null && !node.addr.isEmpty() && !seen.contains(node.addr)) {
                 addresses.add(node.addr);
                 seen.add(node.addr);
+                System.out.println("[getAllAddresses]   - Node: " + node.addr);
             }
         }
 
+        System.out.println("[getAllAddresses] Total addresses for " + cxID.substring(0, 8) + ": " + addresses.size());
         return addresses;
     }
 }

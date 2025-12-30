@@ -78,14 +78,12 @@ public class MultiPeerTest {
                 // Using public DNS through RProx for security-compliant testing
                 boolean usePublicDNS = true; // RProx is configured
                 String publicEndpoint;
-                if (usePublicDNS && i <= 3) {
                     // Production addresses (RProx configured: cx1, cx2, cx3)
+
+                // IMPORTANT NOTE: The testing environment shown with logs has peer1-5 with their only public addresses being the HTTP bridges (cx1.anvildevelopment.us,cx2,cx3,...) only 1-3 have DNS records for their names and only 1-3
+                // are allowed publicly through the firewall, the idea here is that some nodes will be able to communicate with EPOCH through HTTP and they will be able to relay communication from firewalled nodes seamlessly and automatically
                     publicEndpoint = "https://cx" + i + ".anvildevelopment.us/cx";
-                } else {
-                    // Fallback for peers 4-5 (use localhost for now)
                     //TODO MultiAddress support per node
-                    publicEndpoint = "http://localhost:" + httpPort + "/cx";
-                }
 
                 try {
                     // Get THIS peer's bridge provider instance (not the global one)
@@ -192,28 +190,95 @@ public class MultiPeerTest {
                 System.err.println("  ✗ State monitoring interrupted");
             }
 
-            // Step 2d: P2P Message Test using TESTNET (CXN scope broadcast)
+            // Step 2c.5: Async wait for CXHELLO exchanges to complete
+            // READY state means scanning finished, but CXHELLO responses are still being processed
+            // TIMING BOTTLENECKS:
+            // - OutputProcessor polls queue every 10ms (NodeConfig.IO_THREAD_SLEEP)
+            // - Each CXHELLO transmission sleeps 500ms before closing socket
+            // - With 4 peers discovering each other, cumulative delay can exceed 60s
+            System.out.println("\nStep 2c.5: Waiting for CXHELLO exchanges to complete...");
+            System.out.println("  Initial HV peers: " + PeerDirectory.hv.size());
+            System.out.println("  Expected HV peers: " + (peers.size() - 1) + " (excluding EPOCH, each peer sees others)");
+
+            final int cxhelloWaitSeconds = 180; // Increased to 3 minutes to account for CXHELLO delays
+            final int expectedPeers = peers.size() - 1; // Each peer should see all others (excluding EPOCH for now)
+            Thread cxhelloWait = new Thread(() -> {
+                int elapsed = 0;
+                int lastHvSize = PeerDirectory.hv.size();
+                int stableCount = 0; // Track how long size has been stable
+
+                while (elapsed < cxhelloWaitSeconds) {
+                    try {
+                        Thread.sleep(5000); // Check every 5 seconds
+                        elapsed += 5;
+
+                        int currentHvSize = PeerDirectory.hv.size();
+                        if (currentHvSize > lastHvSize) {
+                            System.out.println("  [" + elapsed + "s] HV peers: " + lastHvSize + " → " + currentHvSize);
+                            lastHvSize = currentHvSize;
+                            stableCount = 0; // Reset stability counter
+                        } else if (currentHvSize == lastHvSize && currentHvSize > 1) {
+                            stableCount += 5; // Increment stability counter
+                        }
+
+                        // SUCCESS: We have expected peers AND stable for 15+ seconds
+                        if (currentHvSize >= expectedPeers && stableCount >= 15) {
+                            System.out.println("  ✓ CXHELLO exchanges complete after " + elapsed + "s");
+                            System.out.println("    HV peers: " + currentHvSize + " (expected: " + expectedPeers + ")");
+                            System.out.println("    Stable for: " + stableCount + "s");
+                            break;
+                        }
+
+                        // EARLY EXIT: We have more than EPOCH and stable for 20+ seconds
+                        // (even if we haven't reached expected count, progress might have stalled)
+                        if (currentHvSize > 1 && stableCount >= 20) {
+                            System.out.println("  ⚠ CXHELLO exchanges stabilized after " + elapsed + "s");
+                            System.out.println("    HV peers: " + currentHvSize + " (expected: " + expectedPeers + ")");
+                            System.out.println("    Stable for: " + stableCount + "s");
+                            break;
+                        }
+                    } catch (InterruptedException e) {
+                        break;
+                    }
+                }
+
+                if (elapsed >= cxhelloWaitSeconds) {
+                    System.out.println("  ⚠ CXHELLO wait timeout after " + cxhelloWaitSeconds + "s (HV peers: " + PeerDirectory.hv.size() + ")");
+                }
+            });
+
+            cxhelloWait.setName("CXHELLO-Wait-Thread");
+            cxhelloWait.setDaemon(false);
+            cxhelloWait.start();
+
+            try {
+                cxhelloWait.join();
+            } catch (InterruptedException e) {
+                System.err.println("  ✗ CXHELLO wait interrupted");
+            }
+
+            // Step 2d: P2P Message Test using CXNET (CXN scope broadcast)
             System.out.println("\nStep 2d: Testing P2P message delivery via CXN broadcast...");
             System.out.println("  HV Peers discovered: " + PeerDirectory.hv.size());
 
-            // Check if peers have TESTNET loaded (should be from bootstrap seed)
-            int testnetCount = 0;
+            // Check if peers have CXNET loaded (should be from bootstrap seed)
+            int cxnetCount = 0;
             for (ConnectX peer : peers) {
-                if (peer.getNetwork("TESTNET") != null) {
-                    testnetCount++;
+                if (peer.getNetwork("CXNET") != null) {
+                    cxnetCount++;
                 }
             }
-            System.out.println("  Peers with TESTNET loaded: " + testnetCount + "/" + peers.size());
+            System.out.println("  Peers with CXNET loaded: " + cxnetCount + "/" + peers.size());
 
-            if (SEND_MESSAGES && testnetCount > 0) {
-                System.out.println("  Sending " + MESSAGE_COUNT + " CXN messages to TESTNET...");
+            if (SEND_MESSAGES && cxnetCount > 0) {
+                System.out.println("  Sending " + MESSAGE_COUNT + " CXN messages to CXNET...");
 
                 for (int i = 0; i < MESSAGE_COUNT; i++) {
                     String msg = "P2P CXN test message #" + (i+1);
 
                     // Send CXN scope message (broadcasts to all peers in network)
                     peers.get(0).buildEvent(EventType.MESSAGE, msg.getBytes())
-                        .toNetwork("TESTNET")
+                        .toNetwork("CXNET")
                         .queue();
 
                     if ((i+1) % 25 == 0) {
@@ -228,7 +293,7 @@ public class MultiPeerTest {
             } else if (!SEND_MESSAGES) {
                 System.out.println("  ⚠ P2P message test skipped (SEND_MESSAGES=false)");
             } else {
-                System.out.println("  ⚠ P2P message test skipped (TESTNET not loaded on any peers)");
+                System.out.println("  ⚠ P2P message test skipped (CXNET not loaded on any peers)");
             }
 
             // Step 3: Wait for bootstrap to complete (with periodic checks)

@@ -47,4 +47,10 @@ public class NetworkEvent implements Serializable {
      * Default: false (most events are not recorded)
      */
     public boolean r = false;
+    /**
+     * This flag identifies if the inner data NetworkEvent.d will be signed or encrypted
+     * False: NodeMesh will treat the inner data as signed event data and will check signatures then attempt deserialization into desired object type
+     * True: NodeMesh will treat the inner data as E2E encrypted, and will attempt to decrypt it into desired object, but if it cannot due to cryptographic access control, or due to it being out of scope NodeMesh will use TransmitPref from NetworkContainer to determine routing/proxy
+     */
+    public boolean e2e = false;
 }

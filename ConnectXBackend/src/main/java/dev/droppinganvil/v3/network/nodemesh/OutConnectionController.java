@@ -76,12 +76,14 @@ public class OutConnectionController {
                     n = PeerDirectory.lookup(out.ne.p.cxID, true, true);
                 }
 
-                // ROUTE 1: Try HTTP bridge from node address
-                if (n != null && n.addr != null && !n.addr.isEmpty()) {
+                // Use getAllAddresses() for priority-ordered multi-source lookup (LAN-Direct prioritized)
+                java.util.List<String> addresses = PeerDirectory.getAllAddresses(out.ne.p.cxID, connectXAPI);
+
+                for (String address : addresses) {
                     try {
-                        if (n.addr.contains(":") && !n.addr.matches("^\\d+\\.\\d+\\.\\d+\\.\\d+:.*")) {
+                        if (address.contains(":") && !address.matches("^\\d+\\.\\d+\\.\\d+:.*")) {
                             // This is a bridge address like "cxHTTP1:https://..."
-                            String[] parts = n.addr.split(":", 2);
+                            String[] parts = address.split(":", 2);
                             String bridgeProtocol = parts[0];
                             String bridgeEndpoint = parts[1];
 
@@ -93,23 +95,27 @@ public class OutConnectionController {
                                 bridge.transmitEvent(bridgePath, cryptNetworkContainer);
                                 sentViaAnyRoute = true;
                                 routesUsed.append(bridgeProtocol).append("+");
+                                break; // Success - stop trying
                             }
                         } else {
-                            // Standard P2P address (IP:port) from PeerDirectory
-                            String[] addr = n.addr.split(":");
+                            // Direct/LAN address (IP:port)
+                            String[] addr = address.split(":");
                             Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
                             s.getOutputStream().write(cryptNetworkContainer);
                             s.close();
                             sentViaAnyRoute = true;
-                            routesUsed.append("P2P-Directory+");
+                            routesUsed.append("LAN-Direct+");
+                            System.out.println("[OutController] LAN-Direct SUCCESS to " + address);
+                            break; // Success - stop trying
                         }
                     } catch (Exception e) {
-                        // Route failed, try next
+                        // This address failed, try next one
+                        continue;
                     }
                 }
 
-                // ROUTE 2: Try CXPath bridge from event path
-                if (out.ne.p.bridge != null && out.ne.p.bridgeArg != null) {
+                // Fallback: Try CXPath bridge from event path if getAllAddresses didn't work
+                if (!sentViaAnyRoute && out.ne.p.bridge != null && out.ne.p.bridgeArg != null) {
                     try {
                         dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =
                             connectXAPI.getBridgeProvider(out.ne.p.bridge);
@@ -119,25 +125,7 @@ public class OutConnectionController {
                             routesUsed.append(out.ne.p.bridge).append("-Path+");
                         }
                     } catch (Exception e) {
-                        // Route failed, try next
-                    }
-                }
-
-                // ROUTE 3: Try local/direct address from DataContainer (LAN discovery)
-                String localAddress = connectXAPI.dataContainer.getLocalPeerAddress(out.ne.p.cxID);
-                System.out.println("[OutController-DEBUG] Looking up local address for " + out.ne.p.cxID.substring(0, 8) + ": " + localAddress);
-                if (localAddress != null && !localAddress.isEmpty()) {
-                    try {
-                        String[] addr = localAddress.split(":");
-                        Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
-                        s.getOutputStream().write(cryptNetworkContainer);
-                        s.close();
-                        sentViaAnyRoute = true;
-                        routesUsed.append("LAN-Direct+");
-                        System.out.println("[OutController] LAN-Direct SUCCESS to " + localAddress);
-                    } catch (Exception e) {
-                        System.out.println("[OutController] LAN-Direct FAILED to " + localAddress + ": " + e.getMessage());
-                        // Route failed, try next
+                        // Route failed
                     }
                 }
 
@@ -178,12 +166,20 @@ public class OutConnectionController {
                     // - Backend priority (fireEvent)
                     // - Blockchain recording (peerProxy)
                     // - Global distribution (peerBroad)
+                    // IMPORTANT: Always try ALL peers even if some are unreachable
+                    // Other nodes might have different paths to unreachable peers
+                    int totalPeers = 0;
+                    int successfulPeers = 0;
+                    int failedPeers = 0;
+
                     for (Node n : PeerDirectory.hv.values()) {
                         // Don't send to ourselves
                         if (n.cxID != null && !n.cxID.equals(connectXAPI.getOwnID())) {
+                            totalPeers++;
                             // MULTI-PATH ROUTING: Use getAllAddresses() to check all sources
                             java.util.List<String> addresses = PeerDirectory.getAllAddresses(n.cxID, connectXAPI);
                             StringBuilder routes = new StringBuilder();
+                            boolean sentToThisPeer = false;
 
                             for (String address : addresses) {
                                 try {
@@ -200,7 +196,9 @@ public class OutConnectionController {
                                             dev.droppinganvil.v3.network.CXPath peerPath = new dev.droppinganvil.v3.network.CXPath();
                                             peerPath.bridgeArg = bridgeEndpoint;
                                             bridge.transmitEvent(peerPath, cryptNetworkContainer);
-                                            routes.append(bridgeProtocol).append("+");
+                                            routes.append(bridgeProtocol);
+                                            sentToThisPeer = true;
+                                            break;  // Successfully sent, no need to try other routes
                                         }
                                     } else {
                                         // Direct/LAN address (IP:port)
@@ -208,19 +206,34 @@ public class OutConnectionController {
                                         Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
                                         s.getOutputStream().write(cryptNetworkContainer);
                                         s.close();
-                                        routes.append("LAN-Direct+");
+                                        routes.append("LAN-Direct");
+                                        sentToThisPeer = true;
+                                        break;  // Successfully sent, no need to try other routes
                                     }
                                 } catch (Exception e) {
-                                    // This route failed, try next
+                                    // This route failed, continue trying other routes for this peer
+                                    // DON'T stop - try all addresses before giving up
                                 }
                             }
 
-                            // Log routes used
-                            if (routes.length() > 0) {
-                                routes.setLength(routes.length() - 1); // Remove trailing "+"
-                                System.out.println("[Multi-Path CXN] " + n.cxID.substring(0, 8) + " via: " + routes);
+                            // Log results for this peer
+                            if (sentToThisPeer) {
+                                System.out.println("[Multi-Path CXN] ✓ " + n.cxID.substring(0, 8) + " via: " + routes);
+                                successfulPeers++;
+                            } else {
+                                // ALL routes failed for this peer - log warning but CONTINUE to next peer
+                                System.out.println("[Multi-Path CXN] ✗ " + n.cxID.substring(0, 8) + " UNREACHABLE (tried " + addresses.size() + " routes)");
+                                failedPeers++;
                             }
                         }
+                    }
+
+                    // Summary logging for CXN broadcast
+                    if (totalPeers > 0) {
+                        String eventType = (out.ne != null && out.ne.eT != null) ? out.ne.eT : "UNKNOWN";
+                        String eventId = (out.ne != null && out.ne.iD != null) ? out.ne.iD.substring(0, 8) : "UNKNOWN";
+                        System.out.println("[CXN Broadcast] " + eventType + " (" + eventId + "...) sent to " +
+                            successfulPeers + "/" + totalPeers + " peers (" + failedPeers + " unreachable)");
                     }
                 }
             }

@@ -6,14 +6,53 @@
 package dev.droppinganvil.v3.network;
 
 public class CXPath {
+    /**
+     * Scope for transmission, usually CXN
+     * CANNOT be null
+     */
     public String scope;
+    /**
+     * Bridge to be used if available for network interaction
+     * Will be null when directly using CX Protocol with Sockets
+     */
     public String bridge;
+    /**
+     * The path the bridge provider will receive on use
+     * Ex. HTTPS://cx.AnvilDevelopment.us/CX
+     * SHOULD be null unless this request is using bridge
+     */
     public String bridgeArg;
+    /**
+     * Network for transmission
+     * Extremely case to case, most events will have network set
+     * Some CXS or lower level messages will not include network information
+     * ALL future request should include network
+     * CXNET is for cross-network communication
+     */
     public String network;
+    /**
+     * Address for direct socket CX connections
+     * Can be null, Nodes can just use bridges for firewall/security
+     */
     public String address;
+    /**
+     * Device ConnectX ID
+     * CANNOT BE NULL
+     * Every request without a ConnectX ID WILL fail
+     */
     public String cxID;
+    /**
+     * Version of resource, REMOTE DIRECTORY not implemented
+     */
     public Integer version;
+    /**
+     * Resource ID on chain, REMOTE DIRECTORY not implemented
+     */
     public String resourceID;
+    /**
+     * Blockchain ID for recording events, view blockchain permissions
+     */
+    public Long chainID;
     public Scope getScope() {
         return Scope.valueOf(scope);
     }

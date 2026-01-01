@@ -353,6 +353,7 @@ public class ConnectX {
         private Node targetNode = null;
         private String recipientPublicKey = null;
         private byte[] signature = null;
+        private java.util.List<String> encryptionRecipients = new java.util.ArrayList<>();
 
         private EventBuilder(ConnectX connectX, EventType eventType, byte[] data) {
             this.connectX = connectX;
@@ -377,10 +378,23 @@ public class ConnectX {
          * Route to a specific network using CXN scope
          * Shorthand for scope("CXN").network(networkId)
          * @param networkId The target network ID
+         * @deprecated Use toNetwork(networkId, chainID) to specify blockchain recording chain
          */
         public EventBuilder toNetwork(String networkId) {
             this.path.scope = "CXN";
             this.path.network = networkId;
+            return this;
+        }
+
+        /**
+         * Route to a specific network using CXN scope with blockchain recording
+         * @param networkId The target network ID
+         * @param chainID The chain ID to record events to (e.g., network.networkDictionary.c3 for events)
+         */
+        public EventBuilder toNetwork(String networkId, Long chainID) {
+            this.path.scope = "CXN";
+            this.path.network = networkId;
+            this.path.chainID = chainID;
             return this;
         }
 
@@ -520,6 +534,15 @@ public class ConnectX {
         }
 
         /**
+         * Set the target blockchain chain ID for recording
+         * @param chainID Chain identifier (c1, c2, or c3)
+         */
+        public EventBuilder chainID(Long chainID) {
+            this.path.chainID = chainID;
+            return this;
+        }
+
+        /**
          * Set a complete custom CXPath
          * @param customPath The CXPath to use
          */
@@ -641,6 +664,76 @@ public class ConnectX {
          */
         public EventBuilder signature(byte[] signature) {
             this.signature = signature;
+            return this;
+        }
+
+        /**
+         * Sign the event data payload
+         * Replaces event.d with a signed blob, preserving the original signature for relay
+         * Used for NewNode events where the Node blob must be signed by the sender
+         * @return This builder for chaining
+         */
+        public EventBuilder signData() {
+            try {
+                // Sign the current data payload
+                ByteArrayInputStream dataInput = new ByteArrayInputStream(this.event.d);
+                ByteArrayOutputStream signedOutput = new ByteArrayOutputStream();
+                connectX.encryptionProvider.sign(dataInput, signedOutput);
+                dataInput.close();
+
+                // Replace event data with signed blob
+                this.event.d = signedOutput.toByteArray();
+                signedOutput.close();
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to sign event data", e);
+            }
+            return this;
+        }
+
+        /**
+         * Add a recipient for E2E encryption
+         * Can be called multiple times to add multiple recipients
+         * Provider should encrypt the message so all listed recipients can decrypt it
+         * @param cxID Recipient's cxID
+         * @return This builder for chaining
+         */
+        public EventBuilder addRecipient(String cxID) {
+            if (cxID != null && !cxID.isEmpty()) {
+                this.encryptionRecipients.add(cxID);
+            }
+            return this;
+        }
+
+        /**
+         * Encrypt the event data payload for all added recipients (E2E encryption)
+         * Sets the e2e flag to true so receiver knows to decrypt
+         * Replaces event.d with encrypted blob that can only be read by recipients
+         * Use addRecipient() before calling this to specify who can decrypt
+         * @return This builder for chaining
+         */
+        public EventBuilder encrypt() {
+            try {
+                if (encryptionRecipients.isEmpty()) {
+                    throw new RuntimeException("No encryption recipients specified - call addRecipient() first");
+                }
+
+                // Encrypt the current data payload for all recipients
+                ByteArrayInputStream dataInput = new ByteArrayInputStream(this.event.d);
+                ByteArrayOutputStream encryptedOutput = new ByteArrayOutputStream();
+                connectX.encryptionProvider.encrypt(dataInput, encryptedOutput, encryptionRecipients);
+                dataInput.close();
+
+                // Replace event data with encrypted blob
+                this.event.d = encryptedOutput.toByteArray();
+                encryptedOutput.close();
+
+                // Set E2E flag so receiver knows to decrypt
+                this.event.e2e = true;
+
+                System.out.println("[E2E] Encrypted event data for " + encryptionRecipients.size() + " recipients");
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to encrypt event data", e);
+            }
             return this;
         }
 
@@ -1091,10 +1184,11 @@ public class ConnectX {
                 }
 
                 try {
-                    // Send NewNode to establish cryptography
+                    // Send NewNode with SIGNED Node blob (receiver will save original signed blob for relay)
                     System.out.println("[P2P Discovery] Sending NewNode to " + peer.cxID.substring(0, 8));
                     String selfJson = serialize("cxJSON1", self);
                     buildEvent(EventType.NewNode, selfJson.getBytes("UTF-8"))
+                        .signData()  // Sign Node JSON to create signed blob (preserves sender signature)
                         .toPeer(peer.cxID)
                         .queue();
 
@@ -1609,15 +1703,21 @@ public class ConnectX {
         // Replay previous blocks to build current permission state
         if (previousBlocks != null) {
             for (dev.droppinganvil.v3.edge.NetworkBlock prevBlock : previousBlocks) {
+                // Prepare previous block: verify and deserialize all events
+                prevBlock.prepare(this);
+
                 // Process permission-modifying events in this block
-                for (NetworkEvent event : prevBlock.networkEvents.values()) {
+                for (NetworkEvent event : prevBlock.deserializedEvents.values()) {
                     updatePermissionState(permissionState, event, network);
                 }
             }
         }
 
+        // Prepare target block: verify and deserialize all events
+        block.prepare(this);
+
         // Now validate each event in the target block against permission state
-        for (java.util.Map.Entry<Integer, NetworkEvent> entry : block.networkEvents.entrySet()) {
+        for (java.util.Map.Entry<Integer, NetworkEvent> entry : block.deserializedEvents.entrySet()) {
             NetworkEvent event = entry.getValue();
 
             // Determine sender from event path or container (stored in event during recording)
@@ -1678,63 +1778,60 @@ public class ConnectX {
         }
     }
 
-    public boolean Event(NetworkEvent ne, String senderID) {
-        if (ne == null || ne.p == null) {
+    /**
+     * Record an already-signed network event to the blockchain
+     * Used for events received from other peers (already signed by sender)
+     *
+     * @param ne Deserialized network event
+     * @param senderID Sender's cxID (must match signature)
+     * @param signedBlob Pre-signed event bytes (cryptographically signed by sender)
+     * @return true if recorded successfully
+     */
+    public boolean Event(NetworkEvent ne, String senderID, byte[] signedBlob) {
+        if (ne == null || ne.p == null || signedBlob == null) {
+            System.err.println("[Blockchain-Debug] Event() null check failed: ne=" + (ne != null) + ", ne.p=" + (ne != null && ne.p != null) + ", signedBlob=" + (signedBlob != null));
             return false;
         }
 
         // Get network ID from CXPath
         String networkID = ne.p.network;
         if (networkID == null || networkID.isEmpty()) {
+            System.err.println("[Blockchain-Debug] Event() networkID check failed: networkID=" + networkID);
             return false;
         }
 
         // Get the network
         CXNetwork network = networkMap.get(networkID);
         if (network == null) {
+            System.err.println("[Blockchain-Debug] Event() network not found: networkID=" + networkID + ", available networks=" + networkMap.keySet());
             return false;
         }
 
-        // Determine which chain to use based on event type
-        // c1 (Admin): State-modifying events (REGISTER_NODE, BLOCK_NODE, UNBLOCK_NODE, permissions)
-        // c2 (Resources): Resource metadata events
-        // c3 (Events): Ephemeral events (MESSAGE, etc.)
-        NetworkRecord targetChain = network.c3;
-        Long chainID = network.networkDictionary.c3;
+        // Get chain ID from CXPath (now stored in path instead of inferred from event type)
+        Long chainID = ne.p.chainID;
+        if (chainID == null) {
+            System.err.println("[Blockchain] Event missing chain ID in path");
+            return false;
+        }
 
-        // Route state-modifying events to c1 (Admin chain)
-        if (ne.eT != null) {
-            try {
-                EventType eventType = EventType.valueOf(ne.eT);
-                switch (eventType) {
-                    case REGISTER_NODE:
-                    case BLOCK_NODE:
-                    case UNBLOCK_NODE:
-                    case UPDATE_NMI:
-                    case ADD_NMI:
-                    case DELETE_NMI:
-                        // Admin/permission events go to c1
-                        targetChain = network.c1;
-                        chainID = network.networkDictionary.c1;
-                        break;
-                    // Resource events would go to c2
-                    // case RESOURCE_UPLOAD:
-                    // case RESOURCE_UPDATE:
-                    //     targetChain = network.c2;
-                    //     chainID = network.networkDictionary.c2;
-                    //     break;
-                    default:
-                        // All other events go to c3 (default)
-                        break;
-                }
-            } catch (IllegalArgumentException e) {
-                // Unknown event type - use default (c3)
-            }
+        // Get target chain
+        NetworkRecord targetChain = null;
+        if (chainID.equals(network.networkDictionary.c1)) {
+            targetChain = network.c1;
+        } else if (chainID.equals(network.networkDictionary.c2)) {
+            targetChain = network.c2;
+        } else if (chainID.equals(network.networkDictionary.c3)) {
+            targetChain = network.c3;
+        }
+
+        if (targetChain == null) {
+            System.err.println("[Blockchain] Invalid chain ID: " + chainID + " (c1=" + network.networkDictionary.c1 + ", c2=" + network.networkDictionary.c2 + ", c3=" + network.networkDictionary.c3 + ")");
+            return false;
         }
 
         // Check if sender has permission to record to this chain
         if (!network.checkChainPermission(senderID, Permission.Record.name(), chainID)) {
-            // Permission denied
+            System.err.println("[Blockchain-Debug] Event() permission check failed: senderID=" + (senderID != null ? senderID.substring(0, 8) : "null") + ", chainID=" + chainID);
             return false;
         }
 
@@ -1772,12 +1869,25 @@ public class ConnectX {
                 currentBlock = newBlock;
             }
 
-            // Add event to current block
+            // Add event to current block with signed blob
             int eventIndex = currentBlock.networkEvents.size();
-            currentBlock.networkEvents.put(eventIndex, ne);
+            if (!currentBlock.addEvent(eventIndex, signedBlob, this)) {
+                System.err.println("[Blockchain] Failed to add event to block");
+                return false;
+            }
         }
 
         return true;
+    }
+
+    /**
+     * @deprecated Recording should happen at transmission time using Event(ne, senderID, signedBlob)
+     *             with the same blob being sent to peers. Do not use this method.
+     */
+    @Deprecated
+    public boolean Event(NetworkEvent ne, String senderID) {
+        System.err.println("[Blockchain] DEPRECATED: Event(ne, senderID) called - use Event(ne, senderID, signedBlob) at transmission time");
+        return false;
     }
 
     /**
@@ -1993,8 +2103,11 @@ public class ConnectX {
                 dev.droppinganvil.v3.edge.NetworkBlock block = chain.blockMap.get(blockNum);
                 if (block == null) continue;
 
+                // Prepare block: verify and deserialize all events
+                block.prepare(this);
+
                 // Process events in this block
-                for (java.util.Map.Entry<Integer, dev.droppinganvil.v3.network.events.NetworkEvent> entry : block.networkEvents.entrySet()) {
+                for (java.util.Map.Entry<Integer, dev.droppinganvil.v3.network.events.NetworkEvent> entry : block.deserializedEvents.entrySet()) {
                     dev.droppinganvil.v3.network.events.NetworkEvent event = entry.getValue();
 
                     // Only replay state-modifying events

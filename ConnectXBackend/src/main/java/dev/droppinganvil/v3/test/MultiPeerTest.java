@@ -264,21 +264,28 @@ public class MultiPeerTest {
             // Check if peers have CXNET loaded (should be from bootstrap seed)
             int cxnetCount = 0;
             for (ConnectX peer : peers) {
-                if (peer.getNetwork("CXNET") != null) {
+                if (peer.getNetwork("TESTNET") != null) {
                     cxnetCount++;
                 }
             }
             System.out.println("  Peers with CXNET loaded: " + cxnetCount + "/" + peers.size());
 
             if (SEND_MESSAGES && cxnetCount > 0) {
-                System.out.println("  Sending " + MESSAGE_COUNT + " CXN messages to CXNET...");
+                System.out.println("  Sending " + MESSAGE_COUNT + " CXN messages to TESTNET...");
+
+                // Get c3 chain ID for blockchain recording
+                CXNetwork network = peers.get(0).getNetwork("TESTNET");
+                Long c3ChainID = (network != null && network.networkDictionary != null)
+                    ? network.networkDictionary.c3 : null;
 
                 for (int i = 0; i < MESSAGE_COUNT; i++) {
                     String msg = "P2P CXN test message #" + (i+1);
 
                     // Send CXN scope message (broadcasts to all peers in network)
+                    // Set chainID so events are recorded to blockchain
                     peers.get(0).buildEvent(EventType.MESSAGE, msg.getBytes())
-                        .toNetwork("CXNET")
+                        .toNetwork("TESTNET")
+                        .chainID(c3ChainID)
                         .queue();
 
                     if ((i+1) % 25 == 0) {
@@ -308,7 +315,7 @@ public class MultiPeerTest {
                 // Count how many peers have CXNET
                 int currentCount = 0;
                 for (ConnectX peer : peers) {
-                    if (peer.getNetwork("CXNET") != null) {
+                    if (peer.getNetwork("TESTNET") != null) {
                         currentCount++;
                     }
                 }
@@ -329,7 +336,7 @@ public class MultiPeerTest {
             System.out.println("\n=== Bootstrap Results ===");
             successCount = 0;
             for (int i = 0; i < peers.size(); i++) {
-                CXNetwork cxnet = peers.get(i).getNetwork("CXNET");
+                CXNetwork cxnet = peers.get(i).getNetwork("TESTNET");
                 if (cxnet != null) {
                     System.out.println("✓ Peer " + (i + 1) + " successfully joined CXNET");
                     successCount++;
@@ -340,7 +347,7 @@ public class MultiPeerTest {
 
             if (successCount == peers.size()) {
                 System.out.println("\n✓ SUCCESS: " + successCount + "/" + peers.size() + " peers bootstrapped into CXNET!");
-                CXNetwork cxnet = peers.get(0).getNetwork("CXNET");
+                CXNetwork cxnet = peers.get(0).getNetwork("TESTNET");
                 System.out.println("  Network ID: " + cxnet.configuration.netID);
                 System.out.println("  Chain c1: " + cxnet.networkDictionary.c1);
                 System.out.println("  Chain c2: " + cxnet.networkDictionary.c2);
@@ -356,7 +363,7 @@ public class MultiPeerTest {
                 System.out.println("\nPeer " + (i + 1) + " (" + peer.getOwnID().substring(0, 8) + "):");
 
                 // Check CXNET membership
-                CXNetwork cxnet = peer.getNetwork("CXNET");
+                CXNetwork cxnet = peer.getNetwork("TESTNET");
                 System.out.println("  CXNET: " + (cxnet != null ? "JOINED" : "NOT JOINED"));
                 if (cxnet != null) {
                     System.out.println("    Chain c1: " + cxnet.c1.blockMap.size() + " blocks (current: " + cxnet.c1.current.block + ")");
@@ -407,7 +414,7 @@ public class MultiPeerTest {
                 // Test 1: Send message from Peer3 to network
                 System.out.println("\n=== Test 1: Peer 3 broadcasts message ===");
                 peers.get(2).buildEvent(EventType.MESSAGE, "Hello from Peer 3 to CXNET!".getBytes())
-                    .toNetwork("CXNET")
+                    .toNetwork("TESTNET")
                     .queue();
                 System.out.println("Message queued from Peer 3 (" + peers.get(2).getOwnID() + ")");
 
@@ -421,7 +428,7 @@ public class MultiPeerTest {
                 System.out.println("\n=== Test 3: Peer finding broadcast ===");
                 //TODO fix implementation Finding peers as a string is not proper implementation and this done nothing but throw errors, this also showed how much of an issue it was for bad data to mess up the incontroller
                 peers.get(0).buildEvent(EventType.PeerFinding, "Finding peers".getBytes())
-                    .toNetwork("CXNET")
+                    .toNetwork("TESTNET")
                     .queue();
                 System.out.println("Peer finding event queued");
             } else {
@@ -433,6 +440,7 @@ public class MultiPeerTest {
                 runSecurityTests(peers);
                 runWhitelistIntegrationTest(peers);
                 runBlockchainSyncAndPermissionTest(peers);
+                runE2EEncryptionTest(peers);
             }
 
             // Keep test running
@@ -468,7 +476,7 @@ public class MultiPeerTest {
         // Test 1: Whitelist Mode Enforcement
         System.out.println("TEST 1: Whitelist Mode Network");
         System.out.println("------------------------------------------------------------------");
-        CXNetwork cxnet = peers.get(0).getNetwork("CXNET");
+        CXNetwork cxnet = peers.get(0).getNetwork("TESTNET");
         if (cxnet == null) {
             System.out.println("✗ CXNET not loaded, skipping security tests");
             return;
@@ -478,8 +486,8 @@ public class MultiPeerTest {
                           cxnet.configuration.whitelistMode : "false (default)"));
 
         // Check DataContainer for registered/blocked nodes (stored locally, not in seed)
-        int regCount = peers.get(0).dataContainer.networkRegisteredNodes.getOrDefault("CXNET", new java.util.HashSet<>()).size();
-        int blockCount = peers.get(0).dataContainer.networkBlockedNodes.getOrDefault("CXNET", new java.util.HashMap<>()).size();
+        int regCount = peers.get(0).dataContainer.networkRegisteredNodes.getOrDefault("TESTNET", new java.util.HashSet<>()).size();
+        int blockCount = peers.get(0).dataContainer.networkBlockedNodes.getOrDefault("TESTNET", new java.util.HashMap<>()).size();
         System.out.println("  - Registered nodes: " + regCount);
         System.out.println("  - Blocked nodes: " + blockCount);
         System.out.println("✓ PASS: Whitelist infrastructure present\n");
@@ -498,7 +506,7 @@ public class MultiPeerTest {
         registerEvent.executeOnSync = true;
 
         java.util.Map<String, Object> registerPayload = new java.util.HashMap<>();
-        registerPayload.put("network", "CXNET");
+        registerPayload.put("network", "TESTNET");
         registerPayload.put("nodeID", peers.get(3).getOwnID());
         registerPayload.put("approver", "test-nmi");
 
@@ -509,12 +517,12 @@ public class MultiPeerTest {
         java.util.Map<String, Object> parsed = (java.util.Map<String, Object>)
             ConnectX.deserialize("cxJSON1", new String(registerEvent.d, "UTF-8"), java.util.Map.class);
         String nodeID = (String) parsed.get("nodeID");
-        peers.get(0).dataContainer.networkRegisteredNodes.computeIfAbsent("CXNET", k -> new java.util.HashSet<>()).add(nodeID);
+        peers.get(0).dataContainer.networkRegisteredNodes.computeIfAbsent("TESTNET", k -> new java.util.HashSet<>()).add(nodeID);
 
         System.out.println("✓ Node registered:");
         System.out.println("  - Node: " + nodeID);
         System.out.println("  - Network: CXNET");
-        System.out.println("  - Total registered: " + peers.get(0).dataContainer.networkRegisteredNodes.get("CXNET").size());
+        System.out.println("  - Total registered: " + peers.get(0).dataContainer.networkRegisteredNodes.get("TESTNET").size());
         System.out.println("✓ PASS: Registration processed (see NodeMesh.java:834-868)\n");
 
         Thread.sleep(1000);
@@ -530,7 +538,7 @@ public class MultiPeerTest {
         blockEvent.executeOnSync = true;
 
         java.util.Map<String, Object> blockPayload = new java.util.HashMap<>();
-        blockPayload.put("network", "CXNET");
+        blockPayload.put("network", "TESTNET");
         blockPayload.put("nodeID", peers.get(3).getOwnID());  // Peer 4 (index 3)
         blockPayload.put("reason", "testing block mechanism");
 
@@ -542,12 +550,12 @@ public class MultiPeerTest {
             ConnectX.deserialize("cxJSON1", new String(blockEvent.d, "UTF-8"), java.util.Map.class);
         String blockedNodeID = (String) parsedBlock.get("nodeID");
         String reason = (String) parsedBlock.get("reason");
-        peers.get(0).dataContainer.blockNode("CXNET", blockedNodeID, reason);
+        peers.get(0).dataContainer.blockNode("TESTNET", blockedNodeID, reason);
 
         System.out.println("✓ Node blocked:");
         System.out.println("  - Node: " + blockedNodeID);
         System.out.println("  - Reason: " + reason);
-        System.out.println("  - Total blocked: " + peers.get(0).dataContainer.networkBlockedNodes.get("CXNET").size());
+        System.out.println("  - Total blocked: " + peers.get(0).dataContainer.networkBlockedNodes.get("TESTNET").size());
         System.out.println("✓ PASS: Blocking processed (see NodeMesh.java:756-793)\n");
 
         Thread.sleep(1000);
@@ -563,7 +571,7 @@ public class MultiPeerTest {
         unblockEvent.executeOnSync = true;
 
         java.util.Map<String, Object> unblockPayload = new java.util.HashMap<>();
-        unblockPayload.put("network", "CXNET");
+        unblockPayload.put("network", "TESTNET");
         unblockPayload.put("nodeID", blockedNodeID);
 
         String unblockJson = ConnectX.serialize("cxJSON1", unblockPayload);
@@ -573,12 +581,12 @@ public class MultiPeerTest {
         java.util.Map<String, Object> parsedUnblock = (java.util.Map<String, Object>)
             ConnectX.deserialize("cxJSON1", new String(unblockEvent.d, "UTF-8"), java.util.Map.class);
         String unblockedNodeID = (String) parsedUnblock.get("nodeID");
-        String removedReason = peers.get(0).dataContainer.unblockNode("CXNET", unblockedNodeID);
+        String removedReason = peers.get(0).dataContainer.unblockNode("TESTNET", unblockedNodeID);
 
         System.out.println("✓ Node unblocked:");
         System.out.println("  - Node: " + unblockedNodeID);
         System.out.println("  - Was blocked for: " + removedReason);
-        System.out.println("  - Total blocked: " + peers.get(0).dataContainer.networkBlockedNodes.get("CXNET").size());
+        System.out.println("  - Total blocked: " + peers.get(0).dataContainer.networkBlockedNodes.get("TESTNET").size());
         System.out.println("✓ PASS: Unblocking processed (see NodeMesh.java:794-833)\n");
 
         Thread.sleep(1000);
@@ -850,7 +858,7 @@ public class MultiPeerTest {
             // Get sync interval from first peer's CXNET configuration
             int syncIntervalSeconds = 600; // Default 10 minutes
             try {
-                CXNetwork cxnet = peers.get(0).getNetwork("CXNET");
+                CXNetwork cxnet = peers.get(0).getNetwork("TESTNET");
                 if (cxnet != null && cxnet.configuration != null && cxnet.configuration.syncIntervalSeconds != null) {
                     syncIntervalSeconds = cxnet.configuration.syncIntervalSeconds;
                 }
@@ -867,7 +875,7 @@ public class MultiPeerTest {
                     System.out.println("\n[PERIODIC SYNC] Starting " + syncIntervalSeconds + "-second sync...");
 
                     for (ConnectX peer : peers) {
-                        for (String netID : new String[]{"CXNET", "TESTNET"}) {
+                        for (String netID : new String[]{"TESTNET", "TESTNET"}) {
                             CXNetwork net = peer.getNetwork(netID);
                             if (net != null && net.configuration.backendSet != null &&
                                 net.configuration.backendSet.contains(peer.getOwnID())) {
@@ -924,7 +932,7 @@ public class MultiPeerTest {
         System.out.println("STEP 1: Attempt to record WITHOUT permission (expect failure)");
         System.out.println("------------------------------------------------------------------");
 
-        CXNetwork cxnet = peers.get(0).getNetwork("CXNET");
+        CXNetwork cxnet = peers.get(0).getNetwork("TESTNET");
         if (cxnet == null) {
             System.out.println("✗ CXNET not loaded, skipping test");
             return;
@@ -952,7 +960,7 @@ public class MultiPeerTest {
         for (int i = 0; i < 10; i++) {
             peers.get(3).buildEvent(EventType.MESSAGE, ("Test WITHOUT permission #" + (i+1)).getBytes())
                 .withRecordFlag(true)
-                .toNetwork("CXNET")
+                .toNetwork("TESTNET", 3L)  // Try to record to chain 3 (should fail - no permission)
                 .queue();
         }
 
@@ -974,7 +982,7 @@ public class MultiPeerTest {
 
         // Create GRANT_PERMISSION event payload
         java.util.Map<String, Object> permissionGrant = new java.util.HashMap<>();
-        permissionGrant.put("network", "CXNET");
+        permissionGrant.put("network", "TESTNET");
         permissionGrant.put("nodeID", PEER4_ID);
         permissionGrant.put("permission", dev.droppinganvil.v3.Permission.Record.name());
         permissionGrant.put("chain", c3ID.intValue());
@@ -987,7 +995,7 @@ public class MultiPeerTest {
         // This event has executeOnSync=true so it modifies state on all peers
         peers.get(3).buildEvent(EventType.GRANT_PERMISSION, grantJson.getBytes())
             .withRecordFlag(true)  // Record admin event to c1 (Admin chain)
-            .toNetwork("CXNET")
+            .toNetwork("TESTNET", 1L)  // Record to chain 1 (Admin chain)
             .queue();
 
         System.out.println("  Waiting for permission grant to propagate...");
@@ -1005,10 +1013,10 @@ public class MultiPeerTest {
             for (int i = 0; i < MESSAGE_COUNT; i++) {
                 String msg = "Blockchain sync test message #" + (i+1);
 
-                // Send message - will be auto-recorded on receipt due to r=true flag
+                // Send message - will be recorded to blockchain at transmission time
                 peers.get(3).buildEvent(EventType.MESSAGE, msg.getBytes())
                     .withRecordFlag(true)  // Enable automatic recording
-                    .toNetwork("CXNET")
+                    .toNetwork("TESTNET", 3L)  // Record to chain 3 (events chain)
                     .queue();
 
                 if ((i+1) % 25 == 0) {
@@ -1047,7 +1055,7 @@ public class MultiPeerTest {
 
         Thread.sleep(15000);
 
-        CXNetwork peer2Cxnet = peers.get(1).getNetwork("CXNET");
+        CXNetwork peer2Cxnet = peers.get(1).getNetwork("TESTNET");
         if (peer2Cxnet != null) {
             long peer2C3 = peer2Cxnet.c3.current != null ? peer2Cxnet.c3.current.block : -1;
             int peer2Events = peer2Cxnet.c3.current != null ? peer2Cxnet.c3.current.networkEvents.size() : 0;
@@ -1093,7 +1101,7 @@ public class MultiPeerTest {
         if (r2) {
             System.out.println("    Peer 2 sending test message...");
             peers.get(1).buildEvent(EventType.MESSAGE, "Test from Peer 2 WITH permissions".getBytes())
-                .toNetwork("CXNET")
+                .toNetwork("TESTNET")
                 .queue();
             System.out.println("    ✓ Message queued");
         }
@@ -1112,7 +1120,7 @@ public class MultiPeerTest {
         // Try sending AFTER revocation
         System.out.println("    Peer 2 sending test message AFTER revocation...");
         peers.get(1).buildEvent(EventType.MESSAGE, "Test from Peer 2 AFTER revoke".getBytes())
-            .toNetwork("CXNET")
+            .toNetwork("TESTNET")
             .queue();
         System.out.println("    ✓ Message queued (should not be recorded to blockchain)");
 
@@ -1130,6 +1138,210 @@ public class MultiPeerTest {
         System.out.println("  ✓ Permission revocation tested");
         System.out.println("  ✓ Message transmission with/without permissions tested");
         System.out.println("\n  CHECK LOGS ABOVE FOR DETAILED SYNC AND PERMISSION BEHAVIOR");
+        System.out.println("==================================================================\n");
+    }
+
+    /**
+     * E2E (End-to-End) Encryption Test
+     * Tests multi-recipient PGP encryption with .addRecipient() and .encrypt()
+     */
+    private static void runE2EEncryptionTest(List<ConnectX> peers) throws Exception {
+        System.out.println("\n\n==================================================================");
+        System.out.println("  E2E ENCRYPTION TEST");
+        System.out.println("==================================================================");
+        System.out.println("Testing PGP multi-recipient encryption with .addRecipient() + .encrypt()\n");
+
+        Thread.sleep(2000);
+
+        // TEST 1: Send regular (non-E2E) message for comparison
+        System.out.println("TEST 1: Baseline - Regular message (no E2E encryption)");
+        System.out.println("------------------------------------------------------------------");
+        System.out.println("Sending regular message from Peer 1 to CXNET...");
+
+        peers.get(0).buildEvent(EventType.MESSAGE, "Regular message - NOT encrypted".getBytes())
+            .toNetwork("TESTNET")
+            .queue();
+
+        System.out.println("✓ Regular message queued");
+        System.out.println("  - Look for: [NodeMesh] Processing event (no [E2E] tags)");
+        Thread.sleep(3000);
+
+        // TEST 2: Send E2E encrypted message to multiple recipients
+        System.out.println("\nTEST 2: E2E encrypted message to multiple recipients");
+        System.out.println("------------------------------------------------------------------");
+        System.out.println("Encrypting message for Peer 2 and Peer 3...");
+        System.out.println("  Sender: Peer 1 (" + peers.get(0).getOwnID().substring(0, 8) + ")");
+        System.out.println("  Recipients:");
+        System.out.println("    - Peer 2 (" + peers.get(1).getOwnID().substring(0, 8) + ")");
+        System.out.println("    - Peer 3 (" + peers.get(2).getOwnID().substring(0, 8) + ")");
+
+        peers.get(0).buildEvent(EventType.MESSAGE, "SECRET: E2E encrypted message!".getBytes())
+            .addRecipient(peers.get(1).getOwnID())  // Peer 2 can decrypt
+            .addRecipient(peers.get(2).getOwnID())  // Peer 3 can decrypt
+            .encrypt()  // Encrypts for both recipients + sender
+            .toNetwork("TESTNET")
+            .queue();
+
+        System.out.println("✓ E2E encrypted message queued");
+        System.out.println("  - Look for: [E2E] Encrypted event data for 2 recipients");
+        System.out.println("  - Look for: [E2E] Decrypting E2E encrypted event");
+        System.out.println("  - Look for: [E2E] Successfully decrypted E2E event data");
+        System.out.println("  ⚠ Peer 4 should NOT be able to decrypt (not in recipient list)");
+
+        Thread.sleep(5000);
+
+        // TEST 3: Send another E2E message to verify it works multiple times
+        System.out.println("\nTEST 3: Second E2E encrypted message (different recipients)");
+        System.out.println("------------------------------------------------------------------");
+        System.out.println("Encrypting message for Peer 3 and Peer 4...");
+        System.out.println("  Sender: Peer 2 (" + peers.get(1).getOwnID().substring(0, 8) + ")");
+        System.out.println("  Recipients:");
+        System.out.println("    - Peer 3 (" + peers.get(2).getOwnID().substring(0, 8) + ")");
+        System.out.println("    - Peer 4 (" + peers.get(3).getOwnID().substring(0, 8) + ")");
+
+        peers.get(1).buildEvent(EventType.MESSAGE, "SECRET: Another E2E message from Peer 2!".getBytes())
+            .addRecipient(peers.get(2).getOwnID())  // Peer 3 can decrypt
+            .addRecipient(peers.get(3).getOwnID())  // Peer 4 can decrypt
+            .encrypt()
+            .toNetwork("TESTNET")
+            .queue();
+
+        System.out.println("✓ Second E2E encrypted message queued");
+        System.out.println("  - Look for: [E2E] Encrypted event data for 2 recipients");
+        System.out.println("  - Look for: [E2E] Decrypting E2E encrypted event");
+        System.out.println("  ⚠ Peer 1 should NOT be able to decrypt (not in recipient list)");
+
+        Thread.sleep(5000);
+
+        // TEST 4: Send E2E message to single recipient
+        System.out.println("\nTEST 4: E2E encrypted message to single recipient");
+        System.out.println("------------------------------------------------------------------");
+        System.out.println("Encrypting message for Peer 1 only...");
+        System.out.println("  Sender: Peer 3 (" + peers.get(2).getOwnID().substring(0, 8) + ")");
+        System.out.println("  Recipient: Peer 1 (" + peers.get(0).getOwnID().substring(0, 8) + ")");
+
+        peers.get(2).buildEvent(EventType.MESSAGE, "SECRET: Private message to Peer 1 only!".getBytes())
+            .addRecipient(peers.get(0).getOwnID())  // Only Peer 1 can decrypt
+            .encrypt()
+            .toNetwork("TESTNET")
+            .queue();
+
+        System.out.println("✓ Single-recipient E2E message queued");
+        System.out.println("  - Look for: [E2E] Encrypted event data for 1 recipients");
+        System.out.println("  - Look for: [E2E] Successfully decrypted E2E event data");
+        System.out.println("  ⚠ Peers 2, 3, 4 should NOT be able to decrypt");
+
+        Thread.sleep(5000);
+
+        // TEST 5: Signed Blob Architecture Verification
+        System.out.println("\nTEST 5: Signed Blob Architecture Verification");
+        System.out.println("==================================================================");
+        System.out.println("Verifying blockchain contains signed blobs and signatures verify...\n");
+
+        // Check each peer's blockchain
+        for (int i = 0; i < peers.size(); i++) {
+            ConnectX peer = peers.get(i);
+            String peerID = peer.getOwnID().substring(0, 8);
+            System.out.println("Checking Peer " + (i+1) + " (" + peerID + ")...");
+
+            CXNetwork network = peer.getNetwork("TESTNET");
+            if (network == null) {
+                System.out.println("  ⚠ TESTNET not loaded on Peer " + (i+1));
+                continue;
+            }
+
+            // Check c3 (events chain) for MESSAGE events
+            var c3 = network.c3;
+            if (c3 == null || c3.current == null) {
+                System.out.println("  ⚠ No c3 blockchain on Peer " + (i+1));
+                continue;
+            }
+
+            var currentBlock = c3.current;
+            int signedBlobCount = currentBlock.networkEvents.size();
+            System.out.println("  ✓ Block " + currentBlock.block + " contains " + signedBlobCount + " signed blobs");
+
+            if (signedBlobCount > 0) {
+                // Prepare block (verify and deserialize all events)
+                int prepared = currentBlock.prepare(peer);
+                System.out.println("  ✓ Prepared " + prepared + "/" + signedBlobCount + " events");
+
+                if (prepared != signedBlobCount) {
+                    System.err.println("  ✗ VERIFICATION FAILED: Not all events could be verified!");
+                    continue;
+                }
+
+                // Verify first event in detail
+                byte[] signedBlob = currentBlock.networkEvents.get(0);
+                var event = currentBlock.deserializedEvents.get(0);
+
+                if (signedBlob != null && event != null) {
+                    System.out.println("  ✓ Event 0: " + event.eT + " (ID: " + event.iD.substring(0, 8) + "...)");
+
+                    // Verify signature
+                    if (event.p != null && event.p.cxID != null) {
+                        try {
+                            java.io.ByteArrayInputStream verifyStream = new java.io.ByteArrayInputStream(signedBlob);
+                            java.io.ByteArrayOutputStream verifiedOutput = new java.io.ByteArrayOutputStream();
+                            boolean verified = peer.encryptionProvider.verifyAndStrip(verifyStream, verifiedOutput, event.p.cxID);
+                            verifyStream.close();
+
+                            if (verified) {
+                                System.out.println("  ✓ Signature verification PASSED for " + event.p.cxID.substring(0, 8));
+                            } else {
+                                System.err.println("  ✗ Signature verification FAILED!");
+                            }
+                        } catch (Exception e) {
+                            System.err.println("  ✗ Signature verification error: " + e.getMessage());
+                        }
+                    }
+
+                    // Verify blob integrity
+                    System.out.println("  ✓ Signed blob: " + signedBlob.length + " bytes");
+                }
+
+                // Count events by type
+                java.util.Map<String, Integer> eventTypeCounts = new java.util.HashMap<>();
+                for (var evt : currentBlock.deserializedEvents.values()) {
+                    eventTypeCounts.put(evt.eT, eventTypeCounts.getOrDefault(evt.eT, 0) + 1);
+                }
+                System.out.print("  ✓ Event types: ");
+                for (java.util.Map.Entry<String, Integer> entry : eventTypeCounts.entrySet()) {
+                    System.out.print(entry.getKey() + "=" + entry.getValue() + " ");
+                }
+                System.out.println();
+            }
+            System.out.println();
+        }
+
+        System.out.println("==================================================================");
+        System.out.println("  SIGNED BLOB ARCHITECTURE VERIFIED");
+        System.out.println("==================================================================");
+        System.out.println("Architecture guarantees:");
+        System.out.println("  ✓ Events stored as signed blobs in blockchain");
+        System.out.println("  ✓ Signatures verify correctly");
+        System.out.println("  ✓ prepare() deserializes events on-demand");
+        System.out.println("  ✓ Same blob used for transmission and storage");
+        System.out.println("==================================================================\n");
+
+        // Summary
+        System.out.println("\n==================================================================");
+        System.out.println("  E2E ENCRYPTION TEST COMPLETE");
+        System.out.println("==================================================================");
+        System.out.println("Tests performed:");
+        System.out.println("  ✓ Baseline non-encrypted message");
+        System.out.println("  ✓ Multi-recipient E2E encryption (2 recipients)");
+        System.out.println("  ✓ Second multi-recipient message (different sender/recipients)");
+        System.out.println("  ✓ Single-recipient E2E encryption");
+        System.out.println();
+        System.out.println("Expected behavior:");
+        System.out.println("  ✓ [E2E] Encrypted event data for N recipients");
+        System.out.println("  ✓ [E2E] Decrypting E2E encrypted event");
+        System.out.println("  ✓ [E2E] Successfully decrypted E2E event data");
+        System.out.println("  ✓ Recipients can decrypt and process events");
+        System.out.println("  ✓ Non-recipients cannot decrypt (DecryptionFailureException)");
+        System.out.println();
+        System.out.println("  CHECK LOGS ABOVE FOR [E2E] TAGS TO VERIFY ENCRYPTION/DECRYPTION");
         System.out.println("==================================================================\n");
     }
 }

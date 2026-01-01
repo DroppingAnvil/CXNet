@@ -38,8 +38,8 @@ public class OutputProcessor implements Runnable {
                     bundle = outController.connectXAPI.outputQueue.poll();
                 }
 
-                // Log every 100 iterations OR when queue is large
-                if (loopCount % 100 == 0 || queueSizeBefore > 5) {
+                // Log every 100 iterations OR when queue is large (only if enabled)
+                if (NodeConfig.enableOutLoopLogging && (loopCount % 100 == 0 || queueSizeBefore > 5)) {
                     System.out.println("[OUT-LOOP] Peer " + peerShort + " iteration " + loopCount +
                         ", queue: " + queueSizeBefore + ", polled: " + (bundle != null));
                 }

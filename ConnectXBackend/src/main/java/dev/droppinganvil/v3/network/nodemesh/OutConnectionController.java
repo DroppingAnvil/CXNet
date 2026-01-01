@@ -55,6 +55,33 @@ public class OutConnectionController {
         // Note: oD should already be set in the relay container, but if not set it from the event
         nc.e = cryptEvent;
 
+        // Record to blockchain if this is a new CXN event (not relay, not CXS)
+        // Use the same signed blob being transmitted to ensure blockchain consistency
+        if (out.prev == null && out.ne.p != null && out.ne.p.scope != null &&
+            out.ne.p.scope.equalsIgnoreCase("CXN") && out.ne.p.chainID != null) {
+            try {
+                boolean recorded = connectXAPI.Event(out.ne, connectXAPI.getOwnID(), cryptEvent);
+                if (recorded) {
+                    System.out.println("[Blockchain] Recorded event " + out.ne.eT + " to chain " + out.ne.p.chainID);
+                } else {
+                    System.err.println("[Blockchain] Event() returned false for " + out.ne.eT);
+                }
+            } catch (Exception e) {
+                System.err.println("[Blockchain] Failed to record event during transmission: " + e.getMessage());
+                e.printStackTrace();
+            }
+        } else {
+            // Debug: Why didn't we record?
+            if (out.ne.eT != null && out.ne.eT.equals("MESSAGE")) {
+                System.out.println("[Blockchain-Debug] MESSAGE not recorded: prev=" + (out.prev == null) +
+                    ", hasPath=" + (out.ne.p != null) +
+                    ", hasScope=" + (out.ne.p != null && out.ne.p.scope != null) +
+                    ", scope=" + (out.ne.p != null ? out.ne.p.scope : "null") +
+                    ", hasChainID=" + (out.ne.p != null && out.ne.p.chainID != null) +
+                    ", chainID=" + (out.ne.p != null ? out.ne.p.chainID : "null"));
+            }
+        }
+
         // Initialize TransmitPref if not set (defaults to peerBroad = true)
         if (nc.tP == null) {
             nc.tP = new TransmitPref();

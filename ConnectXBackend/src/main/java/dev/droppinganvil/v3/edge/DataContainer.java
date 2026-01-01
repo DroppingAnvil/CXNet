@@ -39,6 +39,15 @@ public class DataContainer implements Serializable {
     public Map<String, List<String>> localPeerAddresses = new ConcurrentHashMap<>();
 
     /**
+     * Tracks the last added RECEIVING socket address (non-priority) per peer
+     * Map: peerID -> last receiving socket address
+     * Used to prevent address bloat by removing old receiving socket addresses when new ones arrive
+     * Only tracks addresses added via priority=false (from NodeMesh recording source sockets)
+     * Does NOT track CXHELLO addresses or other priority addresses
+     */
+    private Map<String, String> lastReceivingSocketPerPeer = new ConcurrentHashMap<>();
+
+    /**
      * Whitelist: Registered nodes per network (for whitelist mode)
      * Map: networkID -> Set of registered node UUIDs
      *
@@ -129,12 +138,26 @@ public class DataContainer implements Serializable {
     public void recordLocalPeer(String peerID, String address, boolean priority) {
         if (peerID != null && address != null && !address.isEmpty()) {
             List<String> addresses = localPeerAddresses.computeIfAbsent(peerID, k -> new java.util.ArrayList<>());
+
             // Don't add duplicates
             if (!addresses.contains(address)) {
                 if (priority) {
-                    addresses.add(0, address); // Prepend for priority
+                    // Priority address (from CXHELLO) - prepend and keep all
+                    addresses.add(0, address);
                 } else {
-                    addresses.add(address); // Append as fallback
+                    // Non-priority receiving socket - remove old socket before adding new
+                    // This prevents address bloat from accumulating 60+ socket addresses per peer
+                    String lastReceivingSocket = lastReceivingSocketPerPeer.get(peerID);
+                    if (lastReceivingSocket != null) {
+                        // Remove the previous receiving socket address
+                        addresses.remove(lastReceivingSocket);
+                    }
+
+                    // Add new receiving socket address
+                    addresses.add(address);
+
+                    // Track this as the new last receiving socket
+                    lastReceivingSocketPerPeer.put(peerID, address);
                 }
             }
         }

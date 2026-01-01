@@ -35,4 +35,11 @@ public class NodeConfig {
     //WHEN GETTING LOW LEVEL PROTOCOL ERRORS TRY THIS
     public static boolean devMode = true;
     public static Double cxV = 0.1;
+
+    /**
+     * Enable OUT-LOOP logging - Controls OutputProcessor iteration logging
+     * Shows every 100 iterations of the output processor loop
+     * Default: false (disabled to reduce log noise)
+     */
+    public static boolean enableOutLoopLogging = false;
 }

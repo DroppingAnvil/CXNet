@@ -88,4 +88,19 @@ public class Configuration implements Serializable {
      */
     public Integer defaultTTL = 16;
 
+    /**
+     * Enable OUT-LOOP logging - Controls OutputProcessor iteration logging
+     * Shows every 100 iterations of the output processor loop
+     *
+     * Default: false (disabled)
+     *
+     * When enabled:
+     * - Logs: [OUT-LOOP] Peer XXXX iteration N, queue: N, polled: true/false
+     * - Useful for diagnosing output queue processing issues
+     * - Can generate significant log volume in active networks
+     *
+     * Only enable for specific output queue troubleshooting
+     */
+    public Boolean enableOutLoopLogging = false;
+
 }

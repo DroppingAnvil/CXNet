@@ -130,6 +130,57 @@ public class PainlessCryptProvider extends CryptProvider {
             throw efe;
         }
     }
+
+    @Override
+    public void encrypt(InputStream is, OutputStream os, java.util.List<String> recipientCxIDs) throws EncryptionFailureException {
+        if (!ready) {
+            throw new EncryptionFailureException("Encryption provider not initialized - call setup() first");
+        }
+        if (is == null) {
+            throw new EncryptionFailureException("InputStream cannot be null - no data to encrypt");
+        }
+        if (recipientCxIDs == null || recipientCxIDs.isEmpty()) {
+            throw new EncryptionFailureException("Must specify at least one recipient for E2E encryption");
+        }
+
+        // Cache all recipient certificates
+        for (String cxID : recipientCxIDs) {
+            if (!cacheCert(cxID, false, true)) {
+                throw new EncryptionFailureException("Failed to cache certificate for recipient: " + cxID);
+            }
+        }
+
+        try {
+            // Build encryption options with all recipients
+            EncryptionOptions encryptionOptions = EncryptionOptions.encryptCommunications();
+
+            // Add each recipient
+            for (String cxID : recipientCxIDs) {
+                encryptionOptions.addRecipient(certCache.get(cxID));
+            }
+
+            // Always add sender's own key so they can decrypt their own messages
+            encryptionOptions.addRecipient(publicKey);
+
+            // Create encryption stream
+            EncryptionStream encryptor = PGPainless.encryptAndOrSign()
+                    .onOutputStream(os)
+                    .withOptions(ProducerOptions.signAndEncrypt(
+                            encryptionOptions,
+                            new SigningOptions()
+                                    .addInlineSignature(protector, secretKey, DocumentSignatureType.CANONICAL_TEXT_DOCUMENT)
+                            ).setAsciiArmor(false)
+                    );
+
+            // CRITICAL: Must pipe data and close stream to finalize encryption
+            Streams.pipeAll(is, encryptor);
+            encryptor.close();
+        } catch (Exception e) {
+            EncryptionFailureException efe = new EncryptionFailureException();
+            efe.initCause(e);
+            throw efe;
+        }
+    }
     @Override
     public void sign(InputStream is, OutputStream os) throws EncryptionFailureException {
         if (!ready) {

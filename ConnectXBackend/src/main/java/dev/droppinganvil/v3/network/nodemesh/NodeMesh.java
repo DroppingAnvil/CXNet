@@ -490,6 +490,36 @@ public class NodeMesh {
         synchronized (connectX.eventQueue) {
             InputBundle ib = connectX.eventQueue.poll();
             if (ib == null) return; // Queue is empty
+
+            // Storage for decrypted event data (preserves original ib.ne.d)
+            byte[] eventData;
+
+            // Decrypt E2E encrypted events
+            if (ib.ne.e2e) {
+                try {
+                    System.out.println("[E2E] Decrypting E2E encrypted event");
+                    ByteArrayInputStream encryptedInput = new ByteArrayInputStream(ib.ne.d);
+                    ByteArrayOutputStream decryptedOutput = new ByteArrayOutputStream();
+
+                    // Decrypt the event data
+                    connectX.encryptionProvider.decrypt(encryptedInput, decryptedOutput);
+                    encryptedInput.close();
+
+                    // Store decrypted data (original ib.ne.d remains encrypted)
+                    eventData = decryptedOutput.toByteArray();
+                    decryptedOutput.close();
+
+                    System.out.println("[E2E] Successfully decrypted E2E event data");
+                } catch (Exception e) {
+                    System.err.println("[E2E] Failed to decrypt E2E event: " + e.getMessage());
+                    e.printStackTrace();
+                    throw new DecryptionFailureException();
+                }
+            } else {
+                // No E2E encryption, use original data
+                eventData = ib.ne.d;
+            }
+
             System.out.print(ib.nc);
             System.out.print(ib.ne);
             System.out.print(ib.signedEventBytes);
@@ -502,8 +532,8 @@ public class NodeMesh {
                 System.out.print("UNABLE TO PROCESS UNKNOWN EVENT");
                 if (NodeConfig.supportUnavailableServices) {
                     // Record unsupported events using the transmitter's ID from NetworkContainer
-                    if (ib.nc != null && ib.nc.iD != null) {
-                        connectX.Event(ib.ne, ib.nc.iD);
+                    if (ib.nc != null && ib.nc.iD != null && ib.signedEventBytes != null) {
+                        connectX.Event(ib.ne, ib.nc.iD, ib.signedEventBytes);
                     }
                     //todo relay
                 }
@@ -514,17 +544,35 @@ public class NodeMesh {
                 try {
                     switch (et) {
                         case NewNode:
-                            // Node data is serialized in NetworkEvent.d field (see ConnectX.java:920-921)
-                            String nodeJson = new String(ib.ne.d, "UTF-8");
-                            Node node = (Node) ConnectX.deserialize("cxJSON1", nodeJson, Node.class);
+                            // NewNode events are now sent with SIGNED Node blobs (via .signData())
+                            // Extract and verify the signed blob, then save it for relay
+                            byte[] signedNodeBlob = eventData;
+
+                            // Verify and deserialize the signed Node blob
+                            Node node = (Node) connectX.getSignedObject(
+                                null, // Will extract cxID from signature
+                                new java.io.ByteArrayInputStream(signedNodeBlob),
+                                Node.class,
+                                "cxJSON1"
+                            );
+
+                            if (node == null || node.cxID == null) {
+                                System.err.println("[NodeMesh] NewNode verification failed - invalid signature");
+                                return;
+                            }
+
+                            // Check if we already have this node
                             Node node1 = PeerDirectory.lookup(node.cxID, true, true, connectX.cxRoot, connectX);
                             if (node1 != null) {
                                 connectX.encryptionProvider.cacheCert(node1.cxID, true, false);
+                                System.out.println("[NodeMesh] NewNode already exists: " + node.cxID.substring(0, 8));
                                 return;
                             }
-                            PeerDirectory.addNode(node);
-                            System.out.println("[NodeMesh] Imported NewNode: " + node.cxID);
-                            System.out.println("[NodeMesh] NewNode signature VERIFIED for " + node.cxID);
+
+                            // Add node WITH signed blob (preserves original signature for relay)
+                            PeerDirectory.addNode(node, signedNodeBlob);
+                            System.out.println("[NodeMesh] Imported NewNode: " + node.cxID.substring(0, 8));
+                            System.out.println("[NodeMesh] NewNode signature VERIFIED and SAVED for relay");
                             break;
 
                         case CXHELLO:
@@ -532,7 +580,7 @@ public class NodeMesh {
                             System.out.println("[" + connectX.getOwnID() + "] CXHELLO request received from " + ib.nc.iD);
 
                             // Extract and import Node from CXHELLO payload
-                            String cxhelloPayloadJson = new String(ib.ne.d, "UTF-8");
+                            String cxhelloPayloadJson = new String(eventData, "UTF-8");
                             java.util.Map<String, Object> cxhelloData =
                                 (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", cxhelloPayloadJson, java.util.Map.class);
 
@@ -591,7 +639,7 @@ public class NodeMesh {
                         case CXHELLO_RESPONSE:
                             // CXHELLO_RESPONSE payload: {"peerID": "...", "port": 12345, "node": {...}}
                             System.out.println("[" + connectX.getOwnID() + "] CXHELLO_RESPONSE received from " + ib.nc.iD);
-                            String responsePayloadJson = new String(ib.ne.d, "UTF-8");
+                            String responsePayloadJson = new String(eventData, "UTF-8");
                             java.util.Map<String, Object> responseData =
                                 (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", responsePayloadJson, java.util.Map.class);
 
@@ -650,10 +698,14 @@ public class NodeMesh {
                             boolean hasPermission = network.checkChainPermission(senderID, dev.droppinganvil.v3.Permission.Record.name(), chainID);
 
                             if (hasPermission) {
-                                // Record event to blockchain
-                                boolean recorded = connectX.Event(ib.ne, senderID);
-                                if (recorded) {
-                                    System.out.println("[Auto-Record] Event " + ib.ne.eT + " from " + senderID.substring(0, 8) + " recorded to chain " + chainID);
+                                // Record event to blockchain with signed bytes
+                                if (ib.signedEventBytes != null) {
+                                    boolean recorded = connectX.Event(ib.ne, senderID, ib.signedEventBytes);
+                                    if (recorded) {
+                                        System.out.println("[Auto-Record] Event " + ib.ne.eT + " from " + senderID.substring(0, 8) + " recorded to chain " + chainID);
+                                    }
+                                } else {
+                                    System.err.println("[Auto-Record] Cannot record event - missing signed bytes");
                                 }
                             } else {
                                 System.out.println("[Auto-Record] Event " + ib.ne.eT + " from " + senderID.substring(0, 8) + " NOT recorded - no permission");
@@ -703,6 +755,29 @@ public class NodeMesh {
     }
 
     public boolean fireEvent(NetworkEvent ne, NetworkContainer nc, byte[] signedEventBytes) {
+        // CRITICAL: Verify signature before processing any event
+        // This ensures the event was actually signed by the claimed sender
+        if (signedEventBytes != null && ne != null && ne.p != null && ne.p.cxID != null) {
+            try {
+                java.io.ByteArrayInputStream verifyStream = new java.io.ByteArrayInputStream(signedEventBytes);
+                java.io.ByteArrayOutputStream verifiedOutput = new java.io.ByteArrayOutputStream();
+                boolean verified = connectX.encryptionProvider.verifyAndStrip(verifyStream, verifiedOutput, ne.p.cxID);
+                verifyStream.close();
+
+                if (!verified) {
+                    System.err.println("[SECURITY] Event signature verification FAILED for " +
+                        (ne.p.cxID.length() >= 8 ? ne.p.cxID.substring(0, 8) : ne.p.cxID) +
+                        " - REJECTING EVENT");
+                    return false; // Reject the event
+                }
+                System.out.println("[SECURITY] Event signature verified for " +
+                    (ne.p.cxID.length() >= 8 ? ne.p.cxID.substring(0, 8) : ne.p.cxID));
+            } catch (Exception e) {
+                System.err.println("[SECURITY] Error verifying event signature: " + e.getMessage());
+                return false; // Reject on error
+            }
+        }
+
         boolean handledLocally = false;
 
         // Step 1: Try plugin system for application-level handling
@@ -831,9 +906,10 @@ public class NodeMesh {
                                                 imported++;
                                                 System.out.println("[PeerFinding]   + " + discoveredPeer.cxID.substring(0, 8));
 
-                                                // Send NewNode to establish crypto with newly discovered peer
+                                                // Send NewNode with SIGNED Node blob (receiver will save original signed blob for relay)
                                                 String selfJson = ConnectX.serialize("cxJSON1", connectX.getSelf());
                                                 connectX.buildEvent(EventType.NewNode, selfJson.getBytes("UTF-8"))
+                                                    .signData()  // Sign Node JSON to create signed blob (preserves sender signature)
                                                     .toPeer(discoveredPeer.cxID)
                                                     .queue();
                                             }
@@ -1225,18 +1301,12 @@ public class NodeMesh {
                             System.out.println("[BLOCK_RESPONSE] Received block " + block.block +
                                              " (" + block.networkEvents.size() + " events)");
 
-                            // Get network ID from block's first event (all events in block should be from same network)
-                            String networkID = null;
-                            Long chainID = null;
-                            for (NetworkEvent event : block.networkEvents.values()) {
-                                if (event.p != null && event.p.network != null) {
-                                    networkID = event.p.network;
-                                    break;
-                                }
-                            }
+                            // Get network ID from NetworkEvent path (CXN scope includes network)
+                            String networkID = ne.p != null ? ne.p.network : null;
+                            Long chainID = block.chain;
 
                             if (networkID == null) {
-                                System.err.println("[BLOCK_RESPONSE] Cannot determine network ID from block events");
+                                System.err.println("[BLOCK_RESPONSE] Cannot determine network ID from event path");
                                 handledLocally = true;
                                 break;
                             }
@@ -1282,10 +1352,13 @@ public class NodeMesh {
                                 System.err.println("[BLOCK_RESPONSE] Failed to save block to disk: " + e.getMessage());
                             }
 
+                            // Prepare block: verify and deserialize all events
+                            block.prepare(connectX);
+
                             // Queue state-modifying events for processing to rebuild state
                             int stateEvents = 0;
                             int skippedEvents = 0;
-                            for (NetworkEvent event : block.networkEvents.values()) {
+                            for (NetworkEvent event : block.deserializedEvents.values()) {
                                 if (event.executeOnSync) {
                                     // Queue event for processing through existing framework
                                     dev.droppinganvil.v3.network.events.NetworkContainer eventContainer =
@@ -1664,12 +1737,15 @@ public class NodeMesh {
 
         // Step 4b: Handle peerProxy mode - record to blockchain + distribute to all peers
         if (tP.peerProxy) {
-            // Try to record to blockchain if we have permissions
-            // Use our own ID when recording (we're accepting responsibility for this event)
-            try {
-                connectX.Event(ne, connectX.getOwnID());
-            } catch (Exception ignored) {
-                // Permission denied or other error - continue with distribution
+            // Try to record to blockchain using original sender's signed bytes
+            // Signature already verified at top of fireEvent()
+            if (nc != null && nc.e != null && ne.p != null && ne.p.cxID != null) {
+                try {
+                    // Record with original sender's signature (never re-sign)
+                    connectX.Event(ne, ne.p.cxID, nc.e);
+                } catch (Exception e) {
+                    System.err.println("[PeerProxy] Error recording event: " + e.getMessage());
+                }
             }
 
             // Distribute to all peers for eventual delivery

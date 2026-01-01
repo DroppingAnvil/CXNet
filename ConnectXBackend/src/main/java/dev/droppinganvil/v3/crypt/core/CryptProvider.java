@@ -59,6 +59,17 @@ public abstract class CryptProvider {
     public void encrypt(InputStream is, OutputStream os, String cxID) throws EncryptionFailureException {
 
     }
+
+    /**
+     * Encrypt data for multiple recipients (E2E encryption)
+     * @param is Input stream with plaintext data
+     * @param os Output stream for encrypted data
+     * @param recipientCxIDs List of recipient cxIDs to encrypt for
+     * @throws EncryptionFailureException if encryption fails
+     */
+    public void encrypt(InputStream is, OutputStream os, java.util.List<String> recipientCxIDs) throws EncryptionFailureException {
+
+    }
     public void sign(InputStream is, OutputStream os) throws EncryptionFailureException {
 
     }

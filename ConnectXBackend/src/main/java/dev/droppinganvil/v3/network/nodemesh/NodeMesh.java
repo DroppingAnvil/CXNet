@@ -689,6 +689,7 @@ public class NodeMesh {
                                     case UNBLOCK_NODE:
                                     case GRANT_PERMISSION:
                                     case REVOKE_PERMISSION:
+                                    case ZERO_TRUST_ACTIVATION:
                                         chainID = network.networkDictionary.c1;  // Admin events go to c1
                                         break;
                                 }
@@ -1334,55 +1335,52 @@ public class NodeMesh {
                                 break;
                             }
 
-                            // Add block to local blockchain in memory
-                            targetChain.blockMap.put(block.block, block);
-                            System.out.println("[BLOCK_RESPONSE] Added block " + block.block + " to chain " + chainID + " in memory");
+                            // Check if sender is EPOCH/NMI/backend (authoritative source)
+                            boolean isAuthoritative = network.configuration != null &&
+                                                     network.configuration.backendSet != null &&
+                                                     network.configuration.backendSet.contains(nc.iD);
 
-                            // Update current block pointer if this is the latest block
-                            if (targetChain.current == null || block.block > targetChain.current.block) {
-                                targetChain.current = block;
-                                System.out.println("[BLOCK_RESPONSE] Updated current block to " + block.block);
-                            }
+                            if (isAuthoritative && !network.zT) {
+                                // EPOCH/NMI response in non-zero-trust mode - accept immediately as source of truth
+                                System.out.println("[BLOCK_RESPONSE] EPOCH/NMI source - accepting as authoritative");
+                                applyBlockToChain(connectX, network, targetChain, block, networkID, chainID, nc.iD);
 
-                            // Save block to disk for persistence
-                            try {
-                                connectX.blockchainPersistence.saveBlock(networkID, chainID, block);
-                                System.out.println("[BLOCK_RESPONSE] Saved block " + block.block + " to disk");
-                            } catch (Exception e) {
-                                System.err.println("[BLOCK_RESPONSE] Failed to save block to disk: " + e.getMessage());
-                            }
+                            } else {
+                                // Peer response OR zero trust mode - use consensus
+                                System.out.println("[BLOCK_RESPONSE] Using consensus" +
+                                                 (network.zT ? " (zero trust mode)" : " (peer response)"));
 
-                            // Prepare block: verify and deserialize all events
-                            block.prepare(connectX);
+                                // Create request key for this block
+                                String requestKey = BlockConsensusTracker.createRequestKey(networkID, chainID, block.block);
 
-                            // Queue state-modifying events for processing to rebuild state
-                            int stateEvents = 0;
-                            int skippedEvents = 0;
-                            for (NetworkEvent event : block.deserializedEvents.values()) {
-                                if (event.executeOnSync) {
-                                    // Queue event for processing through existing framework
-                                    dev.droppinganvil.v3.network.events.NetworkContainer eventContainer =
-                                        new dev.droppinganvil.v3.network.events.NetworkContainer();
-                                    eventContainer.se = "cxJSON1";
-                                    eventContainer.s = false;
-                                    eventContainer.iD = nc.iD; // Mark as coming from the peer who sent the block
+                                // Record this response in consensus tracker
+                                boolean recorded = connectX.blockConsensusTracker.recordResponse(requestKey, nc.iD, block);
 
-                                    InputBundle ib = new InputBundle(event, eventContainer);
-                                    connectX.eventQueue.add(ib);
+                                if (recorded) {
+                                    // Check if consensus has been reached
+                                    boolean consensusReached = connectX.blockConsensusTracker.checkConsensus(requestKey);
 
-                                    stateEvents++;
-                                    System.out.println("[BLOCK_SYNC] Queued state event: " + event.eT);
+                                    if (consensusReached) {
+                                        // Get consensus block
+                                        dev.droppinganvil.v3.edge.NetworkBlock consensusBlock =
+                                            connectX.blockConsensusTracker.getConsensusBlock(requestKey);
+
+                                        if (consensusBlock != null) {
+                                            System.out.println("[BLOCK_CONSENSUS] Consensus reached for block " + consensusBlock.block);
+
+                                            // Apply consensus block
+                                            applyBlockToChain(connectX, network, targetChain, consensusBlock, networkID, chainID, nc.iD);
+
+                                            // Clean up this request
+                                            connectX.blockConsensusTracker.removeRequest(requestKey);
+                                        }
+                                    } else {
+                                        System.out.println("[BLOCK_CONSENSUS] Waiting for more responses...");
+                                    }
                                 } else {
-                                    // Skip ephemeral events (messages, pings, etc.)
-                                    skippedEvents++;
+                                    System.err.println("[BLOCK_RESPONSE] Failed to record response in consensus tracker");
                                 }
                             }
-
-                            System.out.println("[BLOCK_SYNC] Block " + block.block + " processed:");
-                            System.out.println("  - Added to chain " + chainID);
-                            System.out.println("  - Saved to disk");
-                            System.out.println("  - Queued " + stateEvents + " state events");
-                            System.out.println("  - Skipped " + skippedEvents + " ephemeral events");
 
                         } catch (Exception e) {
                             System.err.println("[BLOCK_RESPONSE] Error handling response: " + e.getMessage());
@@ -1579,6 +1577,85 @@ public class NodeMesh {
 
                         } catch (Exception e) {
                             System.err.println("[REVOKE_PERMISSION] Error handling event: " + e.getMessage());
+                            e.printStackTrace();
+                        }
+                        handledLocally = true;
+                        break;
+                    case ZERO_TRUST_ACTIVATION:
+                        System.out.println("[" + connectX.getOwnID() + "] ZERO_TRUST_ACTIVATION event received from " + nc.iD);
+                        try {
+                            // Parse payload: {network: "NETWORKID", seed: {...}}
+                            String ztJson = new String(ne.d, "UTF-8");
+                            java.util.Map<String, Object> ztData =
+                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", ztJson, java.util.Map.class);
+
+                            String networkID = (String) ztData.get("network");
+                            java.util.Map<String, Object> seedData = (java.util.Map<String, Object>) ztData.get("seed");
+
+                            System.out.println("[ZERO_TRUST_ACTIVATION] Activating zero trust mode for network " + networkID);
+                            System.out.println("[ZERO_TRUST_ACTIVATION] WARNING: This operation is IRREVERSIBLE");
+
+                            // Get the network
+                            CXNetwork network = connectX.getNetwork(networkID);
+                            if (network != null) {
+                                // Verify sender is NMI (first backend)
+                                boolean isNMI = network.configuration != null &&
+                                               network.configuration.backendSet != null &&
+                                               !network.configuration.backendSet.isEmpty() &&
+                                               network.configuration.backendSet.get(0).equals(nc.iD);
+
+                                if (!isNMI) {
+                                    System.err.println("[ZERO_TRUST_ACTIVATION] Rejected: sender " + nc.iD.substring(0, 8) + " is not NMI");
+                                    handledLocally = true;
+                                    break;
+                                }
+
+                                // Check if already in zero trust mode
+                                if (network.zT) {
+                                    System.out.println("[ZERO_TRUST_ACTIVATION] Network already in zero trust mode, ignoring duplicate activation");
+                                    handledLocally = true;
+                                    break;
+                                }
+
+                                // Activate zero trust mode
+                                network.zT = true;
+                                System.out.println("[ZERO_TRUST_ACTIVATION] Set network.zT = true");
+
+                                // Apply seed data updates if provided
+                                if (seedData != null && seedData.containsKey("zT")) {
+                                    Boolean ztFlag = (Boolean) seedData.get("zT");
+                                    System.out.println("[ZERO_TRUST_ACTIVATION] Seed zT flag: " + ztFlag);
+                                }
+
+                                System.out.println("[ZERO_TRUST_ACTIVATION] Zero trust mode activated for " + networkID);
+                                System.out.println("[ZERO_TRUST_ACTIVATION] NMI permissions are now blocked");
+                                System.out.println("[ZERO_TRUST_ACTIVATION] Network is fully decentralized");
+
+                                // Persist network configuration
+                                try {
+                                    if (connectX.blockchainPersistence != null) {
+                                        connectX.blockchainPersistence.saveChainMetadata(network.c1, networkID);
+                                        connectX.blockchainPersistence.saveChainMetadata(network.c2, networkID);
+                                        connectX.blockchainPersistence.saveChainMetadata(network.c3, networkID);
+                                        System.out.println("[ZERO_TRUST_ACTIVATION] Network configuration persisted");
+                                    }
+                                } catch (Exception persistEx) {
+                                    System.err.println("[ZERO_TRUST_ACTIVATION] Failed to persist configuration: " + persistEx.getMessage());
+                                }
+
+                                // TODO: Trigger blockchain re-sync using zero trust consensus protocols
+                                // This will be implemented when multi-peer block querying and reconciliation are ready
+
+                            } else {
+                                System.err.println("[ZERO_TRUST_ACTIVATION] Network not found: " + networkID);
+                            }
+
+                            // This is a state-modifying event that should be recorded to c1 (Admin) chain
+                            // System reads c1 to rebuild zero trust state during bootstrap/sync
+                            ne.executeOnSync = true;
+
+                        } catch (Exception e) {
+                            System.err.println("[ZERO_TRUST_ACTIVATION] Error handling event: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
@@ -1894,6 +1971,71 @@ public class NodeMesh {
      * Initiate blockchain sync from a trusted peer (NMI/Backend)
      * Compares local and remote chain heights and requests missing blocks
      */
+    /**
+     * Apply a block to the blockchain after consensus or authoritative source
+     * Handles adding to chain, persisting to disk, and queuing state events
+     */
+    private void applyBlockToChain(ConnectX connectX, CXNetwork network,
+                                  dev.droppinganvil.v3.edge.NetworkRecord targetChain,
+                                  dev.droppinganvil.v3.edge.NetworkBlock block,
+                                  String networkID, Long chainID, String senderID) {
+        try {
+            // Add block to local blockchain in memory
+            targetChain.blockMap.put(block.block, block);
+            System.out.println("[BLOCK_APPLY] Added block " + block.block + " to chain " + chainID + " in memory");
+
+            // Update current block pointer if this is the latest block
+            if (targetChain.current == null || block.block > targetChain.current.block) {
+                targetChain.current = block;
+                System.out.println("[BLOCK_APPLY] Updated current block to " + block.block);
+            }
+
+            // Save block to disk for persistence
+            try {
+                connectX.blockchainPersistence.saveBlock(networkID, chainID, block);
+                System.out.println("[BLOCK_APPLY] Saved block " + block.block + " to disk");
+            } catch (Exception e) {
+                System.err.println("[BLOCK_APPLY] Failed to save block to disk: " + e.getMessage());
+            }
+
+            // Prepare block: verify and deserialize all events
+            block.prepare(connectX);
+
+            // Queue state-modifying events for processing to rebuild state
+            int stateEvents = 0;
+            int skippedEvents = 0;
+            for (NetworkEvent event : block.deserializedEvents.values()) {
+                if (event.executeOnSync) {
+                    // Queue event for processing through existing framework
+                    dev.droppinganvil.v3.network.events.NetworkContainer eventContainer =
+                        new dev.droppinganvil.v3.network.events.NetworkContainer();
+                    eventContainer.se = "cxJSON1";
+                    eventContainer.s = false;
+                    eventContainer.iD = senderID; // Mark as coming from the sender
+
+                    InputBundle ib = new InputBundle(event, eventContainer);
+                    connectX.eventQueue.add(ib);
+
+                    stateEvents++;
+                    System.out.println("[BLOCK_SYNC] Queued state event: " + event.eT);
+                } else {
+                    // Skip ephemeral events (messages, pings, etc.)
+                    skippedEvents++;
+                }
+            }
+
+            System.out.println("[BLOCK_SYNC] Block " + block.block + " processed:");
+            System.out.println("  - Added to chain " + chainID);
+            System.out.println("  - Saved to disk");
+            System.out.println("  - Queued " + stateEvents + " state events");
+            System.out.println("  - Skipped " + skippedEvents + " ephemeral events");
+
+        } catch (Exception e) {
+            System.err.println("[BLOCK_APPLY] Error applying block: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
     private void initiateSyncFromPeer(ConnectX connectX, CXNetwork network, String networkID,
                                      java.util.Map<String, Number> remoteChainStatus, String peerID) {
         try {

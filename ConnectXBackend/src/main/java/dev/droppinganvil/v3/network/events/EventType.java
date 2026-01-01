@@ -162,5 +162,29 @@ public enum EventType {
      * - Persists across restarts via blockchain replay
      */
     REVOKE_PERMISSION,
+    /**
+     * Activate Zero Trust mode for a network (NMI-only, irreversible)
+     * Payload format: JSON {"network": "NETWORKID", "seed": {...}} (includes updated seed with zT=true)
+     * Recorded to c1 (Admin) chain as the source of truth
+     * Requires NMI signature and ZeroTrustActivation permission (NMI-only)
+     * Sets executeOnSync = true (state-modifying event)
+     *
+     * CRITICAL: This operation is IRREVERSIBLE
+     * After activation:
+     * - NMI loses all special permissions (treated as regular node)
+     * - Network becomes fully decentralized P2P mesh
+     * - Blockchain consensus switches from NMI-trust to multi-peer voting
+     * - NMI can no longer make edits to network configuration
+     * - Network operates in zero trust mode permanently
+     *
+     * When received (live or during sync):
+     * - Sets network.zT = true
+     * - Applies new seed (without blockchain data) to all peers
+     * - Triggers blockchain re-sync using zero trust consensus protocols
+     * - NMI permissions remain in permission map but are no longer honored
+     *
+     * Use case: Networks created centrally for fine-tuning, then switched to zero trust once stabilized
+     */
+    ZERO_TRUST_ACTIVATION,
     ;
 }

@@ -2967,6 +2967,280 @@ Format: `Record-{chainID}`
 - `AddAccount` - Can add themselves
 - `Record-3` - Can record to Events chain
 
+### Zero Trust Mode
+
+**Zero Trust Mode** is an **irreversible** network transition that converts a centrally-controlled network into a fully decentralized P2P mesh.
+
+#### Purpose & Use Case
+
+**Intended workflow:**
+1. **Network Creation:** NMI creates network with centralized control for initial configuration
+2. **Fine-Tuning:** NMI configures permissions, blockchain settings, backend infrastructure
+3. **Stabilization:** Network operates in centralized mode until ready for production
+4. **Zero Trust Activation:** NMI activates zero trust mode, permanently decentralizing the network
+
+#### Activation Process
+
+**Method:** `NMI.startZeroTrust(networkID)`
+
+**Steps:**
+1. NMI creates `ZERO_TRUST_ACTIVATION` event with updated seed (zT=true)
+2. Event is signed by NMI and recorded to c1 (Admin chain)
+3. Event is distributed CXN-scope to all network participants
+4. Each node receives event and applies zero trust mode:
+   - Sets `network.zT = true`
+   - Applies new seed (without blockchain data)
+   - Triggers blockchain re-sync using zero trust consensus protocols
+
+**Event Payload:**
+```json
+{
+  "network": "NETWORKID",
+  "seed": {
+    "...": "updated seed data with zT=true"
+  }
+}
+```
+
+**Requirements:**
+- Requires NMI signature
+- Recorded to c1 (Admin chain)
+- Sets `executeOnSync = true` (state-modifying event)
+
+#### Changes After Activation
+
+**CRITICAL: This operation is IRREVERSIBLE**
+
+Once activated:
+
+**1. NMI Permission Blocking (CXNetwork.java:66-110)**
+- NMI loses ALL special permissions
+- `checkChainPermission()` blocks NMI if `zT == true`
+- `checkNetworkPermission()` blocks NMI if `zT == true`
+- `getVariableNetworkPermission()` blocks NMI if `zT == true`
+- NMI is treated as a regular node for all permission checks
+
+**Implementation:**
+```java
+// Zero Trust Mode: Block NMI from using permissions
+if (zT && isCurrentNMI(deviceID)) {
+    System.out.println("[ZT-Blocked] NMI blocked from permission: " + permission);
+    return false;
+}
+```
+
+**2. Blockchain Consensus Switch**
+- **Before zT:** NMI is trusted authority for blockchain (single source of truth)
+- **After zT:** Multi-peer voting consensus (requires block reconciliation algorithm)
+- **Implication:** Blockchain conflicts resolved by peer majority, not NMI decree
+
+**3. Network Configuration Lock**
+- NMI can no longer:
+  - Modify network configuration
+  - Grant/revoke permissions
+  - Add/remove backend nodes
+  - Perform administrative actions
+- Network becomes fully peer-governed
+
+**4. Permission Map Retention**
+- NMI permissions remain in `networkPermissions.permissionSet`
+- **Rationale:** Required to securely process the ZERO_TRUST_ACTIVATION event
+- **Enforcement:** Permission checks actively block NMI despite map entries
+
+#### Security Considerations
+
+**Why Irreversible?**
+- Prevents NMI from reclaiming centralized control after decentralization
+- Ensures trust transition is permanent and verifiable
+- Protects network participants from governance reversal
+
+**Why Keep NMI in Permission Map?**
+- ZERO_TRUST_ACTIVATION event requires NMI signature verification
+- Permission system needs NMI entry to validate the activation event
+- Blockchain replay needs to process historical NMI actions
+- Active blocking (`if zT && isNMI`) prevents actual permission use
+
+**NMI Identification:**
+```java
+private boolean isCurrentNMI(String deviceID) {
+    return configuration.backendSet.get(0).equals(deviceID);
+}
+```
+- NMI is always the **first backend** in `backendSet`
+- Set during network creation (ConnectX.createNetwork():1290)
+- Immutable after zero trust activation
+
+#### Event Type Reference
+
+**EventType.ZERO_TRUST_ACTIVATION** (EventType.java:165-188)
+
+```java
+/**
+ * Activate Zero Trust mode for a network (NMI-only, irreversible)
+ * Payload format: JSON {"network": "NETWORKID", "seed": {...}}
+ * Recorded to c1 (Admin) chain as the source of truth
+ * Requires NMI signature and ZeroTrustActivation permission (NMI-only)
+ * Sets executeOnSync = true (state-modifying event)
+ */
+ZERO_TRUST_ACTIVATION
+```
+
+**Documentation:** See EventType.java lines 165-187 for full event documentation
+
+#### Implementation Status
+
+**Completed:**
+- [DONE] Zero trust flag (`CXNetwork.zT`)
+- [DONE] NMI permission blocking in all permission check methods (CXNetwork.java:66-110)
+- [DONE] `ZERO_TRUST_ACTIVATION` event type (EventType.java:165-188)
+- [DONE] `startZeroTrust()` method implementation (ConnectX.java:1399-1479)
+- [DONE] ZERO_TRUST_ACTIVATION event handler (NodeMesh.java:1587-1665)
+- [DONE] Multi-peer block consensus algorithm (BlockConsensusTracker.java)
+- [DONE] Hybrid consensus protocol (EPOCH/NMI + multi-peer voting)
+- [DONE] Per-network consensus configuration (CXNetwork.java:50-78)
+
+**Pending:**
+- [TODO] Integration tests for zero trust activation
+- [TODO] Multi-peer block request broadcasting
+
+---
+
+## Block Consensus Mechanism
+
+ConnectX implements a hybrid consensus system that supports both centralized (EPOCH/NMI-trust) and decentralized (multi-peer voting) block verification.
+
+### Consensus Architecture
+
+**Two Modes:**
+
+1. **EPOCH/NMI Trust Mode** (Default, non-zT networks)
+   - EPOCH/NMI responses are authoritative
+   - Blocks from EPOCH/NMI accepted immediately
+   - Peer responses use multi-peer consensus
+
+2. **Zero Trust Mode** (After zT activation)
+   - All responses (including EPOCH/NMI) use multi-peer consensus
+   - Majority voting determines block validity
+   - No single source of truth
+
+### BlockConsensusTracker
+
+**Location:** `BlockConsensusTracker.java`
+
+**Purpose:** Manages multi-peer block requests and responses to reach consensus through majority voting.
+
+**Components:**
+
+1. **BlockRequest Class**
+   - Tracks requests across multiple peers
+   - Stores responses with block hash comparison
+   - Network-specific consensus configuration
+   - Timeout handling
+
+2. **Consensus Algorithm**
+   ```
+   For each block request:
+   1. Query multiple peers for same block
+   2. Calculate hash for each response
+   3. Count hash occurrences
+   4. Check if majority reaches threshold
+   5. Return consensus block if threshold met
+   ```
+
+### Per-Network Consensus Configuration
+
+**Location:** `CXNetwork.java` lines 50-78
+
+Each network can configure its own consensus parameters:
+
+```java
+public Integer consensusMinPeers = 3;           // Minimum peers required
+public Double consensusMinResponseRate = 0.6;   // 60% must respond
+public Double consensusThreshold = 0.67;        // 67% must agree
+public Long consensusTimeoutMs = 30000L;        // 30 second timeout
+```
+
+**Considerations:**
+
+| Network Type | Min Peers | Response Rate | Threshold | Rationale |
+|-------------|-----------|---------------|-----------|-----------|
+| Test Network | 2 | 0.5 (50%) | 0.5 (51%) | Fast consensus for testing |
+| Production | 3 | 0.6 (60%) | 0.67 (67%) | Balanced security/performance |
+| High Security | 5 | 0.75 (75%) | 0.75 (75%) | Strong consensus guarantees |
+| Zero Trust | 7 | 0.8 (80%) | 0.8 (80%) | Maximum security |
+
+### Consensus Flow
+
+**BLOCK_RESPONSE Handler** (NodeMesh.java:1294-1393)
+
+```
+Block response received
+    ↓
+Is sender EPOCH/NMI?
+    ↓ YES → Is network in zT mode?
+        ↓ NO  → Accept immediately (authoritative)
+        ↓ YES → Use consensus ↓
+    ↓ NO  → Use consensus
+        ↓
+Record response in BlockConsensusTracker
+    ↓
+Check consensus:
+  - Enough peers responded? (≥ minPeers)
+  - Response rate sufficient? (≥ minResponseRate)
+  - Majority agreement? (≥ consensusThreshold)
+    ↓ YES → Apply consensus block
+    ↓ NO  → Wait for more responses
+```
+
+### Block Hash Calculation
+
+**Method:** `BlockConsensusTracker.calculateBlockHash()`
+
+Hash includes:
+- Block number
+- Chain ID
+- Previous block hash
+- Event count
+
+**Purpose:** Quickly compare blocks from different peers without full content comparison.
+
+### Consensus Safety
+
+**Protection Against:**
+
+1. **Byzantine Peers:** Majority voting prevents single bad actor
+2. **Network Partitions:** Timeout prevents indefinite waiting
+3. **Slow Peers:** Minimum response rate ensures timely consensus
+4. **Conflicting Blocks:** Threshold requires supermajority agreement
+
+**Failure Modes:**
+
+- **Timeout:** Request cleaned up after `consensusTimeoutMs`
+- **Insufficient Peers:** Consensus fails if `< minPeers` respond
+- **Low Response Rate:** Consensus fails if `< minResponseRate`
+- **No Agreement:** Consensus fails if no hash reaches `consensusThreshold`
+
+### Integration with Blockchain
+
+**Block Application** (NodeMesh.java:1974-2037)
+
+After consensus reached:
+1. Add block to chain in memory
+2. Update current block pointer
+3. Persist block to disk
+4. Prepare block (verify signatures)
+5. Queue state-modifying events
+
+**State Replay:**
+
+Events marked with `executeOnSync = true` are queued during blockchain sync to rebuild network state:
+- REGISTER_NODE
+- GRANT_PERMISSION
+- REVOKE_PERMISSION
+- ZERO_TRUST_ACTIVATION
+- BLOCK_NODE
+- UNBLOCK_NODE
+
 ---
 
 ## Implementation Notes

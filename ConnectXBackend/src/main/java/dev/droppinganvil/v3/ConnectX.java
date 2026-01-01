@@ -111,6 +111,13 @@ public class ConnectX {
     }
     public final ConcurrentHashMap<String, ConcurrentHashMap<String, SeedResponseData>> seedConsensusMap = new ConcurrentHashMap<>();
 
+    /**
+     * Block consensus tracker for zero trust multi-peer verification
+     * Manages block requests and responses from multiple peers to reach consensus
+     * Used when network.zT = true (zero trust mode activated)
+     */
+    public final BlockConsensusTracker blockConsensusTracker = new BlockConsensusTracker();
+
     public ConnectX() throws IOException {
         this("ConnectX");
     }
@@ -143,8 +150,10 @@ public class ConnectX {
 
         // Initialize crypto with provided or generated UUID
         String actualID = cxID != null ? cxID : java.util.UUID.randomUUID().toString();
-        //TODO Fix logic from testing localhost
-        String address = "127.0.0.1:" + port;
+
+        // Address is optional - nodes can rely solely on HTTP bridge addresses
+        // For nodes with direct P2P connectivity, address will be discovered via CXHELLO
+        String address = null;  // Will be populated by LAN discovery or bridge
         initializeCrypto(actualID, password, address);
 
         // Connect to network
@@ -1394,6 +1403,88 @@ public class ConnectX {
         }
 
         return network;
+    }
+
+    /**
+     * Activate Zero Trust mode for a network (NMI-only, IRREVERSIBLE)
+     *
+     * This method transitions a network from centralized (NMI-controlled) to fully decentralized (zero trust).
+     * After activation:
+     * - NMI loses all special permissions
+     * - Network becomes fully peer-governed
+     * - Blockchain consensus switches to multi-peer voting
+     * - Operation is PERMANENT and CANNOT be reversed
+     *
+     * @param networkID Network to activate zero trust mode for
+     * @throws IllegalAccessException if caller is not NMI or network doesn't exist
+     * @throws Exception if event creation, signing, or distribution fails
+     */
+    public void startZeroTrust(String networkID) throws IllegalAccessException, Exception {
+        // Verify node is initialized
+        if (self == null || self.cxID == null) {
+            throw new IllegalAccessException("Node must be initialized before activating zero trust");
+        }
+
+        // Get network
+        CXNetwork network = networkMap.get(networkID);
+        if (network == null) {
+            throw new IllegalAccessException("Network " + networkID + " not found");
+        }
+
+        // Verify caller is NMI (first backend)
+        if (network.configuration == null || network.configuration.backendSet == null ||
+            network.configuration.backendSet.isEmpty() ||
+            !network.configuration.backendSet.get(0).equals(self.cxID)) {
+            throw new IllegalAccessException("Only NMI can activate zero trust mode");
+        }
+
+        // Verify network is not already in zero trust mode
+        if (network.zT) {
+            throw new IllegalAccessException("Network " + networkID + " is already in zero trust mode");
+        }
+
+        System.out.println("[Zero Trust] Activating zero trust mode for network " + networkID);
+        System.out.println("[Zero Trust] WARNING: This operation is IRREVERSIBLE");
+
+        // Set zT flag in network configuration
+        network.zT = true;
+
+        // Create updated seed data with zT=true
+        java.util.Map<String, Object> seedData = new java.util.HashMap<>();
+        seedData.put("network", networkID);
+        seedData.put("zT", true);
+        seedData.put("timestamp", System.currentTimeMillis());
+        seedData.put("nmi", network.configuration.nmiPub);
+
+        // Create event payload
+        java.util.Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("network", networkID);
+        payload.put("seed", seedData);
+
+        String payloadJson = serialize("cxJSON1", payload);
+        System.out.println("[Zero Trust] Created ZERO_TRUST_ACTIVATION event payload");
+
+        // Build and queue ZERO_TRUST_ACTIVATION event
+        // Record to c1 (Admin chain) and distribute to all network participants
+        buildEvent(dev.droppinganvil.v3.network.events.EventType.ZERO_TRUST_ACTIVATION, payloadJson.getBytes("UTF-8"))
+            .withRecordFlag(true)  // Enable automatic recording
+            .toNetwork(networkID, network.networkDictionary.c1)  // Record to c1 (Admin chain)
+            .queue();
+
+        System.out.println("[Zero Trust] ZERO_TRUST_ACTIVATION event queued for network " + networkID);
+        System.out.println("[Zero Trust] NMI permissions will be blocked after event is processed");
+        System.out.println("[Zero Trust] Network is now in zero trust mode");
+
+        // Persist updated network configuration
+        try {
+            blockchainPersistence.saveChainMetadata(network.c1, networkID);
+            blockchainPersistence.saveChainMetadata(network.c2, networkID);
+            blockchainPersistence.saveChainMetadata(network.c3, networkID);
+            System.out.println("[Zero Trust] Network configuration persisted");
+        } catch (Exception e) {
+            System.err.println("[Zero Trust] Failed to persist network configuration: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     /**

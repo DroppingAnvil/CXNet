@@ -1,7 +1,35 @@
 # ConnectX (CX) Protocol Documentation
 
-**Version:** 3.0
-**Last Updated:** 2025-01-24 (Security Features & Bootstrap)
+**Version:** 3.1
+**Last Updated:** 2025-01-01 (Zero Trust & Consensus)
+
+---
+
+## Recent Updates (v3.1)
+
+### Zero Trust Mode
+- Irreversible network decentralization
+- NMI permission blocking when zT=true
+- ZERO_TRUST_ACTIVATION event type
+- Complete transition from centralized to P2P governance
+
+### Block Consensus Mechanism
+- Hybrid consensus (EPOCH/NMI-trust + multi-peer voting)
+- BlockConsensusTracker for majority voting
+- Per-network consensus configuration
+- Byzantine fault tolerance through supermajority
+
+### Blockchain Improvements
+- Signed event blob architecture
+- Blockchain recording at transmission time
+- Per-chain permission system (Record-1, Record-2, Record-3)
+- Automatic state replay from blockchain
+
+### Network Improvements
+- Hybrid node addressing (P2P + bridge-only nodes)
+- Removed hardcoded localhost for distributed testing
+- Address bloat prevention (single receiving socket per peer)
+- LAN discovery via CXHELLO protocol
 
 ---
 
@@ -2902,8 +2930,347 @@ enum EventType {
     MESSAGE,      // Text messages
     NewNode,      // Peer discovery/announcement
     PeerFinding,  // Peer discovery requests
+    CXHELLO,      // LAN peer discovery handshake
+    CXHELLO_RESPONSE,  // LAN discovery response
+    BLOCK_REQUEST,     // Request blockchain blocks
+    BLOCK_RESPONSE,    // Respond with blockchain blocks
+    CHAIN_STATUS_REQUEST,   // Request blockchain status
+    CHAIN_STATUS_RESPONSE,  // Respond with blockchain status
+    PEER_LIST_RESPONSE,     // Respond with peer list
+    SEED_REQUEST,      // Bootstrap seed request
+    SEED_RESPONSE,     // Bootstrap seed response
+    ZERO_TRUST_ACTIVATION,  // Zero trust mode activation
     // Extensible via plugins
 }
+```
+
+### Event Creation & EventBuilder Pattern
+
+**CRITICAL:** All events MUST be created using the EventBuilder pattern with `.signData()` for cryptographic verification.
+
+#### Security Requirement
+
+Since implementing real security checks, **all production events require cryptographic signatures** to pass verification. Manual NetworkEvent creation is deprecated and will fail security validation.
+
+**Why .signData() is Required:**
+- Cryptographically signs the event payload (NetworkEvent.d) with sender's private key
+- Sets `oCXID` (origin sender ID) for verification
+- Creates signed blob that preserves sender authenticity during relay
+- Prevents event forgery and tampering
+- Required for multi-layer signature verification (NetworkContainer + NetworkEvent + Payload)
+
+#### Three-Layer Signature Architecture
+
+ConnectX uses a **three-layer signature system** for maximum security:
+
+**Layer 1: NetworkContainer Signature**
+- Signs the entire NetworkContainer (transport wrapper)
+- Verifies transmitter identity (nc.iD)
+- Verified in `NodeMesh.processNetworkInput()` before deserialization
+- Prevents spoofing of transmitter ID
+
+**Layer 2: NetworkEvent Signature**
+- Signs the NetworkEvent object itself
+- Verifies event structure integrity
+- Ensures event fields haven't been tampered with
+
+**Layer 3: NetworkEvent.d Payload Signature**
+- Signs the event payload data (the actual message/data)
+- Created by `.signData()` method
+- Verifies original sender (oCXID) - preserved across relay
+- Most critical for relay scenarios (proves original authorship)
+
+#### EventBuilder API
+
+**Location:** `ConnectX.EventBuilder` (ConnectX.java:633-725)
+
+**Standard Event Creation Pattern:**
+```java
+// Standard event with signature
+connectX.buildEvent(EventType.MESSAGE, payloadData)
+    .toPeer(destinationID)
+    .signData()  // REQUIRED for Layer 3 payload signature
+    .queue();
+
+// Event with network routing
+connectX.buildEvent(EventType.BLOCK_REQUEST, requestData)
+    .toPeer(peerID)
+    .signData()
+    .getPath().network = networkID;  // Set network routing
+    .queue();
+
+// Event with bridge routing (bootstrap)
+connectX.buildEvent(EventType.NewNode, nodeData)
+    .toPeer(EPOCH_UUID)
+    .viaBridge(bridgeHost, bridgePort)
+    .signData()
+    .queue();
+
+// E2E encrypted event
+connectX.buildEvent(EventType.MESSAGE, secretData)
+    .addRecipient(peer1ID)
+    .addRecipient(peer2ID)
+    .encrypt()  // E2E encryption
+    .toNetwork("NETWORKID")
+    .queue();
+```
+
+#### EventBuilder Methods
+
+**Routing Methods:**
+- `.toPeer(String peerID)` - Route to specific peer (CXS scope)
+- `.toNetwork(String networkID)` - Broadcast to network (CXN scope)
+- `.viaBridge(String host, String port)` - Route via HTTP bridge
+
+**Security Methods:**
+- `.signData()` - **REQUIRED** - Sign event payload (Layer 3) for verification
+- `.encrypt()` - Enable E2E encryption (auto-includes sender as recipient)
+- `.addRecipient(String peerID)` - Add E2E encryption recipient
+
+**Path Modification:**
+- `.getPath()` - Access CXPath for advanced routing (network, scope, bridge)
+
+**Execution:**
+- `.queue()` - Queue event for transmission
+
+#### Signature Verification Flow
+
+**Outbound Events:**
+1. EventBuilder creates NetworkEvent with payload data
+2. `.signData()` signs payload (Layer 3) with sender's private key → creates signed blob
+3. Sets `event.p.oCXID = sender's cxID`
+4. EventBuilder signs NetworkEvent object (Layer 2)
+5. OutputBundle queued for transmission
+6. OutConnectionController signs NetworkContainer (Layer 1 - transport)
+7. All three signatures transmitted
+
+**Inbound Events:**
+1. **Layer 1:** NetworkContainer signature verified first (transport - verifies transmitter nc.iD)
+2. **Layer 2:** NetworkEvent signature verified (event structure integrity)
+3. **Layer 3:** NetworkEvent.d payload signature verified (original sender oCXID)
+4. Events without valid signatures at ANY layer → `DecryptionFailureException`
+5. Verification failures logged to Analytics
+
+**Relay Integrity:**
+- **Layer 1:** Re-signed by each relay hop (proves transmission chain)
+- **Layer 2:** Preserved across relay (proves event structure unchanged)
+- **Layer 3:** Preserved across relay (proves original sender identity)
+
+#### Migration from Manual Creation
+
+**DEPRECATED PATTERN (DO NOT USE):**
+```java
+// ❌ Manual NetworkEvent creation - FAILS security verification
+NetworkEvent event = new NetworkEvent();
+event.eT = EventType.MESSAGE.name();
+event.iD = UUID.randomUUID().toString();
+event.d = data;  // NO Layer 3 payload signature!
+
+event.p = new CXPath();
+event.p.cxID = destinationID;
+event.p.oCXID = connectX.getOwnID();  // oCXID set but NO cryptographic binding!
+event.p.scope = "CXS";
+
+NetworkContainer nc = new NetworkContainer();
+nc.se = "cxJSON1";
+nc.s = false;
+
+OutputBundle bundle = new OutputBundle(event, targetNode, null, null, nc);
+connectX.queueEvent(bundle);
+```
+
+**Problems with Manual Creation:**
+- Missing `.signData()` call → no Layer 3 payload signature
+- Missing oCXID cryptographic binding (Layer 3)
+- Only Layer 1 (container) and Layer 2 (event) signatures present
+- Fails Layer 3 verification on recipient side
+- Cannot prove original sender in some scenarios
+
+**CORRECT PATTERN (REQUIRED):**
+```java
+// ✅ EventBuilder pattern - passes ALL three-layer security verification
+String payloadJson = ConnectX.serialize("cxJSON1", responseData);
+connectX.buildEvent(EventType.MESSAGE, payloadJson.getBytes("UTF-8"))
+    .toPeer(destinationID)
+    .signData()  // Signs payload (Layer 3), sets oCXID, creates verification-ready event
+    .queue();     // Automatically adds Layer 1 & 2 signatures during transmission
+```
+
+**Benefits:**
+- Automatic Layer 3 payload signing
+- oCXID cryptographically bound to payload signature
+- All three signature layers present
+- Passes all security checks
+- Compatible with relay
+- Proves original sender identity
+- Significantly less code (~75% reduction)
+
+#### Conversion Examples
+
+**Example 1: CXHELLO_RESPONSE**
+```java
+// BEFORE (20+ lines, manual creation, NO Layer 3 signature)
+String responsePayloadJson = ConnectX.serialize("cxJSON1", responsePayload);
+
+NetworkEvent responseEvent = new NetworkEvent();
+responseEvent.eT = EventType.CXHELLO_RESPONSE.name();
+responseEvent.iD = java.util.UUID.randomUUID().toString();
+responseEvent.d = responsePayloadJson.getBytes("UTF-8");  // Unsigned payload!
+
+responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
+responseEvent.p.cxID = requesterID;
+responseEvent.p.oCXID = connectX.getOwnID();  // Set but not cryptographically bound
+responseEvent.p.scope = "CXS";
+
+NetworkContainer responseContainer = new NetworkContainer();
+responseContainer.se = "cxJSON1";
+responseContainer.s = false;
+
+OutputBundle responseBundle = new OutputBundle(
+    responseEvent, requesterNode, null, null, responseContainer);
+connectX.queueEvent(responseBundle);
+
+// AFTER (4 lines, EventBuilder, WITH all three signature layers)
+String responsePayloadJson = ConnectX.serialize("cxJSON1", responsePayload);
+connectX.buildEvent(EventType.CXHELLO_RESPONSE, responsePayloadJson.getBytes("UTF-8"))
+    .toPeer(requesterID)
+    .signData()  // Layer 3 payload signature + oCXID binding
+    .queue();     // Adds Layer 1 & 2 during transmission
+```
+
+**Example 2: BLOCK_RESPONSE with Path Preservation**
+```java
+// BEFORE (25+ lines, manual creation)
+String blockJson = ConnectX.serialize("cxJSON1", block);
+
+NetworkEvent blockEvent = new NetworkEvent();
+blockEvent.eT = EventType.BLOCK_RESPONSE.name();
+blockEvent.iD = java.util.UUID.randomUUID().toString();
+blockEvent.d = blockJson.getBytes("UTF-8");
+
+blockEvent.p = new dev.droppinganvil.v3.network.CXPath();
+blockEvent.p.cxID = requesterID;
+blockEvent.p.oCXID = connectX.getOwnID();
+blockEvent.p.scope = originalEvent.p.scope;
+blockEvent.p.network = originalEvent.p.network;
+blockEvent.p.bridge = originalEvent.p.bridge;
+blockEvent.p.bridgeArg = originalEvent.p.bridgeArg;
+
+NetworkContainer nc = new NetworkContainer();
+nc.se = "cxJSON1";
+nc.s = false;
+
+OutputBundle bundle = new OutputBundle(blockEvent, requesterNode, null, null, nc);
+connectX.queueEvent(bundle);
+
+// AFTER (8 lines, EventBuilder, WITH all signature layers)
+String blockJson = ConnectX.serialize("cxJSON1", block);
+
+ConnectX.EventBuilder eb = connectX.buildEvent(
+    EventType.BLOCK_RESPONSE, blockJson.getBytes("UTF-8"))
+    .toPeer(requesterID)
+    .signData();  // Layer 3 payload signature
+
+// Preserve original path routing
+if (originalEvent.p != null) {
+    eb.getPath().network = originalEvent.p.network;
+    eb.getPath().scope = originalEvent.p.scope;
+    eb.getPath().bridge = originalEvent.p.bridge;
+    eb.getPath().bridgeArg = originalEvent.p.bridgeArg;
+}
+eb.queue();
+```
+
+**Example 3: Bootstrap Event (NEWNODE)**
+```java
+// BEFORE (35+ lines, manual creation)
+String selfJson = serialize("cxJSON1", self);
+
+NetworkEvent newNodeEvent = new NetworkEvent();
+newNodeEvent.eT = EventType.NewNode.name();
+newNodeEvent.iD = java.util.UUID.randomUUID().toString();
+newNodeEvent.d = selfJson.getBytes("UTF-8");
+
+newNodeEvent.p = new CXPath();
+newNodeEvent.p.cxID = EPOCH_UUID;
+newNodeEvent.p.oCXID = getOwnID();
+newNodeEvent.p.scope = "CXS";
+newNodeEvent.p.bridge = bridgeHost;
+newNodeEvent.p.bridgeArg = bridgePort;
+
+NetworkContainer nc = new NetworkContainer();
+nc.se = "cxJSON1";
+nc.s = false;
+
+Node bridgeNode = new Node();
+bridgeNode.cxID = EPOCH_UUID;
+
+OutputBundle bundle = new OutputBundle(newNodeEvent, bridgeNode, null, null, nc);
+queueEvent(bundle);
+
+// AFTER (9 lines, EventBuilder, WITH all signature layers)
+String selfJson = serialize("cxJSON1", self);
+
+String[] bridgeParts = EPOCH_BRIDGE_ADDRESS.split(":", 2);
+buildEvent(EventType.NewNode, selfJson.getBytes("UTF-8"))
+    .toPeer(EPOCH_UUID)
+    .viaBridge(bridgeParts[0], bridgeParts[1])
+    .signData()  // Layer 3 payload signature (critical for relay)
+    .queue();
+```
+
+#### Special Case: LANScanner CXHELLO
+
+**Exception:** `LANScanner.sendCXHELLO()` (LANScanner.java:204-240) intentionally uses manual NetworkEvent creation.
+
+**Why:** CXHELLO is a bootstrap discovery message sent to unknown peers before peer ID is known. It uses the NEWNODE manual pattern for direct transmission fallback in OutConnectionController.
+
+**Pattern:**
+```java
+// Manual creation for bootstrap to unknown peer (NO peer ID available)
+NetworkEvent helloEvent = new NetworkEvent(EventType.CXHELLO, payloadBytes);
+helloEvent.eT = EventType.CXHELLO.name();
+helloEvent.iD = UUID.randomUUID().toString();
+// DON'T set event.p (Permission/CXPath) - triggers direct transmission fallback
+
+Node targetNode = new Node();
+targetNode.addr = targetIP + ":" + targetPort;  // Only address, no peer ID
+
+OutputBundle bundle = new OutputBundle(helloEvent, targetNode, null, null, nc);
+connectX.queueEvent(bundle);
+```
+
+**Important:** This is the ONLY acceptable use case for manual creation - when peer ID is unknown and direct socket transmission to address is required.
+
+#### Verification Failure Handling
+
+**Common Failure Scenarios:**
+
+1. **Event missing Layer 3 payload signature** → `DecryptionFailureException`
+   - Cause: Manual NetworkEvent creation without `.signData()`
+   - Fix: Use EventBuilder pattern with `.signData()`
+
+2. **Invalid signature (any layer)** → `DecryptionFailureException`
+   - Cause: Data modified after signing, or wrong signing key
+   - Fix: Ensure data is not modified after `.signData()` call
+
+3. **oCXID mismatch** → Security warning
+   - Cause: oCXID field doesn't match Layer 3 payload signature
+   - Fix: Use EventBuilder (automatically sets correct oCXID)
+
+4. **Unknown sender on non-bootstrap event** → `DecryptionFailureException`
+   - Cause: Receiving event from peer whose public key is not imported
+   - Fix: Only CXHELLO and NewNode allowed from unknown senders
+
+**Analytics Logging:**
+All verification failures are logged:
+```java
+Analytics.addData(AnalyticData.Tear,
+    "NetworkContainer signature verification FAILED for " + containerID);
+Analytics.addData(AnalyticData.Tear,
+    "NetworkEvent signature verification FAILED for " + eventID);
+Analytics.addData(AnalyticData.Tear,
+    "Payload signature verification FAILED for " + oCXID);
 ```
 
 ### Plugin System
@@ -3273,6 +3640,41 @@ Result:
 - CXN messages broadcast to all peers
 - Receivers filter by network membership
 - No central registry of who's in what network
+
+### Node Addressing
+
+**Hybrid Address Model:**
+
+Nodes in ConnectX can operate with multiple address types:
+
+1. **Direct P2P Address** (IP:Port)
+   - Discovered via LAN scanner (CXHELLO protocol)
+   - Not required during initialization
+   - Automatically populated for nodes with direct connectivity
+
+2. **HTTP Bridge Address**
+   - Format: `cxHTTP1:https://bridge.example.com/cx`
+   - Required for nodes behind firewalls/NAT
+   - Enables connectivity without direct P2P access
+
+3. **No Address** (Bridge-only nodes)
+   - Nodes can launch without any P2P address
+   - Rely solely on HTTP bridge for communication
+   - Suitable for restricted network environments
+
+**Initialization:** (ConnectX.java:154-157)
+```java
+// Address is optional - nodes can rely solely on HTTP bridge addresses
+// For nodes with direct P2P connectivity, address will be discovered via CXHELLO
+String address = null;  // Will be populated by LAN discovery or bridge
+```
+
+**Fair Testing:**
+
+- Removed hardcoded `127.0.0.1` localhost address
+- Enables distributed testing across multiple machines
+- Supports consensus testing with real network topology
+- Allows hybrid deployments (P2P + bridge nodes)
 
 ### Network Isolation
 

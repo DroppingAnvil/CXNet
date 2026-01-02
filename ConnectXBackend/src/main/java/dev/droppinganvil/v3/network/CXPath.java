@@ -42,6 +42,10 @@ public class CXPath {
      */
     public String cxID;
     /**
+     * Origin CXID, should match NetworkContainer.oD, this is persisted for storing events on disk without networking wrappers.
+     */
+    public String oCXID;
+    /**
      * Version of resource, REMOTE DIRECTORY not implemented
      */
     public Integer version;

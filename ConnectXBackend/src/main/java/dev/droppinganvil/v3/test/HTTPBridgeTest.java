@@ -200,20 +200,20 @@ public class HTTPBridgeTest {
             System.out.println("  ✓ CXNET already loaded in memory");
         }
 
-        // Create TESTNET for whitelist security testing
-        System.out.println("\nStep 3b: Setting up TESTNET (whitelist test network)...");
+        // Create TESTNET for blockchain replication testing
+        System.out.println("\nStep 3b: Setting up TESTNET (blockchain replication test network)...");
         dev.droppinganvil.v3.network.CXNetwork testnet = server.getNetwork("TESTNET");
 
         if (testnet == null) {
             testnet = server.createNetwork("TESTNET");
 
-            // Enable whitelist mode
-            testnet.configuration.whitelistMode = true;
+            // Disable whitelist mode for blockchain replication testing
+            testnet.configuration.whitelistMode = false;
             testnet.configuration.publicSeed = false;
             testnet.configuration.syncIntervalSeconds = 30; // Testing mode
 
-            System.out.println("  ✓ TESTNET created with whitelist mode");
-            System.out.println("    Whitelist mode: ENABLED");
+            System.out.println("  ✓ TESTNET created for blockchain replication testing");
+            System.out.println("    Whitelist mode: DISABLED (allows all peers for testing)");
             System.out.println("    Backend/NMI: EPOCH");
             System.out.println("    Sync interval: 30 seconds (testing mode)");
 
@@ -291,6 +291,11 @@ public class HTTPBridgeTest {
         // Register event handler for testing
         registerTestEventHandler(server);
 
+        // Create test events for blockchain sync testing on both networks
+        System.out.println("\nCreating test blockchain events for sync testing...");
+        createTestBlockchainEvents(server, cxnet);
+        createTestBlockchainEvents(server, testnet);
+
         // Keep server running
         System.out.println("\nServer is running. Press Ctrl+C to stop.");
         System.out.println("\nWaiting for incoming connections...\n");
@@ -341,6 +346,60 @@ public class HTTPBridgeTest {
             return ip;
         } catch (Exception e) {
             return "[YOUR_LOCAL_IP]";
+        }
+    }
+
+    /**
+     * Create test blockchain events for sync testing
+     * Creates 100+ events to test block rotation
+     * EPOCH (NMI) has permissions to record events to all chains
+     */
+    private static void createTestBlockchainEvents(ConnectX server, dev.droppinganvil.v3.network.CXNetwork network) {
+        try {
+            String networkID = network.configuration.netID;
+            System.out.println("  Creating 105 test events on " + networkID + " c3 (Events chain) to test block rotation...");
+
+            // Create 105 test events on c3 to force block rotation
+            for (int i = 1; i <= 105; i++) {
+                java.util.Map<String, Object> testData = new java.util.HashMap<>();
+                testData.put("testEvent", networkID + "-c3-event-" + i);
+                testData.put("eventNumber", i);
+                testData.put("timestamp", System.currentTimeMillis());
+                testData.put("message", "Test event #" + i + " for block rotation testing on " + networkID);
+                String testJson = ConnectX.serialize("cxJSON1", testData);
+
+                server.buildEvent(EventType.MESSAGE, testJson.getBytes("UTF-8"))
+                    .withRecordFlag(true)
+                    .toNetwork(networkID, network.networkDictionary.c3)
+                        .signData()
+                    .queue();
+
+                // Progress indicator
+                if (i % 10 == 0) {
+                    System.out.println("    Progress: " + i + "/105 events queued");
+                }
+
+                Thread.sleep(50);  // Small delay to avoid overwhelming the queue
+            }
+
+            // Wait for all events to be processed and recorded
+            System.out.println("  Waiting 5 seconds for all events to be processed and recorded...");
+            Thread.sleep(5000);
+
+            // Display final blockchain stats
+            ConnectX.BlockchainStats stats = server.getBlockchainStats(network);
+            System.out.println("  ✓ Test events recorded successfully on " + networkID + "!");
+            System.out.println("    c1: " + stats.c1BlockCount + " blocks (current: block " + stats.c1CurrentBlock + ")");
+            System.out.println("    c2: " + stats.c2BlockCount + " blocks (current: block " + stats.c2CurrentBlock + ")");
+            System.out.println("    c3: " + stats.c3BlockCount + " blocks (current: block " + stats.c3CurrentBlock + ")");
+
+            if (stats.c3BlockCount > 1) {
+                System.out.println("    ✓ Block rotation occurred on c3! Multiple blocks created.");
+            }
+
+        } catch (Exception e) {
+            System.err.println("  ✗ Error creating test events: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 

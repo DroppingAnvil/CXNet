@@ -4,9 +4,7 @@ import dev.droppinganvil.v3.ConnectX;
 import dev.droppinganvil.v3.analytics.AnalyticData;
 import dev.droppinganvil.v3.analytics.Analytics;
 import dev.droppinganvil.v3.crypt.core.exceptions.DecryptionFailureException;
-import dev.droppinganvil.v3.network.CXNetwork;
-import dev.droppinganvil.v3.network.InputBundle;
-import dev.droppinganvil.v3.network.UnauthorizedNetworkConnectivityException;
+import dev.droppinganvil.v3.network.*;
 import dev.droppinganvil.v3.network.events.EventType;
 import dev.droppinganvil.v3.network.events.NetworkContainer;
 import dev.droppinganvil.v3.network.events.NetworkEvent;
@@ -15,6 +13,7 @@ import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -524,6 +523,33 @@ public class NodeMesh {
             System.out.print(ib.ne);
             System.out.print(ib.signedEventBytes);
             EventType et = null;
+
+            //ADDITIONAL VALIDATIONS
+
+            //VERIFY CONTAINER AND EVENT (Layer 1 + 2)
+            //ib.ne - SIGNED BY ORIGIN UNMODIFIABLE
+            //ib.nc - SIGNED BY LAST HOP, MODIFIABLE
+            //It is critcal that they match to enforce multilayer cryptography
+            if (!Objects.equals(ib.ne.p.oCXID, ib.nc.oD)) {
+                Analytics.addData(AnalyticData.SecurityEvent, "Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                System.out.println("Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD+ " Event Type: " + ib.ne.eT);
+                return;
+            }
+            //VERIFY INTERNAL DATA PAYLOAD
+            // SECURITY: Use oCXID (origin sender) for signature verification, NOT cxID (destination)
+            // This prevents spoofing attacks where attacker sets cxID to victim's ID
+            ByteArrayInputStream signedInput = new ByteArrayInputStream(ib.ne.d);
+            ByteArrayOutputStream strippedOutput = new ByteArrayOutputStream();
+            if (!ib.ne.e2e) {
+                if (!connectX.encryptionProvider.verifyAndStrip(signedInput, strippedOutput, ib.ne.p.oCXID)) {
+                    Analytics.addData(AnalyticData.SecurityEvent, "Security failure, event payload data verification unsuccessful: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                    System.out.println("Security failure, event payload data verification unsuccessful: " + ib.ne.p.oCXID + ", " + ib.nc.oD+ " Event Type: " + ib.ne.eT);
+                    return;
+                }
+            }
+
+
+
             try {
                 et = EventType.valueOf(ib.ne.eT);
             } catch (Exception ignored) {}
@@ -531,9 +557,9 @@ public class NodeMesh {
                 Analytics.addData(AnalyticData.Tear, "Unsupported event - "+ib.ne.eT);
                 System.out.print("UNABLE TO PROCESS UNKNOWN EVENT");
                 if (NodeConfig.supportUnavailableServices) {
-                    // Record unsupported events using the transmitter's ID from NetworkContainer
+                    // Record unsupported events using the ORIGIN ID from NetworkEvent
                     if (ib.nc != null && ib.nc.iD != null && ib.signedEventBytes != null) {
-                        connectX.Event(ib.ne, ib.nc.iD, ib.signedEventBytes);
+                        connectX.Event(ib.ne, ib.ne.p.oCXID, ib.signedEventBytes);
                     }
                     //todo relay
                 }
@@ -576,6 +602,10 @@ public class NodeMesh {
                             break;
 
                         case CXHELLO:
+                            if (!(ib.ne.p.getScope().equals(Scope.CXS) | ib.ne.p.getScope().equals(Scope.LAN))) {
+                                System.out.println("[NodeMesh] ERROR: CXHELLO received in incorrect scope, Only CXS or LAN is allowed");
+                                return;
+                            }
                             // CXHELLO sends full Node object - import it (following NewNode pattern)
                             System.out.println("[" + connectX.getOwnID() + "] CXHELLO request received from " + ib.nc.iD);
 
@@ -613,24 +643,11 @@ public class NodeMesh {
 
                                 String responsePayloadJson = ConnectX.serialize("cxJSON1", responsePayload);
 
-                                NetworkEvent responseEvent = new NetworkEvent();
-                                responseEvent.eT = EventType.CXHELLO_RESPONSE.name();
-                                responseEvent.iD = java.util.UUID.randomUUID().toString();
-                                responseEvent.d = responsePayloadJson.getBytes("UTF-8");
-
-                                // Set path to requester
-                                responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
-                                responseEvent.p.cxID = ib.nc.iD;
-                                responseEvent.p.scope = "CXS"; // Node-to-node
-
-                                NetworkContainer responseContainer = new NetworkContainer();
-                                responseContainer.se = "cxJSON1";
-                                responseContainer.s = false;
-
-                                // Queue response
-                                Node responderNode = requesterNode; // Send back to requester
-                                OutputBundle responseBundle = new OutputBundle(responseEvent, responderNode, null, null, responseContainer);
-                                connectX.queueEvent(responseBundle);
+                                // Send response using EventBuilder pattern
+                                connectX.buildEvent(EventType.CXHELLO_RESPONSE, responsePayloadJson.getBytes("UTF-8"))
+                                    .toPeer(ib.nc.iD)
+                                    .signData()
+                                    .queue();
 
                                 System.out.println("[CXHELLO] Queued CXHELLO_RESPONSE to " + ib.nc.iD.substring(0, 8));
                             }
@@ -675,6 +692,12 @@ public class NodeMesh {
                 // Auto-record events with r=true if ORIGINAL sender has permission
                 if (ib.ne.r && ib.nc != null && ib.nc.oD != null) {
                     String senderID = ib.nc.oD;
+                    //Additional verification after application layer
+                    if (!ib.nc.oD.equals(ib.ne.p.oCXID)) {
+                        Analytics.addData(AnalyticData.SecurityEvent, "Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                        System.out.println("Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD+ " Event Type: " + ib.ne.eT);
+                        return;
+                    }
                     String networkID = ib.ne.p != null ? ib.ne.p.network : null;
 
                     if (networkID != null) {
@@ -807,6 +830,7 @@ public class NodeMesh {
                             dev.droppinganvil.v3.network.events.PeerFinding pf =
                                 (dev.droppinganvil.v3.network.events.PeerFinding) ConnectX.deserialize("cxJSON1", new String(ne.d, "UTF-8"),
                                     dev.droppinganvil.v3.network.events.PeerFinding.class);
+                           // dev.droppinganvil.v3.network.events.PeerFinding pff = dev.droppinganvil.v3.network.events.PeerFinding) connectX.encryptionProvider.verifyAndStrip()
 
                             if ("request".equals(pf.t)) {
                                 // Handle PeerFinding request - respond with our known peers
@@ -844,28 +868,37 @@ public class NodeMesh {
 
                                     System.out.println("[PeerFinding] Responding with " + count + " signed peers");
 
+                                    // Using new Event Builder API
+
                                     // Send response
-                                    String responseJson = ConnectX.serialize("cxJSON1", response);
-                                    NetworkEvent responseEvent = new NetworkEvent();
-                                    responseEvent.eT = EventType.PeerFinding.name();
-                                    responseEvent.iD = java.util.UUID.randomUUID().toString();
-                                    responseEvent.d = responseJson.getBytes("UTF-8");
+                                    //String responseJson = ConnectX.serialize("cxJSON1", response);
+                                    //NetworkEvent responseEvent = new NetworkEvent();
+                                    //responseEvent.eT = EventType.PeerFinding.name();
+                                    //responseEvent.iD = java.util.UUID.randomUUID().toString();
+                                    //responseEvent.d = responseJson.getBytes("UTF-8");
 
                                     // Reply to sender
-                                    responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
-                                    responseEvent.p.cxID = nc.iD;
-                                    responseEvent.p.scope = "CXS"; // Single peer response
-                                    if (ne.p != null) {
-                                        responseEvent.p.bridge = ne.p.bridge;
-                                        responseEvent.p.bridgeArg = ne.p.bridgeArg;
-                                    }
+                                   //responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
+                                    //responseEvent.p.cxID = nc.iD;
+                                    //responseEvent.p.scope = "CXS"; // Single peer response
+                                   // if (ne.p != null) {
+                                    //    responseEvent.p.bridge = ne.p.bridge;
+                                    //    responseEvent.p.bridgeArg = ne.p.bridgeArg;
+                                   // }
 
-                                    Node requesterNode = PeerDirectory.lookup(nc.iD, true, true);
-                                    NetworkContainer responseContainer = new NetworkContainer();
-                                    responseContainer.se = "cxJSON1";
-                                    responseContainer.s = false;
-                                    OutputBundle responseBundle = new OutputBundle(responseEvent, requesterNode, null, null, responseContainer);
-                                    connectX.queueEvent(responseBundle);
+                                   // Node requesterNode = PeerDirectory.lookup(nc.iD, true, true);
+                                   // NetworkContainer responseContainer = new NetworkContainer();
+                                   // responseContainer.se = "cxJSON1";
+                                   // responseContainer.s = false;
+                                   // OutputBundle responseBundle = new OutputBundle(responseEvent, requesterNode, null, null, responseContainer);
+                                  //  connectX.queueEvent(responseBundle);
+
+                                    connectX.buildEvent(EventType.PeerFinding, ConnectX.serialize("cxJSON1", response).getBytes("UTF-8"))
+                                            .targetPeer(nc.iD)
+                                            .toPeer(nc.iD)
+                                            .scope("CXS")
+                                            .signData()
+                                            .queue();
 
                                 } else {
                                     System.out.println("[PeerFinding] Network " + requestedNetwork + " not found");
@@ -993,27 +1026,18 @@ public class NodeMesh {
 
                                 String responseJson = ConnectX.serialize("cxJSON1", response);
 
-                                // Send response
-                                NetworkEvent responseEvent = new NetworkEvent();
-                                responseEvent.eT = EventType.SEED_RESPONSE.name();
-                                responseEvent.iD = java.util.UUID.randomUUID().toString();
-                                responseEvent.d = responseJson.getBytes("UTF-8");
-
-                                responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
-                                responseEvent.p.cxID = nc.iD;
+                                // Send response using EventBuilder pattern
+                                ConnectX.EventBuilder eb = connectX.buildEvent(EventType.SEED_RESPONSE, responseJson.getBytes("UTF-8"))
+                                    .toPeer(nc.iD)
+                                    .signData();
+                                //I think this old method was to allow the original requester to provide a temporary address
                                 if (ne.p != null) {
-                                    responseEvent.p.network = ne.p.network;
-                                    responseEvent.p.scope = ne.p.scope;
-                                    responseEvent.p.bridge = ne.p.bridge;
-                                    responseEvent.p.bridgeArg = ne.p.bridgeArg;
+                                    eb.getPath().network = ne.p.network;
+                                    eb.getPath().scope = ne.p.scope;
+                                    eb.getPath().bridge = ne.p.bridge;
+                                    eb.getPath().bridgeArg = ne.p.bridgeArg;
                                 }
-
-                                Node requesterNode = PeerDirectory.lookup(nc.iD, true, true);
-                                NetworkContainer responseContainer = new NetworkContainer();
-                                responseContainer.se = "cxJSON1";
-                                responseContainer.s = false;
-                                OutputBundle responseBundle = new OutputBundle(responseEvent, requesterNode, null, null, responseContainer);
-                                connectX.queueEvent(responseBundle);
+                                eb.queue();
 
                             } else {
                                 System.out.println("[SEED] Network " + requestedNetwork + " not found");
@@ -1136,31 +1160,13 @@ public class NodeMesh {
                                 response.put("network", networkID);
                                 response.put("status", chainStatus);
 
-                                // Create response event
-                                NetworkEvent responseEvent = new NetworkEvent();
-                                responseEvent.eT = EventType.CHAIN_STATUS_RESPONSE.name();
-                                responseEvent.iD = java.util.UUID.randomUUID().toString();
-
                                 String statusJson = ConnectX.serialize("cxJSON1", response);
-                                responseEvent.d = statusJson.getBytes("UTF-8");
 
-                                // Set path to requester
-                                responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
-                                responseEvent.p.cxID = nc.iD;
-                                if (ne.p != null) {
-                                    responseEvent.p.network = ne.p.network;
-                                    responseEvent.p.scope = ne.p.scope;
-                                    responseEvent.p.bridge = ne.p.bridge;
-                                    responseEvent.p.bridgeArg = ne.p.bridgeArg;
-                                }
-
-                                // Queue response
-                                Node requesterNode = PeerDirectory.lookup(nc.iD, true, true);
-                                NetworkContainer responseContainer = new NetworkContainer();
-                                responseContainer.se = "cxJSON1";
-                                responseContainer.s = false;
-                                OutputBundle responseBundle = new OutputBundle(responseEvent, requesterNode, null, null, responseContainer);
-                                connectX.queueEvent(responseBundle);
+                                // Send response using EventBuilder pattern
+                                connectX.buildEvent(EventType.CHAIN_STATUS_RESPONSE, statusJson.getBytes("UTF-8"))
+                                    .toPeer(nc.iD)
+                                    .signData()
+                                    .queue();
 
                                 System.out.println("[CHAIN_STATUS] Sent status for " + networkID +
                                                  " (c1:" + chainStatus.get("c1") +
@@ -1247,32 +1253,22 @@ public class NodeMesh {
                                     }
 
                                     if (block != null) {
-                                        // Create response event
-                                        NetworkEvent responseEvent = new NetworkEvent();
-                                        responseEvent.eT = EventType.BLOCK_RESPONSE.name();
-                                        responseEvent.iD = java.util.UUID.randomUUID().toString();
-
                                         // Serialize block as payload
                                         String blockJson = ConnectX.serialize("cxJSON1", block);
-                                        responseEvent.d = blockJson.getBytes("UTF-8");
 
-                                        // Set path to requester
-                                        responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
-                                        responseEvent.p.cxID = nc.iD;
+                                        // Send response using EventBuilder pattern
+                                        ConnectX.EventBuilder eb = connectX.buildEvent(EventType.BLOCK_RESPONSE, blockJson.getBytes("UTF-8"))
+                                            .toPeer(nc.iD)
+                                            .signData();
+                                            
+                                        //More special handling...
                                         if (ne.p != null) {
-                                            responseEvent.p.network = ne.p.network;
-                                            responseEvent.p.scope = ne.p.scope;
-                                            responseEvent.p.bridge = ne.p.bridge;
-                                            responseEvent.p.bridgeArg = ne.p.bridgeArg;
+                                            eb.getPath().network = ne.p.network;
+                                            eb.getPath().scope = ne.p.scope;
+                                            eb.getPath().bridge = ne.p.bridge;
+                                            eb.getPath().bridgeArg = ne.p.bridgeArg;
                                         }
-
-                                        // Queue response
-                                        Node requesterNode = PeerDirectory.lookup(nc.iD, true, true);
-                                        NetworkContainer responseContainer = new NetworkContainer();
-                                        responseContainer.se = "cxJSON1";
-                                        responseContainer.s = false;
-                                        OutputBundle responseBundle = new OutputBundle(responseEvent, requesterNode, null, null, responseContainer);
-                                        connectX.queueEvent(responseBundle);
+                                        eb.queue();
 
                                         System.out.println("[BLOCK_REQUEST] Sent block " + blockID + " from chain " + chainID +
                                                          " (" + block.networkEvents.size() + " events)");
@@ -1698,36 +1694,24 @@ public class NodeMesh {
                                 }
                             }
 
-                            // Create response event
-                            NetworkEvent responseEvent = new NetworkEvent();
-                            responseEvent.eT = EventType.PEER_LIST_RESPONSE.name();
-                            responseEvent.iD = java.util.UUID.randomUUID().toString();
-
                             // Serialize response: {ips: ["192.168.1.100:49152", "10.0.0.5:49153", ...]}
                             java.util.Map<String, Object> response = new java.util.HashMap<>();
                             response.put("ips", peerIPs);
                             String responseJson = ConnectX.serialize("cxJSON1", response);
-                            responseEvent.d = responseJson.getBytes("UTF-8");
-
-                            // Set path to send back to requester
-                            responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
-                            responseEvent.p.cxID = nc.iD;
-                            if (ne.p != null) {
-                                responseEvent.p.network = ne.p.network;
-                                responseEvent.p.scope = ne.p.scope;
-                                responseEvent.p.bridge = ne.p.bridge;
-                                responseEvent.p.bridgeArg = ne.p.bridgeArg;
-                            }
 
                             System.out.println("[PEER_LIST_REQUEST] Sending " + peerIPs.size() + " peer IPs to " + nc.iD);
 
-                            // Queue response
-                            Node requesterNode = PeerDirectory.lookup(nc.iD, true, true);
-                            NetworkContainer responseContainer = new NetworkContainer();
-                            responseContainer.se = "cxJSON1";
-                            responseContainer.s = false;
-                            OutputBundle responseBundle = new OutputBundle(responseEvent, requesterNode, null, null, responseContainer);
-                            connectX.queueEvent(responseBundle);
+                            // Send response using EventBuilder pattern
+                            ConnectX.EventBuilder eb = connectX.buildEvent(EventType.PEER_LIST_RESPONSE, responseJson.getBytes("UTF-8"))
+                                .toPeer(nc.iD)
+                                .signData();
+                            if (ne.p != null) {
+                                eb.getPath().network = ne.p.network;
+                                eb.getPath().scope = ne.p.scope;
+                                eb.getPath().bridge = ne.p.bridge;
+                               eb.getPath().bridgeArg = ne.p.bridgeArg;
+                            }
+                                eb.queue();
 
                         } catch (Exception e) {
                             System.err.println("[PEER_LIST_REQUEST] Error handling request: " + e.getMessage());
@@ -2101,29 +2085,12 @@ public class NodeMesh {
 
                 String requestJson = ConnectX.serialize("cxJSON1", request);
 
-                NetworkEvent requestEvent = new NetworkEvent();
-                requestEvent.eT = EventType.BLOCK_REQUEST.name();
-                requestEvent.iD = java.util.UUID.randomUUID().toString();
-                requestEvent.d = requestJson.getBytes("UTF-8");
-
-                // Set path to target peer
-                requestEvent.p = new dev.droppinganvil.v3.network.CXPath();
-                requestEvent.p.cxID = remotePeer.cxID;
-                requestEvent.p.network = networkID;
-                requestEvent.p.scope = "CXS"; // Node-to-node
-                // Copy bridge info from peer if available
-                if (remotePeer.addr != null && remotePeer.addr.startsWith("cxHTTP1:")) {
-                    String[] parts = remotePeer.addr.split(":", 2);
-                    requestEvent.p.bridge = parts[0];
-                    requestEvent.p.bridgeArg = parts[1];
-                }
-
-                // Queue request
-                NetworkContainer requestContainer = new NetworkContainer();
-                requestContainer.se = "cxJSON1";
-                requestContainer.s = false;
-                OutputBundle requestBundle = new OutputBundle(requestEvent, remotePeer, null, null, requestContainer);
-                connectX.queueEvent(requestBundle);
+                // Send request using EventBuilder pattern
+                ConnectX.EventBuilder eb = connectX.buildEvent(EventType.BLOCK_REQUEST, requestJson.getBytes("UTF-8"))
+                    .toPeer(remotePeer.cxID)
+                    .signData();
+                eb.getPath().network = networkID;
+                eb.queue();
 
                 System.out.println("[CHAIN_SYNC] Requested block " + blockNum + " from chain " + chainID);
             }

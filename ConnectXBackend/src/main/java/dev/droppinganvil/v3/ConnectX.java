@@ -14,6 +14,7 @@ import dev.droppinganvil.v3.io.IOJob;
 import dev.droppinganvil.v3.io.strings.JacksonProvider;
 import dev.droppinganvil.v3.io.strings.SerializationProvider;
 import dev.droppinganvil.v3.network.BlockchainPersistence;
+import dev.droppinganvil.v3.network.BlockConsensusTracker;
 import dev.droppinganvil.v3.network.CXNetwork;
 import dev.droppinganvil.v3.network.CXPath;
 import dev.droppinganvil.v3.network.InputBundle;
@@ -36,6 +37,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -392,6 +394,7 @@ public class ConnectX {
         public EventBuilder toNetwork(String networkId) {
             this.path.scope = "CXN";
             this.path.network = networkId;
+            this.path.cxID = "*";  // Broadcast to all network peers by default
             return this;
         }
 
@@ -404,6 +407,7 @@ public class ConnectX {
             this.path.scope = "CXN";
             this.path.network = networkId;
             this.path.chainID = chainID;
+            this.path.cxID = "*";  // Broadcast to all network peers by default
             return this;
         }
 
@@ -677,9 +681,11 @@ public class ConnectX {
         }
 
         /**
+         *  !IMPORTANT!
          * Sign the event data payload
          * Replaces event.d with a signed blob, preserving the original signature for relay
          * Used for NewNode events where the Node blob must be signed by the sender
+         * IF E2E is not in use signData IS REQUIRED, it will fail to pass CX cryptography
          * @return This builder for chaining
          */
         public EventBuilder signData() {
@@ -714,10 +720,12 @@ public class ConnectX {
         }
 
         /**
+         * !IMPORTANT!
          * Encrypt the event data payload for all added recipients (E2E encryption)
          * Sets the e2e flag to true so receiver knows to decrypt
          * Replaces event.d with encrypted blob that can only be read by recipients
          * Use addRecipient() before calling this to specify who can decrypt
+         * If not using signData(), encrypt() is REQUIRED
          * @return This builder for chaining
          */
         public EventBuilder encrypt() {
@@ -753,6 +761,11 @@ public class ConnectX {
          * This is the terminal operation that actually queues the event
          */
         public void queue() {
+            // Set origin CXID to sender's actual ID for signature verification
+            if (this.path.oCXID == null && connectX.self != null) {
+                this.path.oCXID = connectX.self.cxID;
+            }
+
             // Create output bundle with all configured parameters
             OutputBundle bundle = new OutputBundle(
                 event,
@@ -772,6 +785,11 @@ public class ConnectX {
          * @return The constructed OutputBundle
          */
         public OutputBundle build() {
+            // Set origin CXID to sender's actual ID for signature verification
+            if (this.path.oCXID == null && connectX.self != null) {
+                this.path.oCXID = connectX.self.cxID;
+            }
+
             return new OutputBundle(
                 event,
                 targetNode,
@@ -1099,38 +1117,16 @@ public class ConnectX {
             if (self != null && self.publicKey != null) {
                 System.out.println("[Bootstrap] Introducing ourselves to EPOCH...");
 
-                // Create NewNode event with our node information
-                dev.droppinganvil.v3.network.events.NetworkEvent newNodeEvent =
-                    new dev.droppinganvil.v3.network.events.NetworkEvent(
-                        dev.droppinganvil.v3.network.events.EventType.NewNode,
-                        new byte[0]);
-                newNodeEvent.eT = dev.droppinganvil.v3.network.events.EventType.NewNode.name();
-                newNodeEvent.iD = java.util.UUID.randomUUID().toString();
-
-                // Set path to EPOCH - use CXS scope for node-to-node communication
-                dev.droppinganvil.v3.network.CXPath epochPath = new dev.droppinganvil.v3.network.CXPath();
-                epochPath.cxID = EPOCH_UUID; // Target EPOCH specifically
-                epochPath.scope = "CXS"; // Node/system scope (not authorized for CX/CXNET yet)
-                // Extract bridge protocol and URL from EPOCH_BRIDGE_ADDRESS
-                String[] bridgeParts = EPOCH_BRIDGE_ADDRESS.split(":", 2);
-                epochPath.bridge = bridgeParts[0]; // "cxHTTP1"
-                epochPath.bridgeArg = bridgeParts[1]; // "https://CXNET.AnvilDevelopment.US/cx"
-                newNodeEvent.p = epochPath;
-
                 // Serialize our node information as the event payload
                 String selfJson = serialize("cxJSON1", self);
-                newNodeEvent.d = selfJson.getBytes("UTF-8");
 
-                // Create container for NewNode
-                dev.droppinganvil.v3.network.events.NetworkContainer newNodeContainer =
-                    new dev.droppinganvil.v3.network.events.NetworkContainer();
-                newNodeContainer.se = "cxJSON1";
-                newNodeContainer.s = false; // Not E2E encrypted
-                newNodeContainer.iD = self.cxID; // Our ID
-
-                // Queue the NewNode introduction
-                OutputBundle newNodeBundle = new OutputBundle(newNodeEvent, epochNode, null, null, newNodeContainer);
-                queueEvent(newNodeBundle);
+                // Send NewNode using EventBuilder pattern with signature
+                String[] bridgeParts = EPOCH_BRIDGE_ADDRESS.split(":", 2);
+                buildEvent(dev.droppinganvil.v3.network.events.EventType.NewNode, selfJson.getBytes("UTF-8"))
+                    .toPeer(EPOCH_UUID)
+                    .viaBridge(bridgeParts[0], bridgeParts[1])
+                    .signData()
+                    .queue();
 
                 System.out.println("[Bootstrap] NewNode introduction queued");
             }
@@ -1138,35 +1134,13 @@ public class ConnectX {
             // Step 3: Send SEED_REQUEST to EPOCH
             System.out.println("[Bootstrap] Requesting CXNET seed...");
 
-            dev.droppinganvil.v3.network.events.NetworkEvent seedRequest =
-                new dev.droppinganvil.v3.network.events.NetworkEvent(
-                    dev.droppinganvil.v3.network.events.EventType.SEED_REQUEST,
-                    "CXNET".getBytes("UTF-8"));
-            seedRequest.eT = dev.droppinganvil.v3.network.events.EventType.SEED_REQUEST.name();
-            seedRequest.iD = java.util.UUID.randomUUID().toString();
-
-            // Set path to EPOCH NMI - use CXS scope for node-to-node communication
-            dev.droppinganvil.v3.network.CXPath seedPath = new dev.droppinganvil.v3.network.CXPath();
-            seedPath.cxID = EPOCH_UUID; // Target EPOCH specifically
-            seedPath.scope = "CXS"; // Node/system scope (not authorized for CX/CXNET yet)
-            // Extract bridge protocol and URL from EPOCH_BRIDGE_ADDRESS
-            String[] bridgeParts = EPOCH_BRIDGE_ADDRESS.split(":", 2);
-            seedPath.bridge = bridgeParts[0]; // "cxHTTP1"
-            seedPath.bridgeArg = bridgeParts[1]; // "https://CXNET.AnvilDevelopment.US/cx"
-            seedRequest.p = seedPath;
-
-            // Create container
-            dev.droppinganvil.v3.network.events.NetworkContainer seedRequestContainer =
-                new dev.droppinganvil.v3.network.events.NetworkContainer();
-            seedRequestContainer.se = "cxJSON1";
-            seedRequestContainer.s = false;
-            if (self != null) {
-                seedRequestContainer.iD = self.cxID; // Our ID
-            }
-
-            // Queue the request (will be transmitted by OutConnectionController via bridge)
-            OutputBundle seedRequestBundle = new OutputBundle(seedRequest, epochNode, null, null, seedRequestContainer);
-            queueEvent(seedRequestBundle);
+            // Send SEED_REQUEST using EventBuilder pattern with signature
+            String[] bridgeParts2 = EPOCH_BRIDGE_ADDRESS.split(":", 2);
+            buildEvent(dev.droppinganvil.v3.network.events.EventType.SEED_REQUEST, "CXNET".getBytes("UTF-8"))
+                .toPeer(EPOCH_UUID)
+                .viaBridge(bridgeParts2[0], bridgeParts2[1])
+                .signData()
+                .queue();
 
             System.out.println("[Bootstrap] SEED_REQUEST queued for EPOCH");
             System.out.println("[Bootstrap] Waiting for SEED_RESPONSE via HTTP bridge...");
@@ -1263,6 +1237,133 @@ public class ConnectX {
         lanScanThread.setName("LAN-Scanner-Initializer");
         lanScanThread.setDaemon(true);
         lanScanThread.start();
+
+        // Start persistence thread for periodic saves and peer discovery
+        Thread persistenceThread = new Thread(() -> {
+            try {
+                // Wait for CXHELLO handshake to complete before starting persistence
+                Thread.sleep(5000);
+
+                System.out.println("[Persistence] Starting periodic save and discovery thread");
+                System.out.println("[Persistence] - Blockchain saves: every 30 seconds");
+                System.out.println("[Persistence] - Peer discovery: every 5 minutes");
+
+                int cycleCount = 0; // Track cycles for peer discovery timing
+
+                while (true) {
+                    try {
+                        // Save blockchain data (current blocks + metadata) for all networks
+                        for (Map.Entry<String, CXNetwork> entry : networkMap.entrySet()) {
+                            String networkID = entry.getKey();
+                            CXNetwork network = entry.getValue();
+
+                            if (network == null) continue;
+
+                            // Save c1 (Administrative chain)
+                            if (network.c1 != null && network.c1.current != null) {
+                                try {
+                                    blockchainPersistence.saveBlock(networkID, network.c1.chainID, network.c1.current);
+                                    blockchainPersistence.saveChainMetadata(network.c1, networkID);
+                                } catch (Exception e) {
+                                    System.err.println("[Persistence] Failed to save c1 for " + networkID + ": " + e.getMessage());
+                                }
+                            }
+
+                            // Save c2 (Resources chain)
+                            if (network.c2 != null && network.c2.current != null) {
+                                try {
+                                    blockchainPersistence.saveBlock(networkID, network.c2.chainID, network.c2.current);
+                                    blockchainPersistence.saveChainMetadata(network.c2, networkID);
+                                } catch (Exception e) {
+                                    System.err.println("[Persistence] Failed to save c2 for " + networkID + ": " + e.getMessage());
+                                }
+                            }
+
+                            // Save c3 (Events chain)
+                            if (network.c3 != null && network.c3.current != null) {
+                                try {
+                                    blockchainPersistence.saveBlock(networkID, network.c3.chainID, network.c3.current);
+                                    blockchainPersistence.saveChainMetadata(network.c3, networkID);
+                                } catch (Exception e) {
+                                    System.err.println("[Persistence] Failed to save c3 for " + networkID + ": " + e.getMessage());
+                                }
+                            }
+                        }
+
+                        // TODO: Persist PeerDirectory
+                        // Save discovered LAN and WAN peers to disk
+
+                        // TODO: Persist DataContainer
+                        // Save network registrations, blocklists, and other network data
+
+                        // Peer discovery every 5 minutes (10 cycles of 30 seconds)
+                        cycleCount++;
+                        if (cycleCount >= 10) {
+                            cycleCount = 0;
+
+                            try {
+                                System.out.println("[Peer Discovery] Sending PeerFinding requests to known peers...");
+
+                                // Send PeerFinding to a subset of known peers to discover new nodes/bridges
+                                int peersSent = 0;
+                                int maxPeersToContact = 5; // Contact up to 5 peers per discovery cycle
+
+                                if (PeerDirectory.hv != null && !PeerDirectory.hv.isEmpty()) {
+                                    for (Node peer : PeerDirectory.hv.values()) {
+                                        if (peersSent >= maxPeersToContact) break;
+
+                                        if (peer.cxID == null || peer.cxID.equals(getOwnID())) {
+                                            continue; // Skip invalid or self
+                                        }
+
+                                        try {
+                                            // Create PeerFinding request
+                                            dev.droppinganvil.v3.network.events.PeerFinding peerFindingReq =
+                                                new dev.droppinganvil.v3.network.events.PeerFinding();
+                                            peerFindingReq.t = "request";
+                                            peerFindingReq.network = "CXNET"; // Request CXNET peers
+                                            String peerFindingJson = serialize("cxJSON1", peerFindingReq);
+
+                                            buildEvent(EventType.PeerFinding, peerFindingJson.getBytes("UTF-8"))
+                                                .toPeer(peer.cxID)
+                                                .queue();
+
+                                            peersSent++;
+                                        } catch (Exception e) {
+                                            System.err.println("[Peer Discovery] Failed to send to " +
+                                                (peer.cxID.length() >= 8 ? peer.cxID.substring(0, 8) : peer.cxID) +
+                                                ": " + e.getMessage());
+                                        }
+                                    }
+
+                                    if (peersSent > 0) {
+                                        System.out.println("[Peer Discovery] Sent PeerFinding requests to " + peersSent + " peers");
+                                    } else {
+                                        System.out.println("[Peer Discovery] No peers available for discovery");
+                                    }
+                                }
+                            } catch (Exception e) {
+                                System.err.println("[Peer Discovery] Error during peer discovery: " + e.getMessage());
+                            }
+                        }
+
+                    } catch (Exception e) {
+                        System.err.println("[Persistence] Error during periodic save: " + e.getMessage());
+                    }
+
+                    // Wait 30 seconds before next cycle
+                    Thread.sleep(30000);
+                }
+            } catch (InterruptedException e) {
+                System.out.println("[Persistence] Thread interrupted, stopping periodic saves");
+            } catch (Exception e) {
+                System.err.println("[Persistence] Fatal error in persistence thread: " + e.getMessage());
+                e.printStackTrace();
+            }
+        });
+        persistenceThread.setName("Persistence-Discovery-Thread");
+        persistenceThread.setDaemon(true);
+        persistenceThread.start();
     }
 
     public void connect() throws IOException {
@@ -2270,30 +2371,13 @@ public class ConnectX {
             request.put("network", networkID);
             String requestJson = serialize("cxJSON1", request);
 
-            dev.droppinganvil.v3.network.events.NetworkEvent statusRequest =
-                new dev.droppinganvil.v3.network.events.NetworkEvent();
-            statusRequest.eT = dev.droppinganvil.v3.network.events.EventType.CHAIN_STATUS_REQUEST.name();
-            statusRequest.iD = java.util.UUID.randomUUID().toString();
-            statusRequest.d = requestJson.getBytes("UTF-8");
-
-            // Set path to NMI
-            dev.droppinganvil.v3.network.CXPath path = new dev.droppinganvil.v3.network.CXPath();
-            path.cxID = nmiID;
-            path.network = networkID;
-            path.scope = "CXS"; // Node-to-node scope
-            statusRequest.p = path;
-
-            // Create container
-            // NOTE: container.iD is NOT set here - OutConnectionController will automatically
-            // set it to self.cxID before signing, ensuring the signature matches the sender
-            dev.droppinganvil.v3.network.events.NetworkContainer container =
-                new dev.droppinganvil.v3.network.events.NetworkContainer();
-            container.se = "cxJSON1";
-            container.s = false;
-
-            // Queue request
-            OutputBundle bundle = new OutputBundle(statusRequest, nmiNode, null, null, container);
-            queueEvent(bundle);
+            // Send request using EventBuilder pattern with automatic signature
+            EventBuilder eb = buildEvent(
+                dev.droppinganvil.v3.network.events.EventType.CHAIN_STATUS_REQUEST,
+                requestJson.getBytes("UTF-8")
+            ).toPeer(nmiID).signData();
+            eb.getPath().network = networkID;
+            eb.queue();
 
             System.out.println("[Auto-Sync] Chain status request queued for NMI");
 

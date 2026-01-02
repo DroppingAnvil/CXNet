@@ -207,11 +207,13 @@ public class NetworkBlock implements Serializable {
             NetworkEvent unverifiedEvent = (NetworkEvent) dev.droppinganvil.v3.ConnectX.deserialize(
                 "cxJSON1", unverifiedJson, NetworkEvent.class);
 
-            // Extract sender cxID from path
-            if (unverifiedEvent != null && unverifiedEvent.p != null && unverifiedEvent.p.cxID != null) {
-                return unverifiedEvent.p.cxID;
+            // Extract sender oCXID from path - REQUIRED for signature verification
+            // SECURITY: Must use oCXID (origin), never cxID (destination) to prevent spoofing
+            if (unverifiedEvent != null && unverifiedEvent.p != null && unverifiedEvent.p.oCXID != null) {
+                return unverifiedEvent.p.oCXID;
             }
 
+            System.err.println("[NetworkBlock] Security failure: Event missing oCXID (origin sender ID)");
             return null;
         } catch (Exception e) {
             System.err.println("[NetworkBlock] Error peeking sender: " + e.getMessage());

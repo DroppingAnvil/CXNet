@@ -44,7 +44,6 @@ public abstract class CryptProvider {
     public boolean verifyAndStripWithKey(InputStream is, OutputStream os, String publicKeyBase64) throws DecryptionFailureException {
         return false;
     }
-
     /**
      * Strip signature WITHOUT verification
      * Used for NewNode events where we need to peek at the event type before we have the sender's public key

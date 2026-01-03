@@ -8,6 +8,10 @@ package dev.droppinganvil.v3.network.events;
 import java.util.List;
 
 public class PeerFinding {
+    /**
+     * If requesting a specific nodes data, Ex Peer1 knows of Peer2 CXID but they have not met and Peer2 is unreachable, Peer1 can ask peers for Peer2 Node blob
+     */
+    public String rID = "";
     /*
     List of current peers 30% of current connections up to 5
     Node ID, SIGNED NODE DATA FROM ORIGIN (node that created Node object)

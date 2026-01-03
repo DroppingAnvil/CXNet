@@ -4,17 +4,20 @@ import dev.droppinganvil.v3.crypt.core.CryptProvider;
 import dev.droppinganvil.v3.crypt.core.exceptions.DecryptionFailureException;
 import dev.droppinganvil.v3.crypt.core.exceptions.EncryptionFailureException;
 import dev.droppinganvil.v3.network.nodemesh.Node;
+import dev.droppinganvil.v3.network.nodemesh.NodeConfig;
 import dev.droppinganvil.v3.network.nodemesh.PeerDirectory;
 import org.bouncycastle.openpgp.*;
 import org.bouncycastle.util.io.Streams;
 import org.pgpainless.PGPainless;
 import org.pgpainless.algorithm.DocumentSignatureType;
+import org.pgpainless.algorithm.HashAlgorithm;
 import org.pgpainless.decryption_verification.ConsumerOptions;
 import org.pgpainless.decryption_verification.DecryptionStream;
 import org.pgpainless.encryption_signing.EncryptionOptions;
 import org.pgpainless.encryption_signing.EncryptionStream;
 import org.pgpainless.encryption_signing.ProducerOptions;
 import org.pgpainless.encryption_signing.SigningOptions;
+import org.pgpainless.key.info.KeyRingInfo;
 import org.pgpainless.key.protection.SecretKeyRingProtector;
 import org.pgpainless.key.util.KeyRingUtils;
 import org.pgpainless.util.Passphrase;
@@ -146,7 +149,7 @@ public class PainlessCryptProvider extends CryptProvider {
         // Cache all recipient certificates
         for (String cxID : recipientCxIDs) {
             if (!cacheCert(cxID, false, true)) {
-                throw new EncryptionFailureException("Failed to cache certificate for recipient: " + cxID);
+                throw new EncryptionFailureException("Failed to cache certificate for recipient: " + cxID + " This generally indicates that a recipient peer has never been met");
             }
         }
 
@@ -190,9 +193,24 @@ public class PainlessCryptProvider extends CryptProvider {
             throw new EncryptionFailureException("InputStream cannot be null - no data to sign");
         }
         try {
+            //Debug
+            if (NodeConfig.DEBUG) {
+                PGPPublicKeyRing publicRing = PGPainless.extractCertificate(secretKey);
+                KeyRingInfo info = new KeyRingInfo(publicRing);
+
+                System.out.println("Primary User ID: " + info.getPrimaryUserId());
+                System.out.println("Public Keys: " + info.getPublicKeys());
+                System.out.println("Algorithm: " + info.getAlgorithm());
+                System.out.println("Signing Subkeys: " + info.getSigningSubkeys());
+                System.out.println("Primary User ID (again): " + info.getPrimaryUserId());
+                //System.out.println("Preferred Hash Algorithms: " + info.getPreferredHashAlgorithms());
+            }
             EncryptionStream encryptor = PGPainless.encryptAndOrSign()
                     .onOutputStream(os)
-                    .withOptions(ProducerOptions.sign(new SigningOptions().addInlineSignature(protector, secretKey, DocumentSignatureType.CANONICAL_TEXT_DOCUMENT)
+                    .withOptions(ProducerOptions.sign(new SigningOptions()
+                                    .addInlineSignature(protector, secretKey, DocumentSignatureType.CANONICAL_TEXT_DOCUMENT)
+                            //TODO IMPLEMENT BETTER, we are using this override to fix bootstrapping issues
+                                    .overrideHashAlgorithm(HashAlgorithm.SHA512)
                             ).setAsciiArmor(false)
                     );
             // CRITICAL: Must pipe data and close stream to finalize signature

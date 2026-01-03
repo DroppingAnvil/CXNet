@@ -164,7 +164,8 @@ public class OutConnectionController {
                 if (routesUsed.length() > 0) {
                     routesUsed.setLength(routesUsed.length() - 1);
                 }
-                System.out.println("[Multi-Path] Sent to " + out.ne.p.cxID.substring(0, 8) + " via: " + routesUsed);
+                String cxidDisplay = (out.ne.p.cxID != null && out.ne.p.cxID.length() >= 8) ? out.ne.p.cxID.substring(0, 8) : (out.ne.p.cxID != null ? out.ne.p.cxID : "NULL");
+                System.out.println("[Multi-Path] Sent to " + cxidDisplay + " via: " + routesUsed);
             }
             if (out.ne.p.scope.equalsIgnoreCase("CXN")) {
                 // CXN scope: Network transmission with TransmitPref support

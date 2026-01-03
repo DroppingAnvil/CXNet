@@ -658,6 +658,7 @@ public class MultiPeerTest {
 
             peers.get(i).buildEvent(EventType.SEED_REQUEST, reqJson.getBytes())
                 .toPeer("00000000-0000-0000-0000-000000000001")  // EPOCH UUID
+                .signData()
                 .queue();
 
             System.out.println("  ✓ Peer " + (i + 1) + " requested TESTNET seed");
@@ -891,6 +892,7 @@ public class MultiPeerTest {
                                             peer.buildEvent(EventType.CHAIN_STATUS_REQUEST, reqJson.getBytes())
                                                 .toPeer(other.getOwnID())
                                                 .toNetwork(netID)
+                                                .signData()
                                                 .queue();
 
                                         } catch (Exception e) {

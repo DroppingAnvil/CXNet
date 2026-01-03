@@ -262,8 +262,40 @@ public class NodeMesh {
                                 String nodeJson = ConnectX.serialize("cxJSON1", nodeObj);
                                 newNode = (Node) ConnectX.deserialize("cxJSON1", nodeJson, Node.class);
                             } else {
-                                // NewNode payload is directly the Node object
-                                newNode = (Node) ConnectX.deserialize("cxJSON1", payloadJson, Node.class);
+                                // NewNode payload is a SIGNED Node object (from EventBuilder.signData())
+                                String originSender = parsedEvent.p != null ? parsedEvent.p.oCXID : null;
+
+                                if (originSender == null) {
+                                    System.err.println("[NodeMesh] NewNode missing oCXID in path");
+                                    throw new DecryptionFailureException();
+                                }
+
+                                ByteArrayInputStream signedPayloadStream = new ByteArrayInputStream(parsedEvent.d);
+                                ByteArrayOutputStream strippedPayloadStream = new ByteArrayOutputStream();
+
+                                // Check if we have the sender's key cached (known sender vs unknown sender)
+                                boolean isKnownSender = connectX.encryptionProvider.cacheCert(originSender, false, false);
+
+                                if (isKnownSender) {
+                                    // Known sender: verify and strip signature
+                                    Object verifyResult = connectX.encryptionProvider.verifyAndStrip(
+                                        signedPayloadStream, strippedPayloadStream, originSender);
+
+                                    if (verifyResult == null) {
+                                        System.err.println("[NodeMesh] NewNode payload signature verification FAILED for " + originSender);
+                                        throw new DecryptionFailureException();
+                                    }
+                                } else {
+                                    System.out.println("[NodeMesh] Processing NewNode from unknown sender (will import key first)");
+                                    // Unknown sender: strip signature WITHOUT verification (we'll verify container signature after import)
+                                    connectX.encryptionProvider.stripSignature(signedPayloadStream, strippedPayloadStream);
+                                }
+
+                                String strippedJson = strippedPayloadStream.toString("UTF-8");
+                                newNode = (Node) ConnectX.deserialize("cxJSON1", strippedJson, Node.class);
+
+                                signedPayloadStream.close();
+                                strippedPayloadStream.close();
                             }
 
                             // SECURITY: Validate node data
@@ -443,7 +475,23 @@ public class NodeMesh {
         try {
             EventType et = EventType.valueOf(ne.eT);
             if ((et == EventType.CXHELLO || et == EventType.CXHELLO_RESPONSE) && ne.d != null) {
-                String helloJson = new String(ne.d, "UTF-8");
+                // CXHELLO_RESPONSE payloads are PGP-signed (from EventBuilder.signData())
+                // CXHELLO payloads are plain JSON (manual NetworkEvent creation in LANScanner)
+                String helloJson;
+
+                if (et == EventType.CXHELLO_RESPONSE) {
+                    // Strip signature before deserializing (CXHELLO_RESPONSE always signed)
+                    ByteArrayInputStream signedInput = new ByteArrayInputStream(ne.d);
+                    ByteArrayOutputStream strippedOutput = new ByteArrayOutputStream();
+                    connectX.encryptionProvider.stripSignature(signedInput, strippedOutput);
+                    helloJson = strippedOutput.toString("UTF-8");
+                    signedInput.close();
+                    strippedOutput.close();
+                } else {
+                    // Plain JSON payload (CXHELLO never signed)
+                    helloJson = new String(ne.d, "UTF-8");
+                }
+
                 java.util.Map<String, Object> helloData =
                     (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", helloJson, java.util.Map.class);
 
@@ -525,26 +573,40 @@ public class NodeMesh {
             EventType et = null;
 
             //ADDITIONAL VALIDATIONS
-
-            //VERIFY CONTAINER AND EVENT (Layer 1 + 2)
-            //ib.ne - SIGNED BY ORIGIN UNMODIFIABLE
-            //ib.nc - SIGNED BY LAST HOP, MODIFIABLE
-            //It is critcal that they match to enforce multilayer cryptography
-            if (!Objects.equals(ib.ne.p.oCXID, ib.nc.oD)) {
-                Analytics.addData(AnalyticData.SecurityEvent, "Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
-                System.out.println("Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD+ " Event Type: " + ib.ne.eT);
-                return;
-            }
-            //VERIFY INTERNAL DATA PAYLOAD
-            // SECURITY: Use oCXID (origin sender) for signature verification, NOT cxID (destination)
-            // This prevents spoofing attacks where attacker sets cxID to victim's ID
-            ByteArrayInputStream signedInput = new ByteArrayInputStream(ib.ne.d);
-            ByteArrayOutputStream strippedOutput = new ByteArrayOutputStream();
-            if (!ib.ne.e2e) {
-                if (!connectX.encryptionProvider.verifyAndStrip(signedInput, strippedOutput, ib.ne.p.oCXID)) {
-                    Analytics.addData(AnalyticData.SecurityEvent, "Security failure, event payload data verification unsuccessful: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
-                    System.out.println("Security failure, event payload data verification unsuccessful: " + ib.ne.p.oCXID + ", " + ib.nc.oD+ " Event Type: " + ib.ne.eT);
+            //TODO
+            //TODO VERY IMPORTANT, for now we are giving a blanket pass to CXHELLO events for security eval
+            //This needs to be reviewed in the future
+            //TODO
+            if (EventType.valueOf(ib.ne.eT) != EventType.CXHELLO) {
+                //Verify input bundle CXPATH
+                if (ib.ne.p == null) {
+                    Analytics.addData(AnalyticData.SecurityEvent, "Security failure, Missing CXPATH: " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                    System.out.println("Security failure, Missing CXPATH: " + ib.nc.oD + " Event Type: " + ib.ne.eT);
                     return;
+                }
+
+                //VERIFY CONTAINER AND EVENT (Layer 1 + 2)
+                //ib.ne - SIGNED BY ORIGIN UNMODIFIABLE
+                //ib.nc - SIGNED BY LAST HOP, MODIFIABLE
+                //It is critcal that they match to enforce multilayer cryptography
+                if (!Objects.equals(ib.ne.p.oCXID, ib.nc.oD)) {
+                    Analytics.addData(AnalyticData.SecurityEvent, "Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                    System.out.println("Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                    return;
+                }
+                //VERIFY INTERNAL DATA PAYLOAD
+                // SECURITY: Use oCXID (origin sender) for signature verification, NOT cxID (destination)
+                // This prevents spoofing attacks where attacker sets cxID to victim's ID
+                ByteArrayInputStream signedInput = new ByteArrayInputStream(ib.ne.d);
+                ByteArrayOutputStream strippedOutput = new ByteArrayOutputStream();
+                if (!ib.ne.e2e) {
+                    if (!connectX.encryptionProvider.verifyAndStrip(signedInput, strippedOutput, ib.ne.p.oCXID)) {
+                        Analytics.addData(AnalyticData.SecurityEvent, "Security failure, event payload data verification unsuccessful: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                        System.out.println("Security failure, event payload data verification unsuccessful: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                        return;
+                    }
+                    // Update eventData with stripped payload (signature removed)
+                    eventData = strippedOutput.toByteArray();
                 }
             }
 
@@ -602,10 +664,10 @@ public class NodeMesh {
                             break;
 
                         case CXHELLO:
-                            if (!(ib.ne.p.getScope().equals(Scope.CXS) | ib.ne.p.getScope().equals(Scope.LAN))) {
-                                System.out.println("[NodeMesh] ERROR: CXHELLO received in incorrect scope, Only CXS or LAN is allowed");
-                                return;
-                            }
+                            //if (!(ib.ne.p.getScope().equals(Scope.CXS) | ib.ne.p.getScope().equals(Scope.LAN))) {
+                             //   System.out.println("[NodeMesh] ERROR: CXHELLO received in incorrect scope, Only CXS or LAN is allowed");
+                            //    return;
+                            //}
                             // CXHELLO sends full Node object - import it (following NewNode pattern)
                             System.out.println("[" + connectX.getOwnID() + "] CXHELLO request received from " + ib.nc.iD);
 
@@ -677,6 +739,7 @@ public class NodeMesh {
                             return; // Don't continue to fireEvent
                     }
                 } catch (Exception e) {
+                    System.out.println("[NodeMesh] Cryptography failure on event " + ib.ne.eT + " From peer: " + ib.nc.iD);
                     e.printStackTrace();
                     throw new DecryptionFailureException();
                 }
@@ -781,21 +844,22 @@ public class NodeMesh {
     public boolean fireEvent(NetworkEvent ne, NetworkContainer nc, byte[] signedEventBytes) {
         // CRITICAL: Verify signature before processing any event
         // This ensures the event was actually signed by the claimed sender
-        if (signedEventBytes != null && ne != null && ne.p != null && ne.p.cxID != null) {
+        // IMPORTANT: Use oCXID (origin sender) NOT cxID (destination/target)
+        // For CXN broadcasts, cxID may be null but oCXID always identifies the signer
+        if (signedEventBytes != null && ne != null && ne.p != null && ne.p.oCXID != null) {
             try {
                 java.io.ByteArrayInputStream verifyStream = new java.io.ByteArrayInputStream(signedEventBytes);
                 java.io.ByteArrayOutputStream verifiedOutput = new java.io.ByteArrayOutputStream();
-                boolean verified = connectX.encryptionProvider.verifyAndStrip(verifyStream, verifiedOutput, ne.p.cxID);
+                boolean verified = connectX.encryptionProvider.verifyAndStrip(verifyStream, verifiedOutput, ne.p.oCXID);
                 verifyStream.close();
 
                 if (!verified) {
-                    System.err.println("[SECURITY] Event signature verification FAILED for " +
-                        (ne.p.cxID.length() >= 8 ? ne.p.cxID.substring(0, 8) : ne.p.cxID) +
-                        " - REJECTING EVENT");
+                    String cxidDisplay = (ne.p.oCXID != null && ne.p.oCXID.length() >= 8) ? ne.p.oCXID.substring(0, 8) : (ne.p.oCXID != null ? ne.p.oCXID : "NULL");
+                    System.err.println("[SECURITY] Event signature verification FAILED for " + cxidDisplay + " - REJECTING EVENT");
                     return false; // Reject the event
                 }
-                System.out.println("[SECURITY] Event signature verified for " +
-                    (ne.p.cxID.length() >= 8 ? ne.p.cxID.substring(0, 8) : ne.p.cxID));
+                String cxidDisplay = (ne.p.oCXID != null && ne.p.oCXID.length() >= 8) ? ne.p.oCXID.substring(0, 8) : (ne.p.oCXID != null ? ne.p.oCXID : "NULL");
+                System.out.println("[SECURITY] Event signature verified for " + cxidDisplay);
             } catch (Exception e) {
                 System.err.println("[SECURITY] Error verifying event signature: " + e.getMessage());
                 return false; // Reject on error

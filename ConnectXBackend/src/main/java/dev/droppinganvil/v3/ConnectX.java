@@ -1184,6 +1184,7 @@ public class ConnectX {
                     String peerFindingJson = serialize("cxJSON1", peerFindingReq);
                     buildEvent(EventType.PeerFinding, peerFindingJson.getBytes("UTF-8"))
                         .toPeer(peer.cxID)
+                        .signData()
                         .queue();
 
                     contactAttempts++;
@@ -1326,6 +1327,7 @@ public class ConnectX {
 
                                             buildEvent(EventType.PeerFinding, peerFindingJson.getBytes("UTF-8"))
                                                 .toPeer(peer.cxID)
+                                                .signData()
                                                 .queue();
 
                                             peersSent++;

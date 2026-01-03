@@ -1215,27 +1215,43 @@ public class ConnectX {
         attemptCXNETBootstrap();
 
         // Initialize LAN scanner for local peer discovery
-        // Delay scan to allow network to fully initialize
+        // Runs periodically every 5 minutes to maintain LAN peer connectivity
         Thread lanScanThread = new Thread(() -> {
             try {
                 // Wait for socket to be ready
                 Thread.sleep(10000); // Wait 10 seconds for network to stabilize and peers to bootstrap
 
-                // Verify socket is listening before scanning
-                if (nodeMesh != null && nodeMesh.in != null && nodeMesh.in.serverSocket != null &&
-                    nodeMesh.in.serverSocket.isBound() && !nodeMesh.in.serverSocket.isClosed()) {
+                System.out.println("[LAN Scanner] Starting periodic LAN discovery (every 5 minutes)");
 
-                    dev.droppinganvil.v3.network.nodemesh.LANScanner scanner =
-                        new dev.droppinganvil.v3.network.nodemesh.LANScanner(this, port);
-                    scanner.scanNetwork();
-                } else {
-                    System.err.println("[LAN Scanner] Socket not ready, skipping scan");
+                while (true) {
+                    try {
+                        // Verify socket is listening before scanning
+                        if (nodeMesh != null && nodeMesh.in != null && nodeMesh.in.serverSocket != null &&
+                            nodeMesh.in.serverSocket.isBound() && !nodeMesh.in.serverSocket.isClosed()) {
+
+                            System.out.println("[LAN Scanner] Starting LAN scan...");
+                            dev.droppinganvil.v3.network.nodemesh.LANScanner scanner =
+                                new dev.droppinganvil.v3.network.nodemesh.LANScanner(this, port);
+                            scanner.scanNetwork();
+                            System.out.println("[LAN Scanner] Scan complete, next scan in 5 minutes");
+                        } else {
+                            System.err.println("[LAN Scanner] Socket not ready, skipping scan");
+                        }
+                    } catch (Exception e) {
+                        System.err.println("[LAN Scanner] Scan failed: " + e.getMessage());
+                    }
+
+                    // Wait 5 minutes before next scan (matches peer discovery cycle)
+                    Thread.sleep(300000); // 5 minutes = 300,000 ms
                 }
+            } catch (InterruptedException e) {
+                System.out.println("[LAN Scanner] Thread interrupted, stopping periodic scans");
             } catch (Exception e) {
-                System.err.println("[LAN Scanner] Failed to start: " + e.getMessage());
+                System.err.println("[LAN Scanner] Fatal error: " + e.getMessage());
+                e.printStackTrace();
             }
         });
-        lanScanThread.setName("LAN-Scanner-Initializer");
+        lanScanThread.setName("LAN-Scanner-Periodic");
         lanScanThread.setDaemon(true);
         lanScanThread.start();
 

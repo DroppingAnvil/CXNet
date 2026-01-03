@@ -668,74 +668,111 @@ public class NodeMesh {
                              //   System.out.println("[NodeMesh] ERROR: CXHELLO received in incorrect scope, Only CXS or LAN is allowed");
                             //    return;
                             //}
-                            // CXHELLO sends full Node object - import it (following NewNode pattern)
+                            // CXHELLO sends signed Node blob - import it with persistence
                             System.out.println("[" + connectX.getOwnID() + "] CXHELLO request received from " + ib.nc.iD);
 
-                            // Extract and import Node from CXHELLO payload
+                            // Deserialize CXHello payload
                             String cxhelloPayloadJson = new String(eventData, "UTF-8");
-                            java.util.Map<String, Object> cxhelloData =
-                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", cxhelloPayloadJson, java.util.Map.class);
+                            dev.droppinganvil.v3.network.events.CXHello cxhelloData =
+                                (dev.droppinganvil.v3.network.events.CXHello) ConnectX.deserialize("cxJSON1", cxhelloPayloadJson,
+                                    dev.droppinganvil.v3.network.events.CXHello.class);
 
-                            Object cxhelloNodeObj = cxhelloData.get("node");
-                            String cxhelloNodeJson = ConnectX.serialize("cxJSON1", cxhelloNodeObj);
-                            Node cxhelloNode = (Node) ConnectX.deserialize("cxJSON1", cxhelloNodeJson, Node.class);
+                            // Get signed Node blob from payload
+                            byte[] cxhelloSignedBlob = cxhelloData.signedNode;
 
-                            // Verify and import the node (following NewNode pattern)
-                            Node existingCxhelloNode = PeerDirectory.lookup(cxhelloNode.cxID, true, true, connectX.cxRoot, connectX);
-                            if (existingCxhelloNode == null) {
-                                PeerDirectory.addNode(cxhelloNode);
-                                System.out.println("[CXHELLO] Imported new node: " + cxhelloNode.cxID.substring(0, 8));
-                                System.out.println("[CXHELLO] Node signature VERIFIED for " + cxhelloNode.cxID.substring(0, 8));
-                            } else {
-                                connectX.encryptionProvider.cacheCert(existingCxhelloNode.cxID, true, false);
-                                System.out.println("[CXHELLO] Updated existing node: " + existingCxhelloNode.cxID.substring(0, 8));
-                            }
+                            if (cxhelloSignedBlob != null) {
+                                // Verify and deserialize the signed Node blob (using sender's ID from container)
+                                java.io.ByteArrayInputStream signedInput = new java.io.ByteArrayInputStream(cxhelloSignedBlob);
+                                java.io.ByteArrayOutputStream verifiedOutput = new java.io.ByteArrayOutputStream();
+                                boolean verified = connectX.encryptionProvider.verifyAndStrip(signedInput, verifiedOutput, ib.nc.iD);
+                                signedInput.close();
 
-                            // Now lookup the node for response routing
-                            Node requesterNode = PeerDirectory.lookup(ib.nc.iD, true, true);
-                            if (requesterNode != null) {
-                                System.out.println("[CXHELLO] Peer discovered from " + ib.nc.iD.substring(0, 8));
+                                if (verified) {
+                                    String nodeJson = verifiedOutput.toString("UTF-8");
+                                    Node cxhelloNode = (Node) ConnectX.deserialize("cxJSON1", nodeJson, Node.class);
+                                    verifiedOutput.close();
 
-                                // Send CXHELLO_RESPONSE with our peerID, port, and Node data
-                                java.util.Map<String, Object> responsePayload = new java.util.HashMap<>();
-                                responsePayload.put("peerID", connectX.getOwnID());
-                                int listeningPort = (in.serverSocket != null) ? in.serverSocket.getLocalPort() : 0;
-                                responsePayload.put("port", listeningPort);
-                                responsePayload.put("node", connectX.getSelf());
+                                    // Add node WITH signed blob for .cxi persistence
+                                    Node existingCxhelloNode = PeerDirectory.lookup(cxhelloNode.cxID, true, true, connectX.cxRoot, connectX);
+                                    if (existingCxhelloNode == null) {
+                                        PeerDirectory.addNode(cxhelloNode, cxhelloSignedBlob);
+                                        System.out.println("[CXHELLO] Imported and PERSISTED new node: " + cxhelloNode.cxID.substring(0, 8));
+                                    } else {
+                                        connectX.encryptionProvider.cacheCert(existingCxhelloNode.cxID, true, false);
+                                        System.out.println("[CXHELLO] Updated existing node: " + existingCxhelloNode.cxID.substring(0, 8));
+                                    }
 
-                                String responsePayloadJson = ConnectX.serialize("cxJSON1", responsePayload);
+                                    // Now lookup the node for response routing
+                                    Node requesterNode = PeerDirectory.lookup(ib.nc.iD, true, true);
+                                    if (requesterNode != null) {
+                                        System.out.println("[CXHELLO] Peer discovered from " + ib.nc.iD.substring(0, 8));
 
-                                // Send response using EventBuilder pattern
-                                connectX.buildEvent(EventType.CXHELLO_RESPONSE, responsePayloadJson.getBytes("UTF-8"))
-                                    .toPeer(ib.nc.iD)
-                                    .signData()
-                                    .queue();
+                                        // Sign our Node for .cxi persistence on receiver
+                                        String ourNodeJson = ConnectX.serialize("cxJSON1", connectX.getSelf());
+                                        java.io.ByteArrayInputStream nodeInput = new java.io.ByteArrayInputStream(ourNodeJson.getBytes("UTF-8"));
+                                        java.io.ByteArrayOutputStream signedOutput = new java.io.ByteArrayOutputStream();
+                                        connectX.encryptionProvider.sign(nodeInput, signedOutput);
+                                        nodeInput.close();
+                                        byte[] ourSignedBlob = signedOutput.toByteArray();
+                                        signedOutput.close();
 
-                                System.out.println("[CXHELLO] Queued CXHELLO_RESPONSE to " + ib.nc.iD.substring(0, 8));
+                                        // Send CXHELLO_RESPONSE with our peerID, port, and signed Node blob using CXHello class
+                                        int listeningPort = (in.serverSocket != null) ? in.serverSocket.getLocalPort() : 0;
+                                        dev.droppinganvil.v3.network.events.CXHello responsePayload =
+                                            new dev.droppinganvil.v3.network.events.CXHello(connectX.getOwnID(), listeningPort, ourSignedBlob);
+
+                                        String responsePayloadJson = ConnectX.serialize("cxJSON1", responsePayload);
+
+                                        // Send response using EventBuilder pattern
+                                        connectX.buildEvent(EventType.CXHELLO_RESPONSE, responsePayloadJson.getBytes("UTF-8"))
+                                            .toPeer(ib.nc.iD)
+                                            .signData()
+                                            .queue();
+
+                                        System.out.println("[CXHELLO] Queued CXHELLO_RESPONSE to " + ib.nc.iD.substring(0, 8));
+                                    }
+                                } else {
+                                    System.err.println("[CXHELLO] Node signature verification FAILED for " + ib.nc.iD.substring(0, 8));
+                                }
                             }
                             return; // Don't continue to fireEvent
 
                         case CXHELLO_RESPONSE:
-                            // CXHELLO_RESPONSE payload: {"peerID": "...", "port": 12345, "node": {...}}
+                            // CXHELLO_RESPONSE payload: CXHello class with signed Node blob
                             System.out.println("[" + connectX.getOwnID() + "] CXHELLO_RESPONSE received from " + ib.nc.iD);
                             String responsePayloadJson = new String(eventData, "UTF-8");
-                            java.util.Map<String, Object> responseData =
-                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", responsePayloadJson, java.util.Map.class);
+                            dev.droppinganvil.v3.network.events.CXHello responseData =
+                                (dev.droppinganvil.v3.network.events.CXHello) ConnectX.deserialize("cxJSON1", responsePayloadJson,
+                                    dev.droppinganvil.v3.network.events.CXHello.class);
 
-                            // Extract Node from response payload
-                            Object nodeObj = responseData.get("node");
-                            String respNodeJson = ConnectX.serialize("cxJSON1", nodeObj);
-                            Node responseNode = (Node) ConnectX.deserialize("cxJSON1", respNodeJson, Node.class);
+                            // Get signed Node blob from CXHello payload
+                            byte[] respSignedBlob = responseData.signedNode;
 
-                            // Local address already recorded in processNetworkInput
-                            Node existingNode = PeerDirectory.lookup(responseNode.cxID, true, true, connectX.cxRoot, connectX);
-                            if (existingNode != null) {
-                                connectX.encryptionProvider.cacheCert(existingNode.cxID, true, false);
-                                System.out.println("[CXHELLO_RESPONSE] Updated existing node: " + existingNode.cxID.substring(0, 8));
-                                return;
+                            if (respSignedBlob != null) {
+                                // Verify and deserialize the signed Node blob
+                                java.io.ByteArrayInputStream respSignedInput = new java.io.ByteArrayInputStream(respSignedBlob);
+                                java.io.ByteArrayOutputStream respVerifiedOutput = new java.io.ByteArrayOutputStream();
+                                boolean respVerified = connectX.encryptionProvider.verifyAndStrip(respSignedInput, respVerifiedOutput, ib.nc.iD);
+                                respSignedInput.close();
+
+                                if (respVerified) {
+                                    String respNodeJson = respVerifiedOutput.toString("UTF-8");
+                                    Node responseNode = (Node) ConnectX.deserialize("cxJSON1", respNodeJson, Node.class);
+                                    respVerifiedOutput.close();
+
+                                    // Local address already recorded in processNetworkInput
+                                    Node existingNode = PeerDirectory.lookup(responseNode.cxID, true, true, connectX.cxRoot, connectX);
+                                    if (existingNode != null) {
+                                        connectX.encryptionProvider.cacheCert(existingNode.cxID, true, false);
+                                        System.out.println("[CXHELLO_RESPONSE] Updated existing node: " + existingNode.cxID.substring(0, 8));
+                                        return;
+                                    }
+                                    PeerDirectory.addNode(responseNode, respSignedBlob);
+                                    System.out.println("[CXHELLO_RESPONSE] Imported and PERSISTED new node: " + responseNode.cxID.substring(0, 8));
+                                } else {
+                                    System.err.println("[CXHELLO_RESPONSE] Node signature verification FAILED for " + ib.nc.iD.substring(0, 8));
+                                }
                             }
-                            PeerDirectory.addNode(responseNode);
-                            System.out.println("[CXHELLO_RESPONSE] Imported new node: " + responseNode.cxID.substring(0, 8));
                             return; // Don't continue to fireEvent
                     }
                 } catch (Exception e) {
@@ -1989,8 +2026,43 @@ public class NodeMesh {
                             // Use signedEventBytes to preserve original NetworkEvent signature
                             OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
                             connectX.queueEvent(relayBundle);
+                            sentTo.add(peer.cxID);
                         } catch (Exception e) {
                             e.printStackTrace();
+                        }
+                    }
+                }
+
+                // CRITICAL: Also check DataContainer for locally discovered peers
+                // These peers may not be in PeerDirectory.hv/seen yet, but are locally reachable via LAN
+                if (connectX.dataContainer != null && connectX.dataContainer.localPeerAddresses != null) {
+                    for (String peerID : connectX.dataContainer.localPeerAddresses.keySet()) {
+                        if (!peerID.equals(connectX.getOwnID()) &&
+                            !peerID.equals(transmitterID) &&
+                            !sentTo.contains(peerID)) {
+                            try {
+                                // Try to relay to this LAN peer
+                                NetworkContainer relayContainer = new NetworkContainer();
+                                relayContainer.se = "cxJSON1";
+                                relayContainer.s = false;
+                                relayContainer.tP = tP; // Preserve TransmitPref
+                                relayContainer.oD = nc.oD; // Preserve original sender
+
+                                // Create temporary node with LAN address for transmission
+                                Node tempPeer = new Node();
+                                tempPeer.cxID = peerID;
+                                java.util.List<String> addresses = connectX.dataContainer.getLocalPeerAddresses(peerID);
+                                if (!addresses.isEmpty()) {
+                                    tempPeer.addr = addresses.get(0); // Use first known LAN address
+                                }
+
+                                // Use signedEventBytes to preserve original NetworkEvent signature
+                                OutputBundle relayBundle = new OutputBundle(ne, tempPeer, null, signedEventBytes, relayContainer);
+                                connectX.queueEvent(relayBundle);
+                                sentTo.add(peerID);
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
                         }
                     }
                 }

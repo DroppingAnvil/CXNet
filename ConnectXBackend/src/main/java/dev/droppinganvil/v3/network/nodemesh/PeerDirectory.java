@@ -12,11 +12,20 @@ import dev.droppinganvil.v3.exceptions.UnsafeKeywordException;
 
 import java.io.File;
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class PeerDirectory implements Serializable {
     public static ConcurrentHashMap<String,Node> peerCache = new ConcurrentHashMap<>();
+    /**
+     * For tracking nodes we have connected to directly over the internet, in the future this might be changed to a set of cxIDs
+     */
     public static ConcurrentHashMap<String,Node> seen = new ConcurrentHashMap<>();
+    /**
+     * More resource friendly way to store seen peers, by reference
+     * //TODO Optimize older uses of seen map
+     */
+    public static ArrayList<String> seenCXIDs = new ArrayList<>();
     public static ConcurrentHashMap<String, Node> lan = new ConcurrentHashMap<>();
     public static ConcurrentHashMap<String,Node> hv = new ConcurrentHashMap<>();
     public static File peers;

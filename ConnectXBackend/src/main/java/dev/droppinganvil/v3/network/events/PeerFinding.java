@@ -18,7 +18,7 @@ public class PeerFinding {
      */
     public byte[] currentPeers;
     /*
-    LIST of IP/Socket/Bridges that could be connected to 30% max up to 20
+    LIST of ALL IP/Socket/Bridges that could be connected to 30% max up to 20
      */
     public byte[] peers;
     /*

@@ -5,6 +5,7 @@ import dev.droppinganvil.v3.analytics.AnalyticData;
 import dev.droppinganvil.v3.analytics.Analytics;
 import dev.droppinganvil.v3.crypt.core.exceptions.DecryptionFailureException;
 import dev.droppinganvil.v3.network.*;
+import dev.droppinganvil.v3.network.events.CXHello;
 import dev.droppinganvil.v3.network.events.EventType;
 import dev.droppinganvil.v3.network.events.NetworkContainer;
 import dev.droppinganvil.v3.network.events.NetworkEvent;
@@ -338,7 +339,12 @@ public class NodeMesh {
                                 }
 
                                 String strippedJson = strippedPayloadStream.toString("UTF-8");
-                                newNode = (Node) ConnectX.deserialize("cxJSON1", strippedJson, Node.class);
+                                //Strip signature from Event Payload
+                                ByteArrayInputStream baiss = new ByteArrayInputStream(strippedJson.getBytes("UTF-8"));
+                                ByteArrayOutputStream fullyStrippedEvent = new ByteArrayOutputStream();
+                                connectX.encryptionProvider.stripSignature(baiss, fullyStrippedEvent);
+                                String fullyStrippedJSON = fullyStrippedEvent.toString("UTF-8");
+                                newNode = (Node) ConnectX.deserialize("cxJSON1", fullyStrippedJSON, Node.class);
 
                                 signedPayloadStream.close();
                                 strippedPayloadStream.close();
@@ -358,7 +364,7 @@ public class NodeMesh {
 
                             // Import the node with signed blob for CXHELLO persistence
                             if (signedNodeBlobForPersistence != null) {
-                                PeerDirectory.addNode(newNode, signedNodeBlobForPersistence);
+                                PeerDirectory.addNode(newNode, signedNodeBlobForPersistence, connectX.cxRoot);
                                 System.out.println("[NodeMesh] Imported and PERSISTED CXHELLO node: " + newNode.cxID.substring(0, 8));
                             } else {
                                 PeerDirectory.addNode(newNode);
@@ -373,8 +379,8 @@ public class NodeMesh {
 
                             if (o1 == null) {
                                 System.err.println("[NodeMesh] NewNode/CXHELLO container signature verification FAILED for " + nc.iD);
-                                // Rollback: Remove the imported node
-                                PeerDirectory.removeNode(importedNode.cxID);
+                                // Rollback: Remove the imported node (memory AND filesystem)
+                                PeerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
                                 throw new DecryptionFailureException();
                             }
                             System.out.println("[NodeMesh] Container signature VERIFIED for " + newNode.cxID);
@@ -392,8 +398,8 @@ public class NodeMesh {
 
                                 if (!blobVerified) {
                                     System.err.println("[NodeMesh] CXHELLO signedNode verification FAILED for " + nc.iD);
-                                    // Rollback: Remove the imported node
-                                    PeerDirectory.removeNode(importedNode.cxID);
+                                    // Rollback: Remove the imported node (memory AND filesystem)
+                                    PeerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
                                     throw new DecryptionFailureException();
                                 }
                                 System.out.println("[NodeMesh] CXHELLO signedNode signature VERIFIED for " + newNode.cxID);
@@ -405,7 +411,8 @@ public class NodeMesh {
                             e.printStackTrace();
                             System.err.println("[NodeMesh] Failed to process NewNode: " + e.getMessage());
                             if (importedNode != null) {
-                                PeerDirectory.removeNode(importedNode.cxID);
+                                // Rollback: Remove the imported node (memory AND filesystem)
+                                PeerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
                             }
                             throw new DecryptionFailureException();
                         }
@@ -426,6 +433,29 @@ public class NodeMesh {
                     networkEvent = baoss.toString("UTF-8");
                     ne = (NetworkEvent) ConnectX.deserialize(nc.se, networkEvent, NetworkEvent.class);
                     verifyBais.close();
+
+                    //Add o1 check
+                    if (!(boolean) o1) {
+                        System.out.println("[NodeMesh] Signature verification failure, rejecting event. 003");
+                        return;
+                    }
+
+                    /// Verifies event data payload and strips it of cryptography for easy access later with InputBundle.readyObject()
+                if (!parsedEvent.e2e) {
+                    byte[] signedEventd = ne.d;
+                    ByteArrayInputStream baiss = new ByteArrayInputStream(signedEventd);
+                    ByteArrayOutputStream strippedJSON = new ByteArrayOutputStream();
+                    if (connectX.encryptionProvider.verifyAndStrip(baiss, strippedJSON, parsedEvent.p.oCXID)) {
+                        ib.verifiedObjectBytes = strippedJSON.toByteArray();
+                    } else {
+                        System.out.println("[NodeMesh] Internal event data verification failure, rejecting event. 004");
+                        return;
+                    }
+                    baiss.close();
+                    strippedJSON.close();
+                    ///  AFTER this point all helper features should be available in InputBundle
+                }
+
                 }
             }
             bais.close();
@@ -549,6 +579,8 @@ public class NodeMesh {
 
                 /// If for some reason old method is used try it, otherwise use new InputBundle features
                 if (ib.object == null) {
+                    /// Try new InputBundle features first
+                if (!ib.readyObject(CXHello.class, ib.nc.se, connectX)) {
                     System.out.println("[NODEMESH] WARNING: Deprecated use of NodeMesh, Use new InputBundle features!");
                     // Both CXHELLO and CXHELLO_RESPONSE payloads are now PGP-signed
                     // Strip signature before deserializing
@@ -563,6 +595,10 @@ public class NodeMesh {
                     helloData =
                             (dev.droppinganvil.v3.network.events.CXHello) ConnectX.deserialize("cxJSON1", helloJson,
                                     dev.droppinganvil.v3.network.events.CXHello.class);
+                } else {
+                    helloData = (CXHello) ib.object;
+                    System.out.println("[NodeMesh] REMOVE THIS, new IB use");
+                }
                 } else {
                     helloData = (dev.droppinganvil.v3.network.events.CXHello) ib.object;
                 }
@@ -709,9 +745,9 @@ public class NodeMesh {
                             // Extract and verify the signed blob, then save it for relay
                             byte[] signedNodeBlob = eventData;
 
-                            // Verify and deserialize the signed Node blob
+                            // Verify and deserialize the signed Node blob (signed by origin sender)
                             Node node = (Node) connectX.getSignedObject(
-                                null, // Will extract cxID from signature
+                                ib.ne.p.oCXID, // Origin sender's cxID for signature verification
                                 new java.io.ByteArrayInputStream(signedNodeBlob),
                                 Node.class,
                                 "cxJSON1"
@@ -731,7 +767,7 @@ public class NodeMesh {
                             }
 
                             // Add node WITH signed blob (preserves original signature for relay)
-                            PeerDirectory.addNode(node, signedNodeBlob);
+                            PeerDirectory.addNode(node, signedNodeBlob, connectX.cxRoot);
                             System.out.println("[NodeMesh] Imported NewNode: " + node.cxID.substring(0, 8));
                             System.out.println("[NodeMesh] NewNode signature VERIFIED and SAVED for relay");
                             break;
@@ -769,7 +805,7 @@ public class NodeMesh {
                                     // Add node WITH signed blob for .cxi persistence
                                     Node existingCxhelloNode = PeerDirectory.lookup(cxhelloNode.cxID, true, true, connectX.cxRoot, connectX);
                                     if (existingCxhelloNode == null) {
-                                        PeerDirectory.addNode(cxhelloNode, cxhelloSignedBlob);
+                                        PeerDirectory.addNode(cxhelloNode, cxhelloSignedBlob, connectX.cxRoot);
                                         System.out.println("[CXHELLO] Imported and PERSISTED new node: " + cxhelloNode.cxID.substring(0, 8));
                                     } else {
                                         connectX.encryptionProvider.cacheCert(existingCxhelloNode.cxID, true, false);
@@ -827,11 +863,19 @@ public class NodeMesh {
                             dev.droppinganvil.v3.network.events.CXHello responseData;
                             /// NEW InputBundle features handling
                             if (ib.object != null) {
-                                System.out.println("[NodeMesh] ");
-                                String responsePayloadJson = new String(eventData, "UTF-8");
-                                dev.droppinganvil.v3.network.events.CXHello responseData =
-                                        (dev.droppinganvil.v3.network.events.CXHello) ConnectX.deserialize("cxJSON1", responsePayloadJson,
-                                                dev.droppinganvil.v3.network.events.CXHello.class);
+                                //Try new method first
+                                if (!ib.readyObject(CXHello.class, ib.nc.se, connectX)) {
+                                    System.out.println("[NodeMesh] Using depreciated method, use new InputBundle instead 002");
+                                    String responsePayloadJson = new String(eventData, "UTF-8");
+                                    responseData =
+                                            (dev.droppinganvil.v3.network.events.CXHello) ConnectX.deserialize("cxJSON1", responsePayloadJson,
+                                                    dev.droppinganvil.v3.network.events.CXHello.class);
+                                } else {
+                                    System.out.println("[NodeMesh] REMOVE THIS, Trying new InputBundle readyObject");
+                                    responseData = (CXHello) ib.object;
+                                }
+                            } else {
+                                responseData = (dev.droppinganvil.v3.network.events.CXHello) ib.object;
                             }
                             // Get signed Node blob from CXHello payload
                             byte[] respSignedBlob = responseData.signedNode;
@@ -855,7 +899,7 @@ public class NodeMesh {
                                         System.out.println("[CXHELLO_RESPONSE] Updated existing node: " + existingNode.cxID.substring(0, 8));
                                         return;
                                     }
-                                    PeerDirectory.addNode(responseNode, respSignedBlob);
+                                    PeerDirectory.addNode(responseNode, respSignedBlob, connectX.cxRoot);
                                     System.out.println("[CXHELLO_RESPONSE] Imported and PERSISTED new node: " + responseNode.cxID.substring(0, 8));
                                 } else {
                                     System.err.println("[CXHELLO_RESPONSE] Node signature verification FAILED for " + ib.nc.iD.substring(0, 8));
@@ -1126,19 +1170,40 @@ public class NodeMesh {
                                                 continue;
                                             }
 
-                                            // Verify and import signed node
-                                            Node discoveredPeer = (Node) connectX.getSignedObject(
-                                                null, // Will extract cxID from signature
-                                                new java.io.ByteArrayInputStream(signedNodeBytes),
-                                                Node.class,
-                                                "cxJSON1"
-                                            );
+                                            // Import node WITHOUT verification first (need public key from node)
+                                            // Pattern: strip -> deserialize -> import -> verify -> rollback if fail
+                                            java.io.ByteArrayInputStream signedInput = new java.io.ByteArrayInputStream(signedNodeBytes);
+                                            java.io.ByteArrayOutputStream strippedOutput = new java.io.ByteArrayOutputStream();
+                                            connectX.encryptionProvider.stripSignature(signedInput, strippedOutput);
+                                            signedInput.close();
+
+                                            String nodeJson = strippedOutput.toString("UTF-8");
+                                            Node discoveredPeer = (Node) ConnectX.deserialize("cxJSON1", nodeJson, Node.class);
+                                            strippedOutput.close();
 
                                             if (discoveredPeer != null && discoveredPeer.cxID != null) {
                                                 // Add with signed blob for persistence and relaying
-                                                PeerDirectory.addNode(discoveredPeer, signedNodeBytes);
+                                                PeerDirectory.addNode(discoveredPeer, signedNodeBytes, connectX.cxRoot);
+
+                                                // Now verify the signature using the imported public key
+                                                java.io.ByteArrayInputStream verifyInput = new java.io.ByteArrayInputStream(signedNodeBytes);
+                                                java.io.ByteArrayOutputStream verifyOutput = new java.io.ByteArrayOutputStream();
+                                                boolean verified = connectX.encryptionProvider.verifyAndStrip(
+                                                    verifyInput, verifyOutput, discoveredPeer.cxID);
+                                                verifyInput.close();
+                                                verifyOutput.close();
+
+                                                if (!verified) {
+                                                    // Signature verification FAILED - rollback
+                                                    PeerDirectory.removeNode(discoveredPeer.cxID, connectX.cxRoot);
+                                                    System.err.println("[PeerFinding] Signature verification FAILED for " +
+                                                        discoveredPeer.cxID.substring(0, 8) + " - rolled back");
+                                                    continue;
+                                                }
+
                                                 imported++;
-                                                System.out.println("[PeerFinding]   + " + discoveredPeer.cxID.substring(0, 8));
+                                                System.out.println("[PeerFinding]   + " + discoveredPeer.cxID.substring(0, 8) +
+                                                    " (verified)");
 
                                                 // Send NewNode with SIGNED Node blob (receiver will save original signed blob for relay)
                                                 String selfJson = ConnectX.serialize("cxJSON1", connectX.getSelf());

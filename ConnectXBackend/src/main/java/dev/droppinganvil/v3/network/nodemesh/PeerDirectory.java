@@ -44,9 +44,12 @@ public class PeerDirectory implements Serializable {
 //            throw new RuntimeException(e);
         }
             char s = cxID.charAt(0);
+            // Use instance-specific directory if cxRoot provided, otherwise fall back to static peers
+            File peerDir = (cxRoot != null) ? new File(cxRoot, "nodemesh") : peers;
+            // Legacy: Set static peers if needed (for backward compatibility)
             if (peers == null && cxRoot != null) peers = new File(cxRoot, "nodemesh");
-            if (peers == null) return null;
-            File peerGroup = new File(peers, String.valueOf(s));
+            if (peerDir == null) return null;
+            File peerGroup = new File(peerDir, String.valueOf(s));
             if (peerGroup.exists()) {
                 File peer = new File(peerGroup, cxID+".cxi");
                 if (peer.exists()) {
@@ -124,7 +127,21 @@ public class PeerDirectory implements Serializable {
     // Cache of signed node blobs for relaying without re-signing
     public static ConcurrentHashMap<String, byte[]> signedNodeCache = new ConcurrentHashMap<>();
 
+    /**
+     * Add node with signed blob for persistence (uses static peers directory - legacy)
+     * @deprecated Use addNode(Node n, byte[] signed, File cxRoot) for instance-specific persistence
+     */
     public static void addNode(Node n, byte[] signed) {
+        addNode(n, signed, null);
+    }
+
+    /**
+     * Add node with signed blob for persistence to instance-specific directory
+     * @param n The node to add
+     * @param signed The signed node blob for persistence
+     * @param cxRoot The instance-specific root directory (e.g., ConnectX-Peer1)
+     */
+    public static void addNode(Node n, byte[] signed, File cxRoot) {
         if (Node.validate(n)) {
             // Add to in-memory directories (same as regular addNode)
             addNode(n);
@@ -133,11 +150,20 @@ public class PeerDirectory implements Serializable {
             if (signed != null) {
                 signedNodeCache.put(n.cxID, signed);
 
-                // Persist to disk (nodemesh/{first_char}/{cxID}.cxi)
+                // Persist to disk (instance-specific: {cxRoot}/nodemesh/{first_char}/{cxID}.cxi)
                 try {
-                    if (peers != null) {
+                    File peerDir;
+                    if (cxRoot != null) {
+                        // Instance-specific directory
+                        peerDir = new File(cxRoot, "nodemesh");
+                    } else {
+                        // Fallback to static peers directory (legacy behavior)
+                        peerDir = peers;
+                    }
+
+                    if (peerDir != null) {
                         char firstChar = n.cxID.charAt(0);
-                        File peerGroup = new File(peers, String.valueOf(firstChar));
+                        File peerGroup = new File(peerDir, String.valueOf(firstChar));
                         if (!peerGroup.exists()) {
                             peerGroup.mkdirs();
                         }
@@ -148,7 +174,8 @@ public class PeerDirectory implements Serializable {
                         fos.flush();
                         fos.close();
 
-                        System.out.println("[PeerDirectory] Persisted signed node: " + n.cxID.substring(0, 8) + " (" + signed.length + " bytes)");
+                        System.out.println("[PeerDirectory] Persisted signed node: " + n.cxID.substring(0, 8) +
+                            " to " + peerFile.getAbsolutePath() + " (" + signed.length + " bytes)");
                     }
                 } catch (Exception e) {
                     System.err.println("[PeerDirectory] Failed to persist node " + n.cxID + ": " + e.getMessage());
@@ -198,11 +225,21 @@ public class PeerDirectory implements Serializable {
     }
 
     /**
-     * Remove a node from all peer directories
-     * Used for rollback when NewNode signature verification fails
+     * Remove a node from all peer directories (memory only - legacy)
+     * @deprecated Use removeNode(String cxID, File cxRoot) to also remove from filesystem
      * @param cxID The node ID to remove
      */
     public static void removeNode(String cxID) {
+        removeNode(cxID, null);
+    }
+
+    /**
+     * Remove a node from all peer directories (memory AND filesystem)
+     * Used for rollback when NewNode/CXHELLO signature verification fails
+     * @param cxID The node ID to remove
+     * @param cxRoot The instance-specific root directory (e.g., ConnectX-Peer1)
+     */
+    public static void removeNode(String cxID, File cxRoot) {
         if (cxID == null) return;
 
         // Remove from all peer directories
@@ -212,7 +249,36 @@ public class PeerDirectory implements Serializable {
         if (peerCache != null) peerCache.remove(cxID);
         if (signedNodeCache != null) signedNodeCache.remove(cxID);
 
-        System.out.println("[PeerDirectory] Removed node: " + cxID);
+        // Remove from filesystem
+        try {
+            File peerDir;
+            if (cxRoot != null) {
+                // Instance-specific directory
+                peerDir = new File(cxRoot, "nodemesh");
+            } else {
+                // Fallback to static peers directory (legacy behavior)
+                peerDir = peers;
+            }
+
+            if (peerDir != null) {
+                char firstChar = cxID.charAt(0);
+                File peerGroup = new File(peerDir, String.valueOf(firstChar));
+                File peerFile = new File(peerGroup, cxID + ".cxi");
+
+                if (peerFile.exists()) {
+                    boolean deleted = peerFile.delete();
+                    if (deleted) {
+                        System.out.println("[PeerDirectory] Removed node from filesystem: " + cxID + " at " + peerFile.getAbsolutePath());
+                    } else {
+                        System.err.println("[PeerDirectory] Failed to delete file: " + peerFile.getAbsolutePath());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[PeerDirectory] Error removing node from filesystem: " + cxID + " - " + e.getMessage());
+        }
+
+        System.out.println("[PeerDirectory] Removed node from memory: " + cxID);
     }
 
     public static boolean stableConnection() {

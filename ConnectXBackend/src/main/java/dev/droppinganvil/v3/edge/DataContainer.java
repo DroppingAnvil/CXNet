@@ -199,6 +199,43 @@ public class DataContainer implements Serializable {
     }
 
     /**
+     * Deprioritize failed routes by moving them to the end of the address list
+     * Called when a successful route is found after some routes failed
+     * @param peerID Peer UUID
+     * @param successfulAddress The address that succeeded
+     * @param numFailedRoutes Number of routes that failed before this one
+     */
+    public void deprioritizeFailedRoute(String peerID, String successfulAddress, int numFailedRoutes) {
+        if (peerID == null || numFailedRoutes <= 0) return;
+
+        List<String> addresses = localPeerAddresses.get(peerID);
+        if (addresses == null || addresses.size() <= 1) return;
+
+        // Find the successful address index
+        int successIndex = addresses.indexOf(successfulAddress);
+        if (successIndex <= 0) return; // Already at top or not found
+
+        // Move all failed routes (addresses before the successful one) to the end
+        // This ensures next time we try the successful route first
+        synchronized (addresses) {
+            List<String> failedRoutes = new java.util.ArrayList<>();
+            for (int i = 0; i < successIndex; i++) {
+                failedRoutes.add(addresses.get(i));
+            }
+
+            // Remove failed routes from their current positions
+            addresses.removeAll(failedRoutes);
+
+            // Add failed routes to the end (lowest priority)
+            addresses.addAll(failedRoutes);
+
+            System.out.println("[Route Reprioritize] " + peerID.substring(0, 8) +
+                ": Moved " + failedRoutes.size() + " failed routes to end, " +
+                successfulAddress + " now prioritized");
+        }
+    }
+
+    /**
      * Get count of discovered local peers
      * @return Number of peers discovered via LAN/P2P
      */

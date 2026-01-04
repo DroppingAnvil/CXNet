@@ -28,6 +28,10 @@ public class NetworkContainer implements Serializable {
     public byte[] e;
 
     public CXPath p;
+    /**
+     * This allows different serialization providers, for now all serialization has to match network containers provided method, per transmission
+     * Begin transition to NetworkEvent.m
+     */
     public String se = "cxJSON1";
     /**
      * Higher security mode - Not implemented, do not use

@@ -105,14 +105,20 @@ public class OutConnectionController {
 
                 // Use getAllAddresses() for priority-ordered multi-source lookup (LAN-Direct prioritized)
                 java.util.List<String> addresses = PeerDirectory.getAllAddresses(out.ne.p.cxID, connectXAPI);
+                StringBuilder failedRoutes = new StringBuilder();
+                int routeAttempts = 0;
 
                 for (String address : addresses) {
+                    routeAttempts++;
                     try {
-                        if (address.contains(":") && !address.matches("^\\d+\\.\\d+\\.\\d+:.*")) {
+                        if (address.contains(":") && !address.matches("^\\d+\\.\\d+\\.\\d+\\.\\d+:.*")) {
                             // This is a bridge address like "cxHTTP1:https://..."
                             String[] parts = address.split(":", 2);
                             String bridgeProtocol = parts[0];
                             String bridgeEndpoint = parts[1];
+
+                            System.out.println("[ROUTE-TRY " + routeAttempts + "/" + addresses.size() + "] " +
+                                out.ne.p.cxID.substring(0, 8) + " via Bridge: " + bridgeProtocol);
 
                             dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =
                                 connectXAPI.getBridgeProvider(bridgeProtocol);
@@ -122,23 +128,47 @@ public class OutConnectionController {
                                 bridge.transmitEvent(bridgePath, cryptNetworkContainer);
                                 sentViaAnyRoute = true;
                                 routesUsed.append(bridgeProtocol).append("+");
+                                System.out.println("[ROUTE-SUCCESS] " + out.ne.p.cxID.substring(0, 8) +
+                                    " via " + bridgeProtocol);
                                 break; // Success - stop trying
+                            } else {
+                                failedRoutes.append(bridgeProtocol).append("(no-provider),");
                             }
                         } else {
                             // Direct/LAN address (IP:port)
+                            System.out.println("[ROUTE-TRY " + routeAttempts + "/" + addresses.size() + "] " +
+                                out.ne.p.cxID.substring(0, 8) + " via LAN-Direct: " + address);
+
                             String[] addr = address.split(":");
                             Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
                             s.getOutputStream().write(cryptNetworkContainer);
                             s.close();
                             sentViaAnyRoute = true;
                             routesUsed.append("LAN-Direct+");
-                            System.out.println("[OutController] LAN-Direct SUCCESS to " + address);
+                            System.out.println("[ROUTE-SUCCESS] " + out.ne.p.cxID.substring(0, 8) +
+                                " via LAN-Direct: " + address);
+
+                            // Deprioritize any failed routes that came before this successful one
+                            if (routeAttempts > 1 && connectXAPI.dataContainer != null) {
+                                connectXAPI.dataContainer.deprioritizeFailedRoute(out.ne.p.cxID, address, routeAttempts - 1);
+                            }
+
                             break; // Success - stop trying
                         }
                     } catch (Exception e) {
-                        // This address failed, try next one
+                        // This route failed - log and try next one
+                        String routeDesc = address.contains("://") ? address.split(":")[0] : address;
+                        failedRoutes.append(routeDesc).append("(").append(e.getMessage()).append("),");
+                        System.out.println("[ROUTE-FAIL] " + out.ne.p.cxID.substring(0, 8) +
+                            " via " + routeDesc + ": " + e.getMessage());
                         continue;
                     }
+                }
+
+                // Log all failed routes if transmission failed completely
+                if (!sentViaAnyRoute && failedRoutes.length() > 0) {
+                    System.out.println("[ROUTE-ALL-FAILED] " + out.ne.p.cxID.substring(0, 8) +
+                        " - Tried " + routeAttempts + " routes: " + failedRoutes);
                 }
 
                 // Fallback: Try CXPath bridge from event path if getAllAddresses didn't work
@@ -209,7 +239,9 @@ public class OutConnectionController {
                             StringBuilder routes = new StringBuilder();
                             boolean sentToThisPeer = false;
 
+                            int routeAttempts = 0;
                             for (String address : addresses) {
+                                routeAttempts++;
                                 try {
                                     // Check if this is a bridge address (contains protocol prefix)
                                     if (address.contains(":") && !address.matches("^\\d+\\.\\d+\\.\\d+\\.\\d+:.*")) {
@@ -236,6 +268,12 @@ public class OutConnectionController {
                                         s.close();
                                         routes.append("LAN-Direct");
                                         sentToThisPeer = true;
+
+                                        // Deprioritize any failed routes that came before this successful one
+                                        if (routeAttempts > 1 && connectXAPI.dataContainer != null) {
+                                            connectXAPI.dataContainer.deprioritizeFailedRoute(n.cxID, address, routeAttempts - 1);
+                                        }
+
                                         break;  // Successfully sent, no need to try other routes
                                     }
                                 } catch (Exception e) {

@@ -163,7 +163,7 @@ public class MultiPeerTest {
                             System.out.println("  Total P2P peers discovered: " + totalDiscovered);
 
                             allReady[0] = true;
-                            SEND_MESSAGES = true;  // Enable message test
+                            //SEND_MESSAGES = true;  // Enable message test
                         } else if (checkCount % 15 == 0) {
                             // Log progress every 15 seconds
                             System.out.println("  [" + checkCount + "s] " + readyCount + "/" + peers.size() + " peers READY...");

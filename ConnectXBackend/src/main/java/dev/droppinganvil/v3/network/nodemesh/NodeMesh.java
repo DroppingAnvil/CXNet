@@ -28,7 +28,7 @@ public class NodeMesh {
     // Instance fields (per-peer)
     public ServerSocket serverSocket;
     public ConcurrentHashMap<String, ArrayList<String>> transmissionIDMap = new ConcurrentHashMap<>();
-    public PeerDirectory peers;
+    public PeerDirectory peerDirectory = null;
     public InConnectionManager in;
     public Connections connections = new Connections();
     public ConnectX connectX;
@@ -49,6 +49,7 @@ public class NodeMesh {
     //If it is not a global resource it must be encrypted using only the end recipients key then re encrypted for transport
     public NodeMesh(ConnectX connectX) {
         this.connectX = connectX;
+        this.peerDirectory = new PeerDirectory(connectX);
     }
 
     /**
@@ -161,7 +162,7 @@ public class NodeMesh {
             }
 
             // Step 3: Check if we have the transmitter's public key
-            boolean hasPublicKey = connectX.encryptionProvider.cacheCert(unverifiedContainer.iD, false, false);
+            boolean hasPublicKey = connectX.encryptionProvider.cacheCert(unverifiedContainer.iD, false, false, connectX);
 
             if (!hasPublicKey) {
                 // Unknown sender - ONLY CXHELLO and NewNode are allowed from unknown senders
@@ -321,7 +322,7 @@ public class NodeMesh {
                                 ByteArrayOutputStream strippedPayloadStream = new ByteArrayOutputStream();
 
                                 // Check if we have the sender's key cached (known sender vs unknown sender)
-                                boolean isKnownSender = connectX.encryptionProvider.cacheCert(originSender, false, false);
+                                boolean isKnownSender = connectX.encryptionProvider.cacheCert(originSender, false, false, connectX);
 
                                 if (isKnownSender) {
                                     // Known sender: verify and strip signature
@@ -364,10 +365,10 @@ public class NodeMesh {
 
                             // Import the node with signed blob for CXHELLO persistence
                             if (signedNodeBlobForPersistence != null) {
-                                PeerDirectory.addNode(newNode, signedNodeBlobForPersistence, connectX.cxRoot);
+                                peerDirectory.addNode(newNode, signedNodeBlobForPersistence, connectX.cxRoot);
                                 System.out.println("[NodeMesh] Imported and PERSISTED CXHELLO node: " + newNode.cxID.substring(0, 8));
                             } else {
-                                PeerDirectory.addNode(newNode);
+                                peerDirectory.addNode(newNode);
                                 System.out.println("[NodeMesh] Imported NewNode: " + newNode.cxID.substring(0, 8));
                             }
                             importedNode = newNode;
@@ -380,7 +381,7 @@ public class NodeMesh {
                             if (o1 == null) {
                                 System.err.println("[NodeMesh] NewNode/CXHELLO container signature verification FAILED for " + nc.iD);
                                 // Rollback: Remove the imported node (memory AND filesystem)
-                                PeerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
+                                peerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
                                 throw new DecryptionFailureException();
                             }
                             System.out.println("[NodeMesh] Container signature VERIFIED for " + newNode.cxID);
@@ -399,7 +400,7 @@ public class NodeMesh {
                                 if (!blobVerified) {
                                     System.err.println("[NodeMesh] CXHELLO signedNode verification FAILED for " + nc.iD);
                                     // Rollback: Remove the imported node (memory AND filesystem)
-                                    PeerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
+                                    peerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
                                     throw new DecryptionFailureException();
                                 }
                                 System.out.println("[NodeMesh] CXHELLO signedNode signature VERIFIED for " + newNode.cxID);
@@ -412,7 +413,7 @@ public class NodeMesh {
                             System.err.println("[NodeMesh] Failed to process NewNode: " + e.getMessage());
                             if (importedNode != null) {
                                 // Rollback: Remove the imported node (memory AND filesystem)
-                                PeerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
+                                peerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
                             }
                             throw new DecryptionFailureException();
                         }
@@ -759,15 +760,15 @@ public class NodeMesh {
                             }
 
                             // Check if we already have this node
-                            Node node1 = PeerDirectory.lookup(node.cxID, true, true, connectX.cxRoot, connectX);
+                            Node node1 = peerDirectory.lookup(node.cxID, true, true, connectX.cxRoot, connectX);
                             if (node1 != null) {
-                                connectX.encryptionProvider.cacheCert(node1.cxID, true, false);
+                                connectX.encryptionProvider.cacheCert(node1.cxID, true, false, connectX);
                                 System.out.println("[NodeMesh] NewNode already exists: " + node.cxID.substring(0, 8));
                                 return;
                             }
 
                             // Add node WITH signed blob (preserves original signature for relay)
-                            PeerDirectory.addNode(node, signedNodeBlob, connectX.cxRoot);
+                            peerDirectory.addNode(node, signedNodeBlob, connectX.cxRoot);
                             System.out.println("[NodeMesh] Imported NewNode: " + node.cxID.substring(0, 8));
                             System.out.println("[NodeMesh] NewNode signature VERIFIED and SAVED for relay");
                             break;
@@ -803,17 +804,17 @@ public class NodeMesh {
                                     verifiedOutput.close();
 
                                     // Add node WITH signed blob for .cxi persistence
-                                    Node existingCxhelloNode = PeerDirectory.lookup(cxhelloNode.cxID, true, true, connectX.cxRoot, connectX);
+                                    Node existingCxhelloNode = peerDirectory.lookup(cxhelloNode.cxID, true, true, connectX.cxRoot, connectX);
                                     if (existingCxhelloNode == null) {
-                                        PeerDirectory.addNode(cxhelloNode, cxhelloSignedBlob, connectX.cxRoot);
+                                        peerDirectory.addNode(cxhelloNode, cxhelloSignedBlob, connectX.cxRoot);
                                         System.out.println("[CXHELLO] Imported and PERSISTED new node: " + cxhelloNode.cxID.substring(0, 8));
                                     } else {
-                                        connectX.encryptionProvider.cacheCert(existingCxhelloNode.cxID, true, false);
+                                        connectX.encryptionProvider.cacheCert(existingCxhelloNode.cxID, true, false, connectX);
                                         System.out.println("[CXHELLO] Updated existing node: " + existingCxhelloNode.cxID.substring(0, 8));
                                     }
 
                                     // Now lookup the node for response routing
-                                    Node requesterNode = PeerDirectory.lookup(ib.nc.iD, true, true);
+                                    Node requesterNode = peerDirectory.lookup(ib.nc.iD, true, true);
                                     if (requesterNode != null) {
                                         System.out.println("[CXHELLO] Peer discovered from " + ib.nc.iD.substring(0, 8));
 
@@ -893,13 +894,13 @@ public class NodeMesh {
                                     respVerifiedOutput.close();
 
                                     // Local address already recorded in processNetworkInput
-                                    Node existingNode = PeerDirectory.lookup(responseNode.cxID, true, true, connectX.cxRoot, connectX);
+                                    Node existingNode = peerDirectory.lookup(responseNode.cxID, true, true, connectX.cxRoot, connectX);
                                     if (existingNode != null) {
-                                        connectX.encryptionProvider.cacheCert(existingNode.cxID, true, false);
+                                        connectX.encryptionProvider.cacheCert(existingNode.cxID, true, false, connectX);
                                         System.out.println("[CXHELLO_RESPONSE] Updated existing node: " + existingNode.cxID.substring(0, 8));
                                         return;
                                     }
-                                    PeerDirectory.addNode(responseNode, respSignedBlob, connectX.cxRoot);
+                                    peerDirectory.addNode(responseNode, respSignedBlob, connectX.cxRoot);
                                     System.out.println("[CXHELLO_RESPONSE] Imported and PERSISTED new node: " + responseNode.cxID.substring(0, 8));
                                 } else {
                                     System.err.println("[CXHELLO_RESPONSE] Node signature verification FAILED for " + ib.nc.iD.substring(0, 8));
@@ -1094,7 +1095,7 @@ public class NodeMesh {
                                     response.signedNodes = new java.util.ArrayList<>();
 
                                     // Collect peers from PeerDirectory
-                                    java.util.List<String> peerIDs = new java.util.ArrayList<>(PeerDirectory.hv.keySet());
+                                    java.util.List<String> peerIDs = new java.util.ArrayList<>(peerDirectory.hv.keySet());
                                     java.util.Collections.shuffle(peerIDs); // Randomize
 
                                     int count = 0;
@@ -1103,7 +1104,7 @@ public class NodeMesh {
                                         if (peerID.equals(nc.iD) || peerID.equals(connectX.getOwnID())) continue; // Skip requester and self
 
                                         // Get signed node blob (original signature preserved)
-                                        byte[] signedNode = PeerDirectory.getSignedNode(peerID);
+                                        byte[] signedNode = peerDirectory.getSignedNode(peerID);
                                         if (signedNode != null) {
                                             response.signedNodes.add(signedNode);
                                             count++;
@@ -1130,7 +1131,7 @@ public class NodeMesh {
                                     //    responseEvent.p.bridgeArg = ne.p.bridgeArg;
                                    // }
 
-                                   // Node requesterNode = PeerDirectory.lookup(nc.iD, true, true);
+                                   // Node requesterNode = peerDirectory.lookup(nc.iD, true, true);
                                    // NetworkContainer responseContainer = new NetworkContainer();
                                    // responseContainer.se = "cxJSON1";
                                    // responseContainer.s = false;
@@ -1183,7 +1184,7 @@ public class NodeMesh {
 
                                             if (discoveredPeer != null && discoveredPeer.cxID != null) {
                                                 // Add with signed blob for persistence and relaying
-                                                PeerDirectory.addNode(discoveredPeer, signedNodeBytes, connectX.cxRoot);
+                                                peerDirectory.addNode(discoveredPeer, signedNodeBytes, connectX.cxRoot);
 
                                                 // Now verify the signature using the imported public key
                                                 java.io.ByteArrayInputStream verifyInput = new java.io.ByteArrayInputStream(signedNodeBytes);
@@ -1195,7 +1196,7 @@ public class NodeMesh {
 
                                                 if (!verified) {
                                                     // Signature verification FAILED - rollback
-                                                    PeerDirectory.removeNode(discoveredPeer.cxID, connectX.cxRoot);
+                                                    peerDirectory.removeNode(discoveredPeer.cxID, connectX.cxRoot);
                                                     System.err.println("[PeerFinding] Signature verification FAILED for " +
                                                         discoveredPeer.cxID.substring(0, 8) + " - rolled back");
                                                     continue;
@@ -1246,7 +1247,7 @@ public class NodeMesh {
                             CXNetwork network = connectX.getNetwork(requestedNetwork);
                             if (network != null) {
                                 // Create dynamic seed from current peer state
-                                dev.droppinganvil.v3.network.Seed dynamicSeed = dev.droppinganvil.v3.network.Seed.fromCurrentPeers();
+                                dev.droppinganvil.v3.network.Seed dynamicSeed = dev.droppinganvil.v3.network.Seed.fromCurrentPeers(peerDirectory);
                                 dynamicSeed.seedID = java.util.UUID.randomUUID().toString();
                                 dynamicSeed.timestamp = System.currentTimeMillis();
                                 dynamicSeed.networkID = requestedNetwork;
@@ -1943,9 +1944,9 @@ public class NodeMesh {
 
                             // Collect all known peers from PeerDirectory
                             java.util.List<Node> allPeers = new java.util.ArrayList<>();
-                            if (PeerDirectory.hv != null) allPeers.addAll(PeerDirectory.hv.values());
-                            if (PeerDirectory.seen != null) allPeers.addAll(PeerDirectory.seen.values());
-                            if (PeerDirectory.peerCache != null) allPeers.addAll(PeerDirectory.peerCache.values());
+                            if (peerDirectory.hv != null) allPeers.addAll(peerDirectory.hv.values());
+                            if (peerDirectory.seen != null) allPeers.addAll(peerDirectory.seen.values());
+                            if (peerDirectory.peerCache != null) allPeers.addAll(peerDirectory.peerCache.values());
 
                             // Get peer count (30% of known peers or max 10)
                             int knownPeerCount = allPeers.size();
@@ -2031,7 +2032,7 @@ public class NodeMesh {
             if (!ne.p.cxID.equals(connectX.getOwnID())) {
                 // Not for us - relay to target node if we know them
                 try {
-                    Node targetNode = PeerDirectory.lookup(ne.p.cxID, true, true);
+                    Node targetNode = peerDirectory.lookup(ne.p.cxID, true, true);
                     if (targetNode != null) {
                         // Create OutputBundle for relay - preserve original sender's signature
                         NetworkContainer relayContainer = new NetworkContainer();
@@ -2079,7 +2080,7 @@ public class NodeMesh {
             }
 
             // Distribute to all peers for eventual delivery
-            for (Node peer : PeerDirectory.hv.values()) {
+            for (Node peer : peerDirectory.hv.values()) {
                 if (!peer.cxID.equals(connectX.getOwnID()) && !peer.cxID.equals(transmitterID)) {
                     try {
                         NetworkContainer relayContainer = new NetworkContainer();
@@ -2100,9 +2101,9 @@ public class NodeMesh {
 
         // Step 4c: Handle peerBroad mode - global cross-network transmission
         if (tP.peerBroad) {
-            //System.out.println("[RELAY DEBUG] peerBroad=true, broadcasting to " + PeerDirectory.hv.size() + " peers");
+            //System.out.println("[RELAY DEBUG] peerBroad=true, broadcasting to " + peerDirectory.hv.size() + " peers");
             // Broadcast to all peers across all networks
-            for (Node peer : PeerDirectory.hv.values()) {
+            for (Node peer : peerDirectory.hv.values()) {
                 if (!peer.cxID.equals(connectX.getOwnID()) && !peer.cxID.equals(transmitterID)) {
                     try {
                         NetworkContainer relayContainer = new NetworkContainer();
@@ -2140,7 +2141,7 @@ public class NodeMesh {
                 for (String backendID : cxn.configuration.backendSet) {
                     if (!backendID.equals(connectX.getOwnID()) && !backendID.equals(transmitterID)) {
                         try {
-                            Node backendNode = PeerDirectory.lookup(backendID, true, true);
+                            Node backendNode = peerDirectory.lookup(backendID, true, true);
                             if (backendNode != null) {
                                 NetworkContainer relayContainer = new NetworkContainer();
                                 relayContainer.se = "cxJSON1";
@@ -2160,7 +2161,7 @@ public class NodeMesh {
 
                 // Then send to all other peers (not already sent to)
                 // Try hv peers first (high-value/stored), then seen (real-time active connections)
-                for (Node peer : PeerDirectory.hv.values()) {
+                for (Node peer : peerDirectory.hv.values()) {
                     if (!peer.cxID.equals(connectX.getOwnID()) &&
                         !peer.cxID.equals(transmitterID) &&
                         !sentTo.contains(peer.cxID)) {
@@ -2181,7 +2182,7 @@ public class NodeMesh {
                 }
 
                 // Also try seen peers (may have additional real-time connections not in hv)
-                for (Node peer : PeerDirectory.seen.values()) {
+                for (Node peer : peerDirectory.seen.values()) {
                     if (!peer.cxID.equals(connectX.getOwnID()) &&
                         !peer.cxID.equals(transmitterID) &&
                         !sentTo.contains(peer.cxID)) {
@@ -2202,7 +2203,7 @@ public class NodeMesh {
                 }
 
                 // CRITICAL: Also check DataContainer for locally discovered peers
-                // These peers may not be in PeerDirectory.hv/seen yet, but are locally reachable via LAN
+                // These peers may not be in peerDirectory.hv/seen yet, but are locally reachable via LAN
                 if (connectX.dataContainer != null && connectX.dataContainer.localPeerAddresses != null) {
                     for (String peerID : connectX.dataContainer.localPeerAddresses.keySet()) {
                         if (!peerID.equals(connectX.getOwnID()) &&
@@ -2340,7 +2341,7 @@ public class NodeMesh {
             System.out.println("  c2: " + localC2);
             System.out.println("  c3: " + localC3);
 
-            Node remotePeer = PeerDirectory.lookup(peerID, true, true);
+            Node remotePeer = peerDirectory.lookup(peerID, true, true);
             if (remotePeer == null) {
                 System.err.println("[CHAIN_SYNC] Cannot sync - peer not found: " + peerID);
                 return;
@@ -2408,7 +2409,7 @@ public class NodeMesh {
      * Apply a seed after consensus decision
      * Saves EPOCH seeds to disk, adds peers, caches certificates, registers networks
      */
-    private static void applySeedConsensus(ConnectX connectX, dev.droppinganvil.v3.network.Seed seed,
+    private void applySeedConsensus(ConnectX connectX, dev.droppinganvil.v3.network.Seed seed,
                                           boolean isEpochSeed, String consensusReason, String targetNetwork) {
         try {
             System.out.println("[SEED CONSENSUS] Applying seed: " + seed.seedID);
@@ -2433,7 +2434,7 @@ public class NodeMesh {
             int peersAdded = 0;
             for (dev.droppinganvil.v3.network.nodemesh.Node peer : seed.hvPeers) {
                 try {
-                    PeerDirectory.addNode(peer);
+                    peerDirectory.addNode(peer);
                     peersAdded++;
                 } catch (Exception e) {
                     // Ignore duplicate peer errors
@@ -2449,7 +2450,7 @@ public class NodeMesh {
             int certsAdded = 0;
             for (java.util.Map.Entry<String, String> cert : seed.certificates.entrySet()) {
                 try {
-                    connectX.encryptionProvider.cacheCert(cert.getKey(), false, false);
+                    connectX.encryptionProvider.cacheCert(cert.getKey(), false, false, connectX);
                     certsAdded++;
                 } catch (Exception e) {
                     // Ignore cert errors
@@ -2479,7 +2480,7 @@ public class NodeMesh {
             for (ConnectX.SeedResponseData r : responses.values()) {
                 if (r.authoritative && r.dynamicSeed != null) {
                     System.out.println("[SEED CONSENSUS] ✓ EPOCH dynamic seed found - TRUSTING");
-                    applySeedConsensus(connectX, r.dynamicSeed, false,
+                    connectX.nodeMesh.applySeedConsensus(connectX, r.dynamicSeed, false,
                         "EPOCH dynamic seed (authoritative)", targetNetwork);
                     return;
                 }
@@ -2527,7 +2528,7 @@ public class NodeMesh {
                                          ",c2:" + r.chainHeights.get("c2") +
                                          ",c3:" + r.chainHeights.get("c3");
                         if (heightSig.equals(majorityHeights) && r.dynamicSeed != null) {
-                            applySeedConsensus(connectX, r.dynamicSeed, false,
+                            connectX.nodeMesh.applySeedConsensus(connectX, r.dynamicSeed, false,
                                 "Peer consensus (" + String.format("%.0f%%", consensusPercent * 100) +
                                 " agreement) from " + r.senderID.substring(0, 8), targetNetwork);
                             return;
@@ -2557,7 +2558,7 @@ public class NodeMesh {
                         System.out.println("[SEED CONSENSUS] Using fallback: Signed EPOCH seed from disk");
                         dev.droppinganvil.v3.network.Seed epochSeed =
                             dev.droppinganvil.v3.network.Seed.load(latestSeed);
-                        applySeedConsensus(connectX, epochSeed, true,
+                        connectX.nodeMesh.applySeedConsensus(connectX, epochSeed, true,
                             "EPOCH signed seed (disk fallback - peer conflict)", targetNetwork);
                         return;
                     }

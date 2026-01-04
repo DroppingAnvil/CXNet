@@ -16,28 +16,33 @@ import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class PeerDirectory implements Serializable {
-    public static ConcurrentHashMap<String,Node> peerCache = new ConcurrentHashMap<>();
+    public ConcurrentHashMap<String,Node> peerCache = new ConcurrentHashMap<>();
     /**
      * For tracking nodes we have connected to directly over the internet, in the future this might be changed to a set of cxIDs
      */
-    public static ConcurrentHashMap<String,Node> seen = new ConcurrentHashMap<>();
+    public ConcurrentHashMap<String,Node> seen = new ConcurrentHashMap<>();
     /**
      * More resource friendly way to store seen peers, by reference
      * //TODO Optimize older uses of seen map
      */
-    public static ArrayList<String> seenCXIDs = new ArrayList<>();
-    public static ConcurrentHashMap<String, Node> lan = new ConcurrentHashMap<>();
-    public static ConcurrentHashMap<String,Node> hv = new ConcurrentHashMap<>();
-    public static File peers;
+    public ArrayList<String> seenCXIDs = new ArrayList<>();
+    public ConcurrentHashMap<String, Node> lan = new ConcurrentHashMap<>();
+    public ConcurrentHashMap<String,Node> hv = new ConcurrentHashMap<>();
+    public File peers;
+    public ConnectX connectX = null;
 
-
+    public PeerDirectory(ConnectX cx) {
+        if (connectX == null) {
+            connectX = cx;
+        }
+    }
     //TODO
     //Writing node lookup and create account implementation, next up create peer finding event
-    public static Node lookup(String cxID, boolean tryImport, boolean sync) throws UnsafeKeywordException {
+    public Node lookup(String cxID, boolean tryImport, boolean sync) throws UnsafeKeywordException {
         return lookup(cxID, tryImport, sync, null, null);
     }
 
-    public static Node lookup(String cxID, boolean tryImport, boolean sync, File cxRoot, ConnectX cx) throws UnsafeKeywordException {
+    public Node lookup(String cxID, boolean tryImport, boolean sync, File cxRoot, ConnectX cx) throws UnsafeKeywordException {
         ConnectX.checkSafety(cxID);
         try {
             if (hv.containsKey(cxID)) return hv.get(cxID);
@@ -86,7 +91,7 @@ public class PeerDirectory implements Serializable {
         return null;
     }
 
-    public static void addNode(Node n) {
+    public void addNode(Node n) {
         if (Node.validate(n)) {
             // Lazy initialization - ensure maps are initialized before use
             if (seen == null) seen = new ConcurrentHashMap<>();
@@ -134,13 +139,13 @@ public class PeerDirectory implements Serializable {
     }
 
     // Cache of signed node blobs for relaying without re-signing
-    public static ConcurrentHashMap<String, byte[]> signedNodeCache = new ConcurrentHashMap<>();
+    public ConcurrentHashMap<String, byte[]> signedNodeCache = new ConcurrentHashMap<>();
 
     /**
-     * Add node with signed blob for persistence (uses static peers directory - legacy)
+     * Add node with signed blob for persistence (uses peers directory - legacy)
      * @deprecated Use addNode(Node n, byte[] signed, File cxRoot) for instance-specific persistence
      */
-    public static void addNode(Node n, byte[] signed) {
+    public void addNode(Node n, byte[] signed) {
         addNode(n, signed, null);
     }
 
@@ -150,7 +155,7 @@ public class PeerDirectory implements Serializable {
      * @param signed The signed node blob for persistence
      * @param cxRoot The instance-specific root directory (e.g., ConnectX-Peer1)
      */
-    public static void addNode(Node n, byte[] signed, File cxRoot) {
+    public void addNode(Node n, byte[] signed, File cxRoot) {
         if (Node.validate(n)) {
             // Add to in-memory directories (same as regular addNode)
             addNode(n);
@@ -201,7 +206,7 @@ public class PeerDirectory implements Serializable {
      * @param cxID The node ID to get signed blob for
      * @return Signed node bytes, or null if not available
      */
-    public static byte[] getSignedNode(String cxID) {
+    public byte[] getSignedNode(String cxID) {
         // Check memory cache first
         if (signedNodeCache != null && signedNodeCache.containsKey(cxID)) {
             return signedNodeCache.get(cxID);
@@ -238,7 +243,7 @@ public class PeerDirectory implements Serializable {
      * @deprecated Use removeNode(String cxID, File cxRoot) to also remove from filesystem
      * @param cxID The node ID to remove
      */
-    public static void removeNode(String cxID) {
+    public void removeNode(String cxID) {
         removeNode(cxID, null);
     }
 
@@ -248,7 +253,7 @@ public class PeerDirectory implements Serializable {
      * @param cxID The node ID to remove
      * @param cxRoot The instance-specific root directory (e.g., ConnectX-Peer1)
      */
-    public static void removeNode(String cxID, File cxRoot) {
+    public void removeNode(String cxID, File cxRoot) {
         if (cxID == null) return;
 
         // Remove from all peer directories
@@ -290,7 +295,7 @@ public class PeerDirectory implements Serializable {
         System.out.println("[PeerDirectory] Removed node from memory: " + cxID);
     }
 
-    public static boolean stableConnection() {
+    public boolean stableConnection() {
         return true;
     }
 
@@ -306,7 +311,7 @@ public class PeerDirectory implements Serializable {
      * @param connectX ConnectX instance (for DataContainer access)
      * @return List of all known addresses for this peer, empty list if none found
      */
-    public static java.util.List<String> getAllAddresses(String cxID, ConnectX connectX) {
+    public java.util.List<String> getAllAddresses(String cxID, ConnectX connectX) {
         java.util.List<String> addresses = new java.util.ArrayList<>();
         java.util.Set<String> seen = new java.util.HashSet<>(); // Track duplicates
 
@@ -329,7 +334,7 @@ public class PeerDirectory implements Serializable {
         Node[] nodesToCheck = new Node[] {
             lan.get(cxID),      // LAN discovered nodes
             hv.get(cxID),       // High-value peers (seeds, registered)
-            PeerDirectory.seen.get(cxID), // Recently seen peers
+            this.seen.get(cxID),     // Recently seen peers
             peerCache.get(cxID) // Cached peer info
         };
 

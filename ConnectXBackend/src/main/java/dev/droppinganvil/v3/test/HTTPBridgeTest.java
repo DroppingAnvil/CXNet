@@ -32,6 +32,7 @@ public class HTTPBridgeTest {
     public static final String SERVER_ID = "00000000-0000-0000-0000-000000000001";
     public static final String NETWORK_NAME = "CXNET";
     public static final String CXNET_DIR = "C:\\Users\\Alexw\\Documents\\AD\\CXNET";
+    public static final Boolean addEpoch = false;
 
     public static void main(String[] args) throws Exception {
         System.out.println("=== EPOCH NMI Terminal - CXNET Network ===\n");
@@ -81,12 +82,14 @@ public class HTTPBridgeTest {
         server.setSelf(serverNode);
         System.out.println("  ✓ EPOCH identity: " + SERVER_ID);
 
-        // Initialize and add EPOCH to peer directory for signature verification
-        if (dev.droppinganvil.v3.network.nodemesh.PeerDirectory.hv == null) {
-            dev.droppinganvil.v3.network.nodemesh.PeerDirectory.hv = new java.util.concurrent.ConcurrentHashMap<>();
+       // Initialize and add EPOCH to peer directory for signature verification
+        if (addEpoch) {
+            if (server.nodeMesh.peerDirectory.hv == null) {
+                server.nodeMesh.peerDirectory.hv = new java.util.concurrent.ConcurrentHashMap<>();
+            }
+            server.nodeMesh.peerDirectory.hv.put(SERVER_ID, serverNode);
+            System.out.println("  ✓ EPOCH added to peer directory");
         }
-        dev.droppinganvil.v3.network.nodemesh.PeerDirectory.hv.put(SERVER_ID, serverNode);
-        System.out.println("  ✓ EPOCH added to peer directory");
 
         // Get auto-registered cxHTTP1 bridge provider (per-instance)
         System.out.println("\nStep 2: Getting cxHTTP1 bridge provider...");

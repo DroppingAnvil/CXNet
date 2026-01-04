@@ -197,14 +197,18 @@ public class MultiPeerTest {
             // - Each CXHELLO transmission sleeps 500ms before closing socket
             // - With 4 peers discovering each other, cumulative delay can exceed 60s
             System.out.println("\nStep 2c.5: Waiting for CXHELLO exchanges to complete...");
-            System.out.println("  Initial HV peers: " + PeerDirectory.hv.size());
+            System.out.println("  Initial HV peers per peer:");
+            for (int i = 0; i < peers.size(); i++) {
+                int hvSize = peers.get(i).nodeMesh.peerDirectory.hv.size();
+                System.out.println("    Peer " + (i+1) + ": " + hvSize + " HV peers");
+            }
             System.out.println("  Expected HV peers: " + (peers.size() - 1) + " (excluding EPOCH, each peer sees others)");
 
             final int cxhelloWaitSeconds = 180; // Increased to 3 minutes to account for CXHELLO delays
             final int expectedPeers = peers.size() - 1; // Each peer should see all others (excluding EPOCH for now)
             Thread cxhelloWait = new Thread(() -> {
                 int elapsed = 0;
-                int lastHvSize = PeerDirectory.hv.size();
+                int lastHvSize = peers.get(0).nodeMesh.peerDirectory.hv.size();
                 int stableCount = 0; // Track how long size has been stable
 
                 while (elapsed < cxhelloWaitSeconds) {
@@ -212,7 +216,7 @@ public class MultiPeerTest {
                         Thread.sleep(5000); // Check every 5 seconds
                         elapsed += 5;
 
-                        int currentHvSize = PeerDirectory.hv.size();
+                        int currentHvSize = peers.get(0).nodeMesh.peerDirectory.hv.size();
                         if (currentHvSize > lastHvSize) {
                             System.out.println("  [" + elapsed + "s] HV peers: " + lastHvSize + " → " + currentHvSize);
                             lastHvSize = currentHvSize;
@@ -243,7 +247,11 @@ public class MultiPeerTest {
                 }
 
                 if (elapsed >= cxhelloWaitSeconds) {
-                    System.out.println("  ⚠ CXHELLO wait timeout after " + cxhelloWaitSeconds + "s (HV peers: " + PeerDirectory.hv.size() + ")");
+                    System.out.print("  ⚠ CXHELLO wait timeout after " + cxhelloWaitSeconds + "s (HV peers per peer:");
+                    for (int i = 0; i < peers.size(); i++) {
+                        System.out.print(" P" + (i+1) + "=" + peers.get(i).nodeMesh.peerDirectory.hv.size());
+                    }
+                    System.out.println(")");
                 }
             });
 
@@ -259,7 +267,11 @@ public class MultiPeerTest {
 
             // Step 2d: P2P Message Test using CXNET (CXN scope broadcast)
             System.out.println("\nStep 2d: Testing P2P message delivery via CXN broadcast...");
-            System.out.println("  HV Peers discovered: " + PeerDirectory.hv.size());
+            System.out.print("  HV Peers discovered per peer:");
+            for (int i = 0; i < peers.size(); i++) {
+                System.out.print(" P" + (i+1) + "=" + peers.get(i).nodeMesh.peerDirectory.hv.size());
+            }
+            System.out.println();
 
             // Check if peers have CXNET loaded (should be from bootstrap seed)
             int cxnetCount = 0;
@@ -372,9 +384,9 @@ public class MultiPeerTest {
                 }
 
                 // Check PeerDirectory
-                int hvPeerCount = dev.droppinganvil.v3.network.nodemesh.PeerDirectory.hv.size();
-                int lanPeerCount = dev.droppinganvil.v3.network.nodemesh.PeerDirectory.lan.size();
-                int cacheCount = dev.droppinganvil.v3.network.nodemesh.PeerDirectory.peerCache.size();
+                int hvPeerCount = peer.nodeMesh.peerDirectory.hv.size();
+                int lanPeerCount = peer.nodeMesh.peerDirectory.lan.size();
+                int cacheCount = peer.nodeMesh.peerDirectory.peerCache.size();
                 System.out.println("  PeerDirectory:");
                 System.out.println("    HV Peers: " + hvPeerCount);
                 System.out.println("    LAN Peers: " + lanPeerCount);
@@ -384,12 +396,12 @@ public class MultiPeerTest {
                 if (hvPeerCount > 0) {
                     System.out.println("    HV Peers list:");
                     int count = 0;
-                    for (String peerID : dev.droppinganvil.v3.network.nodemesh.PeerDirectory.hv.keySet()) {
+                    for (String peerID : peer.nodeMesh.peerDirectory.hv.keySet()) {
                         if (count++ >= 3) {
                             System.out.println("      ... and " + (hvPeerCount - 3) + " more");
                             break;
                         }
-                        dev.droppinganvil.v3.network.nodemesh.Node node = dev.droppinganvil.v3.network.nodemesh.PeerDirectory.hv.get(peerID);
+                        dev.droppinganvil.v3.network.nodemesh.Node node = peer.nodeMesh.peerDirectory.hv.get(peerID);
                         System.out.println("      " + peerID.substring(0, 8) + " @ " + node.addr);
                     }
                 }
@@ -452,9 +464,10 @@ public class MultiPeerTest {
                 // Aggregate queue sizes from all peers
                 int totalOutput = peers.stream().mapToInt(p -> p.outputQueue.size()).sum();
                 int totalEvent = peers.stream().mapToInt(p -> p.eventQueue.size()).sum();
+                int totalHvPeers = peers.stream().mapToInt(p -> p.nodeMesh.peerDirectory.hv.size()).sum();
                 System.out.println("Queues - Output: " + totalOutput +
                                  ", Event: " + totalEvent +
-                                 ", HV Peers: " + PeerDirectory.hv.size());
+                                 ", Total HV Peers: " + totalHvPeers);
             }
 
         } catch (Exception e) {
@@ -595,11 +608,11 @@ public class MultiPeerTest {
         System.out.println("TEST 5: Peer Discovery (PEER_LIST_REQUEST)");
         System.out.println("------------------------------------------------------------------");
 
-        int hvCount = PeerDirectory.hv != null ? PeerDirectory.hv.size() : 0;
+        int hvCount = (peers.get(0).nodeMesh.peerDirectory.hv != null) ? peers.get(0).nodeMesh.peerDirectory.hv.size() : 0;
         int maxPeers = Math.min(10, (int) Math.ceil(hvCount * 0.3));
 
         System.out.println("Peer discovery statistics:");
-        System.out.println("  - Total HV peers: " + hvCount);
+        System.out.println("  - Total HV peers (Peer 1): " + hvCount);
         System.out.println("  - 30% of peers: " + (int) Math.ceil(hvCount * 0.3));
         System.out.println("  - Max returned: " + maxPeers);
         System.out.println("  - Rate limit: 3 requests/IP/hour");
@@ -690,21 +703,21 @@ public class MultiPeerTest {
         Thread.sleep(2000);
 
         // STEP 2: Backend pre-registers first 3 peers (simulating they already went through registration)
-        System.out.println("\nSTEP 2: Pre-register Peers 1-3 (bootstrap scenario)");
-        System.out.println("------------------------------------------------------------------");
+     //   System.out.println("\nSTEP 2: Pre-register Peers 1-3 (bootstrap scenario)");
+      //  System.out.println("------------------------------------------------------------------");
 
-        for (int i = 0; i < 3; i++) {
-            String peerID = peers.get(i).getOwnID();
-            // Add to ALL peers' DataContainers (simulating they synced from blockchain)
-            for (ConnectX peer : peers) {
-                peer.dataContainer.networkRegisteredNodes
-                    .computeIfAbsent("TESTNET", k -> new java.util.HashSet<>())
-                    .add(peerID);
-            }
-            System.out.println("  ✓ Peer " + (i + 1) + " pre-registered (bootstrap)");
-        }
+       // for (int i = 0; i < 3; i++) {
+        //    String peerID = peers.get(i).getOwnID();
+       //     // Add to ALL peers' DataContainers (simulating they synced from blockchain)
+        //    for (ConnectX peer : peers) {
+         //      peer.dataContainer.networkRegisteredNodes
+         //           .computeIfAbsent("TESTNET", k -> new java.util.HashSet<>())
+         //           .add(peerID);
+         //   }
+           // System.out.println("  ✓ Peer " + (i + 1) + " pre-registered (bootstrap)");
+       // }
 
-        System.out.println("  ⚠ Peer 4 and 5 NOT registered yet");
+       // System.out.println("  ⚠ Peer 4 and 5 NOT registered yet");
 
         Thread.sleep(2000);
 

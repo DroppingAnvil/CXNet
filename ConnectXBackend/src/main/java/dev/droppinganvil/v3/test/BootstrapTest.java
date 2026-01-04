@@ -25,10 +25,13 @@ public class BootstrapTest {
 
         try {
             // Initialize peer directory
-            PeerDirectory.peerCache = new ConcurrentHashMap<>();
-            PeerDirectory.seen = new ConcurrentHashMap<>();
-            PeerDirectory.lan = new ConcurrentHashMap<>();
-            PeerDirectory.hv = new ConcurrentHashMap<>();
+
+            // This shouldnt be needed anymore
+
+            //PeerDirectory.peerCache = new ConcurrentHashMap<>();
+           // PeerDirectory.seen = new ConcurrentHashMap<>();
+            //PeerDirectory.lan = new ConcurrentHashMap<>();
+           // PeerDirectory.hv = new ConcurrentHashMap<>();
 
             // Step 1: Create a new peer
             System.out.println("Step 1: Creating new peer...");
@@ -144,12 +147,12 @@ public class BootstrapTest {
             }
 
             // Check peer directory
-            System.out.println("\nPeer Directory:");
-            System.out.println("  HV peers: " + PeerDirectory.hv.size());
-            System.out.println("  Seen peers: " + PeerDirectory.seen.size());
-            for (String cxID : PeerDirectory.hv.keySet()) {
-                System.out.println("    - " + cxID);
-            }
+            //System.out.println("\nPeer Directory:");
+            //System.out.println("  HV peers: " + PeerDirectory.hv.size());
+            //System.out.println("  Seen peers: " + PeerDirectory.seen.size());
+           // for (String cxID : PeerDirectory.hv.keySet()) {
+           //     System.out.println("    - " + cxID);
+           // }
 
             // Check for seed files
             System.out.println("\nLocal Seeds:");

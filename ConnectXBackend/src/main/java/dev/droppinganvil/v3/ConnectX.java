@@ -191,8 +191,8 @@ public class ConnectX {
         nodemesh = new File(cxRoot, "nodemesh");
         if (!nodemesh.exists()) if (!nodemesh.mkdir()) throw new IOException();
 
-        // Initialize PeerDirectory.peers for signed node persistence
-        dev.droppinganvil.v3.network.nodemesh.PeerDirectory.peers = nodemesh;
+        // Initialize nodeMesh.peerDirectory.peers for signed node persistence
+        nodeMesh.peerDirectory.peers = nodemesh;
 
         resources = new File(nodemesh, "nodemesh-resources");
         if (!resources.exists()) if (!resources.mkdir()) throw new IOException();
@@ -1057,7 +1057,7 @@ public class ConnectX {
 
         // Add hv peers to directory
         for (dev.droppinganvil.v3.network.nodemesh.Node peer : seed.hvPeers) {
-            PeerDirectory.addNode(peer);
+            nodeMesh.peerDirectory.addNode(peer);
             System.out.println("[Seed] Added peer: " + peer.cxID);
         }
 
@@ -1078,7 +1078,7 @@ public class ConnectX {
         // Cache certificates
         for (java.util.Map.Entry<String, String> cert : seed.certificates.entrySet()) {
             try {
-                encryptionProvider.cacheCert(cert.getKey(), false, false);
+                encryptionProvider.cacheCert(cert.getKey(), false, false, this);
                 System.out.println("[Seed] Cached certificate: " + cert.getKey());
             } catch (Exception e) {
                 System.err.println("[Seed] Failed to cache certificate for " + cert.getKey() + ": " + e.getMessage());
@@ -1105,7 +1105,7 @@ public class ConnectX {
 
             // Add EPOCH to peer directory so we can reach it
             try {
-                PeerDirectory.addNode(epochNode);
+                nodeMesh.peerDirectory.addNode(epochNode);
                 System.out.println("[Bootstrap] Added EPOCH to peer directory");
             } catch (SecurityException e) {
                 // EPOCH already exists - this is fine
@@ -1158,10 +1158,10 @@ public class ConnectX {
      */
     private void initiateP2PDiscovery() {
         try {
-            System.out.println("[P2P Discovery] Contacting " + PeerDirectory.hv.size() + " peers from seed...");
+            System.out.println("[P2P Discovery] Contacting " + nodeMesh.peerDirectory.hv.size() + " peers from seed...");
 
             int contactAttempts = 0;
-            for (Node peer : PeerDirectory.hv.values()) {
+            for (Node peer : nodeMesh.peerDirectory.hv.values()) {
                 if (peer.cxID == null || peer.cxID.equals(getOwnID())) {
                     continue; // Skip invalid or self
                 }
@@ -1325,8 +1325,8 @@ public class ConnectX {
                                 int peersSent = 0;
                                 int maxPeersToContact = 5; // Contact up to 5 peers per discovery cycle
 
-                                if (PeerDirectory.hv != null && !PeerDirectory.hv.isEmpty()) {
-                                    for (Node peer : PeerDirectory.hv.values()) {
+                                if (nodeMesh.peerDirectory.hv != null && !nodeMesh.peerDirectory.hv.isEmpty()) {
+                                    for (Node peer : nodeMesh.peerDirectory.hv.values()) {
                                         if (peersSent >= maxPeersToContact) break;
 
                                         if (peer.cxID == null || peer.cxID.equals(getOwnID())) {
@@ -2124,24 +2124,11 @@ public class ConnectX {
             if (f.getName().contains(".cxi")) {
                 try {
                     Node n = (Node) getSignedObject(getOwnID(), f.toURL().openStream(), Node.class, "cxJSON1");
-                    PeerDirectory.lan.put(n.cxID, n);
+                    nodeMesh.peerDirectory.lan.put(n.cxID, n);
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
             }
-        }
-    }
-
-    public static boolean isPeerLoaded(String cxID) {
-        return PeerDirectory.peerCache.containsKey(cxID);
-    }
-
-    public static void loadPeer(String cxID, boolean sync, boolean lookups) {
-        //TODO implement peer loading
-        try {
-            PeerDirectory.lookup(cxID, lookups, sync);
-        } catch (Exception e) {
-            e.printStackTrace();
         }
     }
 
@@ -2375,7 +2362,7 @@ public class ConnectX {
 
             // Get first NMI from backend set
             String nmiID = network.configuration.backendSet.iterator().next();
-            Node nmiNode = PeerDirectory.lookup(nmiID, true, true);
+            Node nmiNode = nodeMesh.peerDirectory.lookup(nmiID, true, true);
 
             if (nmiNode == null) {
                 System.out.println("[Auto-Sync] NMI " + nmiID + " not found in peer directory, cannot request sync");

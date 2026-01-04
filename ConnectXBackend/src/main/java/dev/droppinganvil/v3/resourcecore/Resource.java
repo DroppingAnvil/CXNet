@@ -67,7 +67,7 @@ public class Resource implements Serializable {
 
     public Object getObject(Class<?> clazz, Boolean sync, boolean tryImports) throws Exception {
         if (o != null) return o;
-        Node owner = PeerDirectory.lookup(oID, tryImports, true, cx.cxRoot, cx);
+        Node owner = cx.nodeMesh.peerDirectory.lookup(oID, tryImports, true, cx.cxRoot, cx);
         if (rD != null & !ref) {
             ByteArrayInputStream bais = new ByteArrayInputStream(rD);
             o = cx.getSignedObject(oID, bais, clazz, m);

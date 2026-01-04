@@ -1,0 +1,21 @@
+ConnectX
+    public static boolean isPeerLoaded(String cxID) {
+        return nodeMesh.peerDirectory.peerCache.containsKey(cxID);
+    }
+
+    public static void loadPeer(String cxID, boolean sync, boolean lookups) {
+        //TODO implement peer loading
+        try {
+            nodeMesh.peerDirectory.lookup(cxID, lookups, sync);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+BootstrapTest
+            // Check peer directory
+            //System.out.println("\nPeer Directory:");
+            //System.out.println("  HV peers: " + PeerDirectory.hv.size());
+            //System.out.println("  Seen peers: " + PeerDirectory.seen.size());
+           // for (String cxID : PeerDirectory.hv.keySet()) {
+           //     System.out.println("    - " + cxID);
+           // }

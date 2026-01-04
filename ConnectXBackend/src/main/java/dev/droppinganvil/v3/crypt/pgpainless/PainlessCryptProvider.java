@@ -1,5 +1,6 @@
 package dev.droppinganvil.v3.crypt.pgpainless;
 
+import dev.droppinganvil.v3.ConnectX;
 import dev.droppinganvil.v3.crypt.core.CryptProvider;
 import dev.droppinganvil.v3.crypt.core.exceptions.DecryptionFailureException;
 import dev.droppinganvil.v3.crypt.core.exceptions.EncryptionFailureException;
@@ -38,7 +39,7 @@ public class PainlessCryptProvider extends CryptProvider {
     /**
      * Network public key cache
      */
-    public static ConcurrentHashMap<String, PGPPublicKeyRing> certCache = new ConcurrentHashMap<>();
+    public ConcurrentHashMap<String, PGPPublicKeyRing> certCache = new ConcurrentHashMap<>();
     /**
      * On board public key
      */
@@ -337,14 +338,14 @@ public class PainlessCryptProvider extends CryptProvider {
         ready = true;
     }
     @Override
-    public boolean cacheCert(String cxID, boolean tryImport, boolean sync) {
+    public boolean cacheCert(String cxID, boolean tryImport, boolean sync, ConnectX connectX) {
         try {
             if (certCache.containsKey(cxID)) return true;
         } catch (Exception ignored) {
 
         }
         try {
-            Node n = PeerDirectory.lookup(cxID, tryImport, sync);
+            Node n = connectX.nodeMesh.peerDirectory.lookup(cxID, tryImport, sync);
             if (n != null) {
                 PGPPublicKeyRing cert = PGPainless.readKeyRing().publicKeyRing(n.publicKey);
                 if (cert != null) {

@@ -97,14 +97,14 @@ public class OutConnectionController {
                 StringBuilder routesUsed = new StringBuilder();
 
                 Node n;
-                if (PeerDirectory.lan.containsKey(out.ne.p.cxID)) {
-                    n = PeerDirectory.lan.get(out.ne.p.cxID);
+                if (connectXAPI.nodeMesh.peerDirectory.lan.containsKey(out.ne.p.cxID)) {
+                    n = connectXAPI.nodeMesh.peerDirectory.lan.get(out.ne.p.cxID);
                 } else {
-                    n = PeerDirectory.lookup(out.ne.p.cxID, true, true);
+                    n = connectXAPI.nodeMesh.peerDirectory.lookup(out.ne.p.cxID, true, true);
                 }
 
                 // Use getAllAddresses() for priority-ordered multi-source lookup (LAN-Direct prioritized)
-                java.util.List<String> addresses = PeerDirectory.getAllAddresses(out.ne.p.cxID, connectXAPI);
+                java.util.List<String> addresses = connectXAPI.nodeMesh.peerDirectory.getAllAddresses(out.ne.p.cxID, connectXAPI);
                 StringBuilder failedRoutes = new StringBuilder();
                 int routeAttempts = 0;
 
@@ -206,7 +206,7 @@ public class OutConnectionController {
                     // Use case: Fast point-to-point when backend is known to be online
                     for (String s : cxn.configuration.backendSet) {
                         try {
-                            Node n = PeerDirectory.lookup(s, true, true);
+                            Node n = connectXAPI.nodeMesh.peerDirectory.lookup(s, true, true);
                             if (n != null && n.addr != null) {
                                 String[] addr = n.addr.split(":");
                                 Socket so = new Socket(addr[0], Integer.parseInt(addr[1]));
@@ -230,12 +230,12 @@ public class OutConnectionController {
                     int successfulPeers = 0;
                     int failedPeers = 0;
 
-                    for (Node n : PeerDirectory.hv.values()) {
+                    for (Node n : connectXAPI.nodeMesh.peerDirectory.hv.values()) {
                         // Don't send to ourselves
                         if (n.cxID != null && !n.cxID.equals(connectXAPI.getOwnID())) {
                             totalPeers++;
                             // MULTI-PATH ROUTING: Use getAllAddresses() to check all sources
-                            java.util.List<String> addresses = PeerDirectory.getAllAddresses(n.cxID, connectXAPI);
+                            java.util.List<String> addresses = connectXAPI.nodeMesh.peerDirectory.getAllAddresses(n.cxID, connectXAPI);
                             StringBuilder routes = new StringBuilder();
                             boolean sentToThisPeer = false;
 

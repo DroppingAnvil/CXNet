@@ -131,13 +131,16 @@ public class Seed {
     /**
      * Create a seed from current PeerDirectory high-value peers
      * NOTE: LAN peers are automatically excluded
+     * @param peerDirectory PeerDirectory instance to get peers from
      * @return Seed containing current hv peers
      */
-    public static Seed fromCurrentPeers() {
+    public static Seed fromCurrentPeers(PeerDirectory peerDirectory) {
         Seed seed = new Seed();
         // Only include hv peers, NEVER LAN peers
-        for (Node node : PeerDirectory.hv.values()) {
-            seed.addHvPeer(node);
+        if (peerDirectory != null && peerDirectory.hv != null) {
+            for (Node node : peerDirectory.hv.values()) {
+                seed.addHvPeer(node);
+            }
         }
         return seed;
     }

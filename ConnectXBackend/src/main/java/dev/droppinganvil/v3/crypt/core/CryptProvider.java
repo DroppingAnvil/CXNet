@@ -1,5 +1,6 @@
 package dev.droppinganvil.v3.crypt.core;
 
+import dev.droppinganvil.v3.ConnectX;
 import dev.droppinganvil.v3.crypt.core.exceptions.CryptInternalVerificationException;
 import dev.droppinganvil.v3.crypt.core.exceptions.DecryptionFailureException;
 import dev.droppinganvil.v3.crypt.core.exceptions.EncryptionFailureException;
@@ -116,7 +117,7 @@ public abstract class CryptProvider {
     public void setup(String cxID, String s, File dir) throws Exception {
 
     }
-    public boolean cacheCert(String cxID, boolean tryImport, boolean sync) {return false;}
+    public boolean cacheCert(String cxID, boolean tryImport, boolean sync, ConnectX connectX) {return false;}
     public void shutdown() {
 
     }

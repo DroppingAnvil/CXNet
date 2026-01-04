@@ -45,6 +45,7 @@ dev\droppinganvil\v3\test\BlockSyncTest.class
 dev\droppinganvil\v3\ConnectX$1.class
 dev\droppinganvil\v3\network\threads\RetryProcessor.class
 dev\droppinganvil\v3\network\BlockConsensusTracker.class
+dev\droppinganvil\v3\network\events\CXHello.class
 dev\droppinganvil\v3\network\UnauthorizedNetworkConnectivityException.class
 dev\droppinganvil\v3\test\BlockRotationTest.class
 dev\droppinganvil\v3\Permission.class

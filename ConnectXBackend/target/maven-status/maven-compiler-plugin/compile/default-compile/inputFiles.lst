@@ -34,6 +34,7 @@ C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\dropp
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\BlockConsensusTracker.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\CXNetwork.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\CXPath.java
+C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\events\CXHello.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\events\EventType.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\events\NetworkContainer.java
 C:\Users\Alexw\IdeaProjects\Open-Connect\ConnectXBackend\src\main\java\dev\droppinganvil\v3\network\events\NetworkEvent.java

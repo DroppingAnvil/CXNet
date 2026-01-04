@@ -24,4 +24,24 @@ public class InputBundle {
      * Must NOT be re-signed during relay to maintain original sender's signature
      */
     public byte[] signedEventBytes;
+    /**
+     * New method to streamline NodeMesh operations, used by some functions, not fully implemented yet
+     */
+    public byte[] strippedEventBytes;
+    /**
+     * Stripped and Deserialized Object if available
+     */
+    public Object object;
+
+
+    public void verifyCryptoLayers() {
+
+    }
+    public void verifyCryptoLayersE2E() {
+
+    }
+
+    public boolean verify() {
+        return false;
+    }
 }

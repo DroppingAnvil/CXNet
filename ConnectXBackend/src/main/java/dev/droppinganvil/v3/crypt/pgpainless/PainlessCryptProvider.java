@@ -28,8 +28,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class PainlessCryptProvider extends CryptProvider {
 
-    public PainlessCryptProvider() {
-        super("Encryption Layer", "Core");
+    public PainlessCryptProvider(ConnectX connectX) {
+        super("Encryption Layer", "Core", connectX);
     }
 
     /**
@@ -88,7 +88,7 @@ public class PainlessCryptProvider extends CryptProvider {
     @Override
     public boolean verifyAndStrip(InputStream is, OutputStream os, String cxID) throws DecryptionFailureException {
         //TODO verify tryimport is best case
-        if (cacheCert(cxID, true, true)) {
+        if (cacheCert(cxID, true, true, super.connectX)) {
             try {
                 DecryptionStream decryptionStream = PGPainless.decryptAndOrVerify()
                         .onInputStream(is)
@@ -110,7 +110,7 @@ public class PainlessCryptProvider extends CryptProvider {
     }
     @Override
     public void encrypt(InputStream is, OutputStream os, String cxID) throws EncryptionFailureException {
-        if (!cacheCert(cxID, false, true)) throw new EncryptionFailureException();
+        if (!cacheCert(cxID, false, true, super.connectX)) throw new EncryptionFailureException();
         if (is == null) {
             throw new EncryptionFailureException("InputStream cannot be null - no data to encrypt");
         }
@@ -149,7 +149,7 @@ public class PainlessCryptProvider extends CryptProvider {
 
         // Cache all recipient certificates
         for (String cxID : recipientCxIDs) {
-            if (!cacheCert(cxID, false, true)) {
+            if (!cacheCert(cxID, false, true, super.connectX)) {
                 throw new EncryptionFailureException("Failed to cache certificate for recipient: " + cxID + " This generally indicates that a recipient peer has never been met");
             }
         }

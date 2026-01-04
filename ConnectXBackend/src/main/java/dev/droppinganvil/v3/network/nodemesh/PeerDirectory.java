@@ -9,6 +9,7 @@ import dev.droppinganvil.v3.ConnectX;
 import dev.droppinganvil.v3.analytics.AnalyticData;
 import dev.droppinganvil.v3.analytics.Analytics;
 import dev.droppinganvil.v3.exceptions.UnsafeKeywordException;
+import us.anvildevelopment.util.tools.database.annotations.MemoryOnly;
 
 import java.io.File;
 import java.io.Serializable;
@@ -29,6 +30,7 @@ public class PeerDirectory implements Serializable {
     public ConcurrentHashMap<String, Node> lan = new ConcurrentHashMap<>();
     public ConcurrentHashMap<String,Node> hv = new ConcurrentHashMap<>();
     public File peers;
+    @MemoryOnly
     public ConnectX connectX = null;
 
     public PeerDirectory(ConnectX cx) {
@@ -72,7 +74,7 @@ public class PeerDirectory implements Serializable {
                             Node node = null;
                             if (cx != null) {
                                 node = (Node) cx.getSignedObject(cxID, peer.toURL().openStream(), Node.class, "cxJSON1");
-                                cx.encryptionProvider.cacheCert(cxID, false, false);
+                                cx.encryptionProvider.cacheCert(cxID, false, false, connectX);
                             }
                             if (node != null) {
                                 peerCache.put(cxID, node);

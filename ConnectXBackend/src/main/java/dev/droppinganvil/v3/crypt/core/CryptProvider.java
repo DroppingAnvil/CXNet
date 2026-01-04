@@ -16,10 +16,12 @@ public abstract class CryptProvider {
     private File tempdir;
     public BaseStatus status;
     public boolean ready = false;
+    public ConnectX connectX;
 
-    public CryptProvider(String serviceName, String serviceCategory) {
+    public CryptProvider(String serviceName, String serviceCategory, ConnectX connectX) {
         status = new BaseStatus(serviceName, serviceCategory);
         status.setVMPair();
+        this.connectX = connectX;
     }
     public String getPublicKey() {
         return null;

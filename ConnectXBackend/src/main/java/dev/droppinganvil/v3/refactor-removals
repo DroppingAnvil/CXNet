@@ -19,3 +19,25 @@ BootstrapTest
            // for (String cxID : PeerDirectory.hv.keySet()) {
            //     System.out.println("    - " + cxID);
            // }
+BlockSyncTest
+            //Node epochNode = PeerDirectory.lookup(EPOCH_UUID, true, true);
+
+            //if (epochNode != null) {
+           //     // Create container and queue request
+           //     NetworkContainer container = new NetworkContainer();
+          //      container.se = "cxJSON1";
+          //      container.s = false;
+
+          //      OutputBundle bundle = new OutputBundle(chainStatusRequest, epochNode, null, null, container);
+          //      lateJoiner.queueEvent(bundle);
+
+          //      System.out.println("  ✓ CHAIN_STATUS_REQUEST sent to EPOCH");
+          //      System.out.println("    Waiting for response...");
+        //    } else {
+         //       System.err.println("  ✗ Could not find EPOCH in peer directory!");
+        //    }
+LanScannerTest
+removed completely
+TwoPeerTest
+REMOVED
+ConnectX sets PeerDirectory File in connect now after network init

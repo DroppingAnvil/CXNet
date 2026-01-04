@@ -58,7 +58,7 @@ public class ConnectX {
     public State state = State.CXConnecting;
     // IMPORTANT: Per-instance network map to support multiple ConnectX instances in same JVM
     private final ConcurrentHashMap<String, CXNetwork> networkMap = new ConcurrentHashMap<>();
-    public final CryptProvider encryptionProvider = new PainlessCryptProvider();
+    public CryptProvider encryptionProvider = null;
     private static final transient ConcurrentHashMap<String, SerializationProvider> serializationProviders = new ConcurrentHashMap<>();
     public static final ConcurrentHashMap<String, CXBridge> bridgeMap = new ConcurrentHashMap<>(); // Legacy - deprecated
 
@@ -192,7 +192,7 @@ public class ConnectX {
         if (!nodemesh.exists()) if (!nodemesh.mkdir()) throw new IOException();
 
         // Initialize nodeMesh.peerDirectory.peers for signed node persistence
-        nodeMesh.peerDirectory.peers = nodemesh;
+        //nodeMesh.peerDirectory.peers = nodemesh;
 
         resources = new File(nodemesh, "nodemesh-resources");
         if (!resources.exists()) if (!resources.mkdir()) throw new IOException();
@@ -215,7 +215,7 @@ public class ConnectX {
                 System.err.println("[ConnectX] Failed to register default HTTP bridge: " + e.getMessage());
             }
         }
-
+        encryptionProvider = new PainlessCryptProvider(this);
         //TODO network join
     }
     public static void checkSafety(String s) throws UnsafeKeywordException {
@@ -1210,6 +1210,8 @@ public class ConnectX {
         dev.droppinganvil.v3.network.nodemesh.OutConnectionController outController =
             new dev.droppinganvil.v3.network.nodemesh.OutConnectionController(this);
         nodeMesh = dev.droppinganvil.v3.network.nodemesh.NodeMesh.initializeNetwork(this, port, outController);
+        // Initialize nodeMesh.peerDirectory.peers for signed node persistence
+        nodeMesh.peerDirectory.peers = nodemesh;
 
         // Attempt automatic CXNET bootstrap after network layer is ready
         attemptCXNETBootstrap();

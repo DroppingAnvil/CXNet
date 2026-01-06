@@ -2,6 +2,7 @@ package dev.droppinganvil.v3.network.nodemesh;
 
 import dev.droppinganvil.v3.ConnectX;
 import dev.droppinganvil.v3.network.CXNetwork;
+import dev.droppinganvil.v3.network.CXPath;
 import dev.droppinganvil.v3.network.events.NetworkContainer;
 import dev.droppinganvil.v3.network.events.NetworkEvent;
 
@@ -58,7 +59,7 @@ public class OutConnectionController {
         // Record to blockchain if this is a new CXN event (not relay, not CXS)
         // Use the same signed blob being transmitted to ensure blockchain consistency
         if (out.prev == null && out.ne.p != null && out.ne.p.scope != null &&
-            out.ne.p.scope.equalsIgnoreCase("CXN") && out.ne.p.chainID != null) {
+            out.ne.p.scope.equalsIgnoreCase("CXN") && out.ne.p.chainID != null && out.ne.r) {
             try {
                 boolean recorded = connectXAPI.Event(out.ne, connectXAPI.getOwnID(), cryptEvent);
                 if (recorded) {
@@ -78,7 +79,9 @@ public class OutConnectionController {
                     ", hasScope=" + (out.ne.p != null && out.ne.p.scope != null) +
                     ", scope=" + (out.ne.p != null ? out.ne.p.scope : "null") +
                     ", hasChainID=" + (out.ne.p != null && out.ne.p.chainID != null) +
-                    ", chainID=" + (out.ne.p != null ? out.ne.p.chainID : "null"));
+                    ", chainID=" + (out.ne.p != null ? out.ne.p.chainID : "null") +
+                        "record=" + out.ne.r
+                );
             }
         }
 
@@ -306,8 +309,12 @@ public class OutConnectionController {
         } else if (out.n != null && out.n.addr != null && !out.n.addr.isEmpty()) {
             // Special case: Direct transmission to address (for CXHELLO discovery)
             // Used when we have a target address but no peer ID yet
-            System.out.println("[OutController] Attempting direct transmission to " + out.n.addr + " (" + cryptNetworkContainer.length + " bytes)");
+
+            /// MULTI-BRIDGE SUPPORT using new CXPath features
+        CXPath cxPath = CXPath.getPathFromString(out.n.addr);
+        if (CXPath.isSocket(cxPath)) {
             try {
+                System.out.println("[OutController] Attempting direct transmission to " + out.n.addr + " (" + cryptNetworkContainer.length + " bytes)");
                 String[] addr = out.n.addr.split(":");
                 Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
                 java.io.OutputStream os = s.getOutputStream();
@@ -321,6 +328,23 @@ public class OutConnectionController {
                 // Failed to send (normal for discovery - host may not be ConnectX peer)
                 System.out.println("[OutController] Direct transmission FAILED to " + out.n.addr + ": " + e.getMessage());
             }
+        } else {
+            //TODO Duplicate code, consider centralizing method
+            if (CXPath.isBridge(cxPath)) {
+                dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =
+                        connectXAPI.getBridgeProvider(cxPath.bridge);
+                if (bridge != null) {
+                    //TODO mem waste, fix duplicate, adverting risk
+                    dev.droppinganvil.v3.network.CXPath bridgePath = new dev.droppinganvil.v3.network.CXPath();
+                    bridgePath.bridgeArg = cxPath.bridgeArg;
+                    bridge.transmitEvent(bridgePath, cryptNetworkContainer);
+                    System.out.println("[NodeMesh] Direct bridge " + cxPath.address +
+                            " via " + cxPath.bridge);
+                } else {
+                    System.out.println("[OutController] Could not transmit event bridge direct. Event type: " + out.ne.eT);
+                }
+            }
+        }
         } else {
             // No routing info - log for debugging
             if (out.ne != null && out.ne.eT != null && (out.ne.eT.equals("CXHELLO") || out.ne.eT.equals("CXHELLO_RESPONSE"))) {

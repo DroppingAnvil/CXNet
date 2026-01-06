@@ -19,8 +19,9 @@ public class PeerFinding {
     public byte[] currentPeers;
     /*
     LIST of ALL IP/Socket/Bridges that could be connected to 30% max up to 20
+    //TODO security eval, implement local security modes?
      */
-    public byte[] peers;
+    public List<String> peers;
     /*
     If this field is included it should indicate that a peer is bootstrapping/peerfind a specific network
     Randomly select up to 50 nodes from that network and include them all SIGNED FROM ORIGIN

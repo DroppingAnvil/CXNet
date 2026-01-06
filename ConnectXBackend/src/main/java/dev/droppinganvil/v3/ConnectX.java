@@ -79,6 +79,7 @@ public class ConnectX {
     public File resources;
     private transient static CXNetwork cx;
     private transient Node self;
+    public int listeningPort = 0;
     private static ConcurrentHashMap<String, CXPlugin> plugins = new ConcurrentHashMap<>();
     private static transient List<String> reserved = Arrays.asList("SYSTEM", "CX", "cxJSON1", "CXNET");
 
@@ -1207,6 +1208,7 @@ public class ConnectX {
      * @throws IOException if network initialization fails
      */
     public void connect(int port) throws IOException {
+        this.listeningPort = port;
         dev.droppinganvil.v3.network.nodemesh.OutConnectionController outController =
             new dev.droppinganvil.v3.network.nodemesh.OutConnectionController(this);
         nodeMesh = dev.droppinganvil.v3.network.nodemesh.NodeMesh.initializeNetwork(this, port, outController);
@@ -1319,6 +1321,59 @@ public class ConnectX {
                         cycleCount++;
                         if (cycleCount >= 10) {
                             cycleCount = 0;
+
+                            /// Send CXHELLO's to addresses waiting
+                        System.out.println("[ConnectX] Sending CXHELLO to " + dataContainer.waitingAddresses.size() + " addresses");
+                        for (String s : dataContainer.waitingAddresses) {
+                            //TODO Store static self node blob locally, no need to generate it each time for ALL events
+                            String nodeJson = ConnectX.serialize("cxJSON1", getSelf());
+                            java.io.ByteArrayInputStream nodeInput = new java.io.ByteArrayInputStream(nodeJson.getBytes("UTF-8"));
+                            java.io.ByteArrayOutputStream signedNodeOutput = new java.io.ByteArrayOutputStream();
+                            encryptionProvider.sign(nodeInput, signedNodeOutput);
+                            nodeInput.close();
+                            byte[] signedNodeBlob = signedNodeOutput.toByteArray();
+                            signedNodeOutput.close();
+
+                            // Create CXHELLO payload using CXHello data structure
+                            // Include peer's preferred address if available (for NAT/public IP scenarios)
+                            String peerAddress = (getSelf() != null) ? getSelf().addr : null;
+                            dev.droppinganvil.v3.network.events.CXHello helloPayload =
+                                    new dev.droppinganvil.v3.network.events.CXHello(getOwnID(), listeningPort, signedNodeBlob, peerAddress);
+
+                            String payloadJson = ConnectX.serialize("cxJSON1", helloPayload);
+
+                            // Sign the CXHELLO payload for consistency with CXHELLO_RESPONSE
+                            java.io.ByteArrayInputStream payloadInput = new java.io.ByteArrayInputStream(payloadJson.getBytes("UTF-8"));
+                            java.io.ByteArrayOutputStream signedPayloadOutput = new java.io.ByteArrayOutputStream();
+                            encryptionProvider.sign(payloadInput, signedPayloadOutput);
+                            payloadInput.close();
+                            byte[] signedPayload = signedPayloadOutput.toByteArray();
+                            signedPayloadOutput.close();
+
+                            // Manually create NetworkEvent (like NEWNODE bootstrap pattern)
+                            NetworkEvent helloEvent = new NetworkEvent(EventType.CXHELLO, signedPayload);
+                            helloEvent.eT = EventType.CXHELLO.name();
+                            helloEvent.iD = java.util.UUID.randomUUID().toString();
+                            // DON'T set event.p (CXPath) - leave null for direct transmission fallback
+
+                            // Create target node with address only (no peer ID known yet)
+                            Node targetNode = new Node();
+                            targetNode.addr = s;
+
+                            // Manually create NetworkContainer
+                            NetworkContainer nc = new NetworkContainer();
+                            nc.se = "cxJSON1";
+                            nc.s = false;  // Not E2E encrypted
+                            nc.iD = getSelf().cxID;  // Set sender ID (like NewNode)
+
+                            // Create OutputBundle directly (bypassing buildEvent) - follows NEWNODE pattern
+                            OutputBundle bundle = new OutputBundle(helloEvent, targetNode, null, null, nc);
+                            queueEvent(bundle);
+                            System.out.println("[ConnectX] Queued CXHELLO to " + s);
+                        }
+                        //Clear after
+                            //TODO evaluate thread safety
+                            dataContainer.waitingAddresses.clear();
 
                             try {
                                 System.out.println("[Peer Discovery] Sending PeerFinding requests to known peers...");

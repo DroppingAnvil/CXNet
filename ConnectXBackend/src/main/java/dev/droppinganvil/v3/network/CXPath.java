@@ -5,6 +5,8 @@
 
 package dev.droppinganvil.v3.network;
 
+import java.net.Socket;
+
 public class CXPath {
     /**
      * Scope for transmission, usually CXN
@@ -57,7 +59,35 @@ public class CXPath {
      * Blockchain ID for recording events, view blockchain permissions
      */
     public Long chainID;
+
+
+    public Integer pt;
+    public String sAR;
+
     public Scope getScope() {
         return Scope.valueOf(scope);
+    }
+
+    public static CXPath getPathFromString(String address) {
+        CXPath path = new CXPath();
+        path.address = address;
+        if (isBridge(path)) {
+            String[] parts = address.split(":", 2);
+            path.bridge = parts[0];
+            path.bridgeArg = parts[1];
+        } else {
+            String[] sar = path.address.split(":");
+            path.sAR = sar[0];
+            path.pt = Integer.parseInt(sar[1]);
+        }
+        return path;
+    }
+
+    public static Boolean isBridge(CXPath cxPath) {
+        return (cxPath.address.contains(":") && !cxPath.address.matches("^\\d+\\.\\d+\\.\\d+\\.\\d+:.*"));
+    }
+
+    public static Boolean isSocket(CXPath cxPath) {
+        return (cxPath.sAR != null);
     }
 }

@@ -73,6 +73,14 @@ public class DataContainer implements Serializable {
     public Map<String, String> registrationTokens = new ConcurrentHashMap<>();
 
     /**
+     * This list is for storing waiting addresses in CX Address format, these will get picked up by CXHELLO and PeerFinding process in normal environments
+     * Objects are generally received by PeerFinding response processing
+     */
+    public List<String> waitingAddresses = new ArrayList<>();
+
+    /// CODE
+
+    /**
      * Check if a node is registered to a network (whitelist check)
      */
     public boolean isNodeRegistered(String networkID, String nodeID) {

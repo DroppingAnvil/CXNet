@@ -4,17 +4,21 @@ import dev.droppinganvil.v3.ConnectX;
 import dev.droppinganvil.v3.analytics.AnalyticData;
 import dev.droppinganvil.v3.analytics.Analytics;
 import dev.droppinganvil.v3.crypt.core.exceptions.DecryptionFailureException;
+import dev.droppinganvil.v3.crypt.pgpainless.PainlessCryptProvider;
 import dev.droppinganvil.v3.network.*;
 import dev.droppinganvil.v3.network.events.CXHello;
 import dev.droppinganvil.v3.network.events.EventType;
 import dev.droppinganvil.v3.network.events.NetworkContainer;
 import dev.droppinganvil.v3.network.events.NetworkEvent;
+import org.bouncycastle.openpgp.PGPPublicKeyRing;
+import org.pgpainless.decryption_verification.OpenPgpMetadata;
 
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -455,12 +459,42 @@ public class NodeMesh {
                     baiss.close();
                     strippedJSON.close();
                     ///  AFTER this point all helper features should be available in InputBundle
+                } else {
+                    byte[] encryptedd = ne.d;
+                    ByteArrayInputStream baiss = new ByteArrayInputStream(encryptedd);
+                    ByteArrayOutputStream decryptedJSON = new ByteArrayOutputStream();
+                    //TODO
+                    //TODO Move PGP specific actions back to PainlessCryptProvider, will need another refactor
+                    OpenPgpMetadata o3 = (OpenPgpMetadata) connectX.encryptionProvider.decrypt(baiss, decryptedJSON);
+                    byte[] arr1 = null;
+                    arr1 = decryptedJSON.toByteArray();
+                    if (arr1 != null && arr1.length > 0) {
+                        //TODO This is fine for testing, but, we need to consider better handling of E2E events when peers have not met. Possibly including origin node data in E2E coms
+                        String senderCXID = ne.p.oCXID;
+                        //TODO More PGP specific code
+                        PGPPublicKeyRing originPub = ((PainlessCryptProvider) connectX.encryptionProvider).certCache.get(senderCXID);
+                        if (senderCXID != null && originPub != null && o3.containsVerifiedSignatureFrom(originPub)) {
+                            ib.verifiedObjectBytes = arr1;
+                        } else {
+                            System.out.println("[NodeMesh] E2E Decryption validation failure, 005");
+                        }
+                    } else {
+                        System.out.println("[NodeMesh] Internal event data verification failure, rejecting event. 006");
+                        return;
+                    }
+                    baiss.close();
+                    decryptedJSON.close();
                 }
 
                 }
             }
             bais.close();
             baoss.close();
+
+            // Track seen peers (memory-efficient using seenCXIDs list)
+            if (nc.iD != null && !peerDirectory.seenCXIDs.contains(nc.iD)) {
+                peerDirectory.seenCXIDs.add(nc.iD);
+            }
 
             // SECURITY: Validate CXNET and CX scope messages
             // Only CXNET backendSet or NMI can send CXNET or CX-scoped messages
@@ -1113,6 +1147,33 @@ public class NodeMesh {
 
                                     System.out.println("[PeerFinding] Responding with " + count + " signed peers");
 
+                                    // Populate peers field: 30% of seen peers, then 30% of their addresses (max 20)
+                                    java.util.Set<String> allAddresses = new java.util.HashSet<>();
+
+                                    // Select 30% of seen peers
+                                    java.util.List<String> seenPeerIDs = new java.util.ArrayList<>(peerDirectory.seenCXIDs);
+                                    java.util.Collections.shuffle(seenPeerIDs);
+                                    // 30% rule 0.3
+                                    int seenPeerCount = (int) Math.ceil(seenPeerIDs.size() * 0.3);
+
+                                    for (int i = 0; i < Math.min(seenPeerCount, seenPeerIDs.size()); i++) {
+                                        String peerID = seenPeerIDs.get(i);
+                                        // Get all addresses for this peer
+                                        java.util.List<String> peerAddresses = peerDirectory.getAllAddresses(peerID, connectX);
+                                        allAddresses.addAll(peerAddresses);
+                                    }
+
+                                    // Select 30% of addresses (max 20)
+                                    java.util.List<String> addressList = new java.util.ArrayList<>(allAddresses);
+                                    java.util.Collections.shuffle(addressList);
+                                    int addressCount = Math.min(20, (int) Math.ceil(addressList.size() * 0.3));
+                                    java.util.List<String> selectedAddresses = addressList.subList(0, Math.min(addressCount, addressList.size()));
+
+                                    //Set response
+                                    response.peers = selectedAddresses;
+
+                                    System.out.println("[PeerFinding] Added " + selectedAddresses.size() + " peer addresses from " + seenPeerIDs.size() + " seen peers");
+
                                     // Using new Event Builder API
 
                                     // Send response
@@ -1219,6 +1280,12 @@ public class NodeMesh {
                                     }
                                     System.out.println("[PeerFinding] Imported " + imported + " new peers");
                                 }
+                                if (pf.peers != null && pf.peers.size() <= 20) {
+                                    //TODO security eval
+                                    connectX.dataContainer.waitingAddresses.addAll(pf.peers);
+                                    System.out.println("[PeerFinding] Imported addresses for connections from " + ne.p.oCXID);
+                                }
+
                             }
                         } catch (Exception e) {
                             System.err.println("[PeerFinding] Error: " + e.getMessage());

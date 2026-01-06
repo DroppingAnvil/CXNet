@@ -33,6 +33,7 @@ public class HTTPBridgeTest {
     public static final String NETWORK_NAME = "CXNET";
     public static final String CXNET_DIR = "C:\\Users\\Alexw\\Documents\\AD\\CXNET";
     public static final Boolean addEpoch = false;
+    public static final Boolean messages = false;
 
     public static void main(String[] args) throws Exception {
         System.out.println("=== EPOCH NMI Terminal - CXNET Network ===\n");
@@ -295,9 +296,13 @@ public class HTTPBridgeTest {
         registerTestEventHandler(server);
 
         // Create test events for blockchain sync testing on both networks
-        System.out.println("\nCreating test blockchain events for sync testing...");
-        createTestBlockchainEvents(server, cxnet);
-        createTestBlockchainEvents(server, testnet);
+        if (messages) {
+            System.out.println("\nCreating test blockchain events for sync testing...");
+            createTestBlockchainEvents(server, cxnet);
+            createTestBlockchainEvents(server, testnet);
+        } else {
+            System.out.println("Skipping messages/blockchain test, this reduces network noise during initialization test");
+        }
 
         // Keep server running
         System.out.println("\nServer is running. Press Ctrl+C to stop.");

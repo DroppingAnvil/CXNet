@@ -1170,7 +1170,7 @@ public class NodeMesh {
                                     java.util.List<String> selectedAddresses = addressList.subList(0, Math.min(addressCount, addressList.size()));
 
                                     //Set response
-                                    response.peers = selectedAddresses;
+                                    response.peers.addAll(addressList);
 
                                     System.out.println("[PeerFinding] Added " + selectedAddresses.size() + " peer addresses from " + seenPeerIDs.size() + " seen peers");
 

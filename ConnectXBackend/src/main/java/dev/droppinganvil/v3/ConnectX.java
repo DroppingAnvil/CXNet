@@ -1317,9 +1317,11 @@ public class ConnectX {
                         // TODO: Persist DataContainer
                         // Save network registrations, blocklists, and other network data
 
-                        // Peer discovery every 5 minutes (10 cycles of 30 seconds)
+                        // Peer discovery every 5 minutes (10 cycles of 30 seconds) PROD
+                        // We are using 30 seconds for testing
+                        //TODO REMOVE TEST
                         cycleCount++;
-                        if (cycleCount >= 10) {
+                        if (cycleCount >= 1) {
                             cycleCount = 0;
 
                             /// Send CXHELLO's to addresses waiting

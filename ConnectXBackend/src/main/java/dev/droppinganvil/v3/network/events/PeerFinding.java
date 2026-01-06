@@ -5,6 +5,7 @@
 
 package dev.droppinganvil.v3.network.events;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class PeerFinding {
@@ -21,7 +22,7 @@ public class PeerFinding {
     LIST of ALL IP/Socket/Bridges that could be connected to 30% max up to 20
     //TODO security eval, implement local security modes?
      */
-    public List<String> peers;
+    public List<String> peers = new ArrayList<>();
     /*
     If this field is included it should indicate that a peer is bootstrapping/peerfind a specific network
     Randomly select up to 50 nodes from that network and include them all SIGNED FROM ORIGIN

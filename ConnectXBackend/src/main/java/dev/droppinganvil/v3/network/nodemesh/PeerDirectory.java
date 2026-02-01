@@ -41,7 +41,7 @@ public class PeerDirectory implements Serializable {
     //TODO
     //Writing node lookup and create account implementation, next up create peer finding event
     public Node lookup(String cxID, boolean tryImport, boolean sync) throws UnsafeKeywordException {
-        return lookup(cxID, tryImport, sync, null, null);
+        return lookup(cxID, tryImport, sync, connectX.cxRoot, connectX);
     }
 
     public Node lookup(String cxID, boolean tryImport, boolean sync, File cxRoot, ConnectX cx) throws UnsafeKeywordException {
@@ -73,12 +73,13 @@ public class PeerDirectory implements Serializable {
                         try {
                             Node node = null;
                             if (cx != null) {
-                                node = (Node) cx.getSignedObject(cxID, peer.toURL().openStream(), Node.class, "cxJSON1");
-                                cx.encryptionProvider.cacheCert(cxID, false, false, connectX);
-                            }
-                            if (node != null) {
-                                peerCache.put(cxID, node);
-                                return node;
+                                node = (Node) cx.getSignedObjectNoVerify(peer.toURL().openStream(), Node.class, "cxJSON1");
+                                if (node != null) {
+                                    peerCache.put(cxID, node);
+                                    seen.put(cxID, node);
+                                    cx.encryptionProvider.cacheCert(cxID, false, false, connectX);
+                                    return node;
+                                }
                             }
                         } catch (Exception e) {
                             e.printStackTrace();

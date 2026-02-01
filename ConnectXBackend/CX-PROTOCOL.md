@@ -552,6 +552,7 @@ if (parsedEvent.eT.equals("NewNode") || parsedEvent.eT.equals("CXHELLO")) {
 
 ```java
 /**
+ * NOTE: Builder is accessed ConnectX.buildEvent()
  * Sign the event data payload
  * Replaces event.d with a signed blob, preserving the original signature for relay
  * Used for NewNode events where the Node blob must be signed by the sender

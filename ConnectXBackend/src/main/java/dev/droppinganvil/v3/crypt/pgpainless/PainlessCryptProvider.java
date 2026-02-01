@@ -149,7 +149,7 @@ public class PainlessCryptProvider extends CryptProvider {
 
         // Cache all recipient certificates
         for (String cxID : recipientCxIDs) {
-            if (!cacheCert(cxID, false, true, super.connectX)) {
+            if (!cacheCert(cxID, true, true, super.connectX)) {
                 throw new EncryptionFailureException("Failed to cache certificate for recipient: " + cxID + " This generally indicates that a recipient peer has never been met");
             }
         }
@@ -230,7 +230,7 @@ public class PainlessCryptProvider extends CryptProvider {
                     .onInputStream(is)
                     .withOptions(new ConsumerOptions()
                             .addDecryptionKey(secretKey, protector)
-                            .addVerificationCert(certCache.get(certCache.get(cxID)))
+                            .addVerificationCert(certCache.get(cxID))
                     );
             Streams.pipeAll(decryptionStream, os);
             decryptionStream.close();
@@ -346,8 +346,14 @@ public class PainlessCryptProvider extends CryptProvider {
         }
         try {
             Node n = connectX.nodeMesh.peerDirectory.lookup(cxID, tryImport, sync);
+            System.out.println(n);
             if (n != null) {
-                PGPPublicKeyRing cert = PGPainless.readKeyRing().publicKeyRing(n.publicKey);
+                PGPPublicKeyRing cert = PGPainless.readKeyRing()
+                        .publicKeyRing(
+                                new ByteArrayInputStream(
+                                        java.util.Base64.getDecoder().decode(n.publicKey)
+                                )
+                        );
                 if (cert != null) {
                     certCache.put(cxID, cert);
                     return true;

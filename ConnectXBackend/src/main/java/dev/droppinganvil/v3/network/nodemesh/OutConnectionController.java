@@ -239,6 +239,7 @@ public class OutConnectionController {
                             totalPeers++;
                             // MULTI-PATH ROUTING: Use getAllAddresses() to check all sources
                             java.util.List<String> addresses = connectXAPI.nodeMesh.peerDirectory.getAllAddresses(n.cxID, connectXAPI);
+                            if (addresses.contains(connectXAPI.getSelf().addr)) {continue;}
                             StringBuilder routes = new StringBuilder();
                             boolean sentToThisPeer = false;
 

@@ -1,5 +1,6 @@
 package dev.droppinganvil.v3.network.nodemesh;
 
+import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import dev.droppinganvil.v3.ConnectX;
 import dev.droppinganvil.v3.analytics.AnalyticData;
 import dev.droppinganvil.v3.analytics.Analytics;
@@ -17,6 +18,7 @@ import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -27,6 +29,7 @@ public class NodeMesh {
     // Global static fields for security (shared across all peers)
     public static ConcurrentHashMap<String, Integer> timeout = new ConcurrentHashMap<>();
     public static ConcurrentHashMap<String, String> blacklist = new ConcurrentHashMap<>();
+    public HashSet<String> ownAddresses = new HashSet<>();
     public static ThreadPoolExecutor threadPool = (ThreadPoolExecutor) Executors.newFixedThreadPool(NodeConfig.pThreads);
 
     // Instance fields (per-peer)
@@ -179,7 +182,7 @@ public class NodeMesh {
                 eventPeekStream.close();
                 eventPeekBaos.close();
 
-                if (peekedEvent.eT == null || !(peekedEvent.eT.equals("NewNode") || peekedEvent.eT.equals("CXHELLO"))) {
+                if (peekedEvent.eT == null || !(peekedEvent.eT.equals("NewNode") || peekedEvent.eT.equals("CXHELLO") || peekedEvent.eT.equals("CXHELLO_RESPONSE") || peekedEvent.eT.equals("SEED_REQUEST") || peekedEvent.eT.equals("PeerFinding"))) {
                     // NOT a bootstrap message from unknown sender - REJECT
                     if (socket != null) socket.close();
                     Analytics.addData(AnalyticData.Tear, "Message from unknown sender " + unverifiedContainer.iD +
@@ -258,6 +261,11 @@ public class NodeMesh {
 
                 // Check if this is a NewNode or CXHELLO event (both need public key import before verification)
                 if (parsedEvent.eT != null && (parsedEvent.eT.equals("NewNode") || parsedEvent.eT.equals("CXHELLO"))) {
+                    if (nc.iD.equals(connectX.getOwnID())) {
+                        System.out.println("[NodeMesh] Rejecting peer finding from self");
+                        ownAddresses.add(socket.getLocalSocketAddress().toString());
+                        return;
+                    }
                     System.out.println("[NodeMesh] Processing " + parsedEvent.eT + " event from " + nc.iD);
 
                     // Import node BEFORE verification (we need the public key)
@@ -326,7 +334,7 @@ public class NodeMesh {
                                 ByteArrayOutputStream strippedPayloadStream = new ByteArrayOutputStream();
 
                                 // Check if we have the sender's key cached (known sender vs unknown sender)
-                                boolean isKnownSender = connectX.encryptionProvider.cacheCert(originSender, false, false, connectX);
+                                boolean isKnownSender = connectX.encryptionProvider.cacheCert(originSender, true, false, connectX);
 
                                 if (isKnownSender) {
                                     // Known sender: verify and strip signature
@@ -465,18 +473,23 @@ public class NodeMesh {
                     ByteArrayOutputStream decryptedJSON = new ByteArrayOutputStream();
                     //TODO
                     //TODO Move PGP specific actions back to PainlessCryptProvider, will need another refactor
-                    OpenPgpMetadata o3 = (OpenPgpMetadata) connectX.encryptionProvider.decrypt(baiss, decryptedJSON);
+                    OpenPgpMetadata o3 = (OpenPgpMetadata) connectX.encryptionProvider.decrypt(baiss, decryptedJSON, ne.p.oCXID, true);
                     byte[] arr1 = null;
                     arr1 = decryptedJSON.toByteArray();
                     if (arr1 != null && arr1.length > 0) {
                         //TODO This is fine for testing, but, we need to consider better handling of E2E events when peers have not met. Possibly including origin node data in E2E coms
                         String senderCXID = ne.p.oCXID;
                         //TODO More PGP specific code
+                        connectX.nodeMesh.peerDirectory.lookup(senderCXID, true, true);
                         PGPPublicKeyRing originPub = ((PainlessCryptProvider) connectX.encryptionProvider).certCache.get(senderCXID);
+
                         if (senderCXID != null && originPub != null && o3.containsVerifiedSignatureFrom(originPub)) {
                             ib.verifiedObjectBytes = arr1;
                         } else {
                             System.out.println("[NodeMesh] E2E Decryption validation failure, 005");
+                            System.out.println(senderCXID);
+                            System.out.println(originPub.getPublicKey().toString());
+                            System.out.println(o3.containsVerifiedSignatureFrom(originPub));
                         }
                     } else {
                         System.out.println("[NodeMesh] Internal event data verification failure, rejecting event. 006");
@@ -522,6 +535,9 @@ public class NodeMesh {
                 }
             }
         } catch (Exception e) {
+            if (e instanceof MismatchedInputException) {
+                return;
+            }
             e.printStackTrace();
             if (!NodeConfig.devMode && socketAddress != null) {
                 if (NodeMesh.timeout.containsKey(socketAddress)) {
@@ -632,7 +648,6 @@ public class NodeMesh {
                                     dev.droppinganvil.v3.network.events.CXHello.class);
                 } else {
                     helloData = (CXHello) ib.object;
-                    System.out.println("[NodeMesh] REMOVE THIS, new IB use");
                 }
                 } else {
                     helloData = (dev.droppinganvil.v3.network.events.CXHello) ib.object;
@@ -643,23 +658,25 @@ public class NodeMesh {
                 String requestPeerID = helloData.peerID;
                 int requestPort = helloData.port;
                 String peerProvidedAddress = helloData.address;
+                if (!requestPeerID.equals(connectX.getSelf().cxID)) {
 
-                // Record addresses with PRIORITY (prepends to address list)
-                // Priority order (index 0 = highest): peer-provided > socket-based > ephemeral
+                    // Record addresses with PRIORITY (prepends to address list)
+                    // Priority order (index 0 = highest): peer-provided > socket-based > ephemeral
 
-                // 1. Record socket-based address (socket IP + listening port from payload)
-                if (socketAddress != null && requestPort > 0) {
-                    String socketBasedAddress = socketAddress + ":" + requestPort;
-                    connectX.dataContainer.recordLocalPeer(requestPeerID, socketBasedAddress, true);
-                    System.out.println("[processNetworkInput] " + et.name() + ": Recorded socket-based address " +
-                        socketBasedAddress + " for " + requestPeerID.substring(0, 8));
-                }
+                    // 1. Record socket-based address (socket IP + listening port from payload)
+                    if (socketAddress != null && requestPort > 0) {
+                        String socketBasedAddress = socketAddress + ":" + requestPort;
+                        connectX.dataContainer.recordLocalPeer(requestPeerID, socketBasedAddress, true);
+                        System.out.println("[processNetworkInput] " + et.name() + ": Recorded socket-based address " +
+                                socketBasedAddress + " for " + requestPeerID.substring(0, 8));
+                    }
 
-                // 2. Record peer-provided address (HIGHEST priority - will be at index 0)
-                if (peerProvidedAddress != null && !peerProvidedAddress.isEmpty()) {
-                    connectX.dataContainer.recordLocalPeer(requestPeerID, peerProvidedAddress, true);
-                    System.out.println("[processNetworkInput] " + et.name() + ": Recorded PEER-PROVIDED address (highest priority) " +
-                        peerProvidedAddress + " for " + requestPeerID.substring(0, 8));
+                    // 2. Record peer-provided address (HIGHEST priority - will be at index 0)
+                    if (peerProvidedAddress != null && !peerProvidedAddress.isEmpty()) {
+                        connectX.dataContainer.recordLocalPeer(requestPeerID, peerProvidedAddress, true);
+                        System.out.println("[processNetworkInput] " + et.name() + ": Recorded PEER-PROVIDED address (highest priority) " +
+                                peerProvidedAddress + " for " + requestPeerID.substring(0, 8));
+                    }
                 }
             }
         } catch (Exception e) {
@@ -906,7 +923,6 @@ public class NodeMesh {
                                             (dev.droppinganvil.v3.network.events.CXHello) ConnectX.deserialize("cxJSON1", responsePayloadJson,
                                                     dev.droppinganvil.v3.network.events.CXHello.class);
                                 } else {
-                                    System.out.println("[NodeMesh] REMOVE THIS, Trying new InputBundle readyObject");
                                     responseData = (CXHello) ib.object;
                                 }
                             } else {
@@ -1095,7 +1111,7 @@ public class NodeMesh {
                 switch (et) {
                     case MESSAGE:
                         // Display received message
-                        String message = new String(eventPayload, "UTF-8");
+                        String message = new String(ib.verifiedObjectBytes, "UTF-8");
                         System.out.println("\n[" + connectX.getOwnID() + "] RECEIVED MESSAGE: " + message);
                         if (ne.p != null) {
                             System.out.println("  From network: " + ne.p.network);
@@ -1107,7 +1123,7 @@ public class NodeMesh {
                         try {
                             // Parse PeerFinding request/response
                             dev.droppinganvil.v3.network.events.PeerFinding pf =
-                                (dev.droppinganvil.v3.network.events.PeerFinding) ConnectX.deserialize("cxJSON1", new String(eventPayload, "UTF-8"),
+                                (dev.droppinganvil.v3.network.events.PeerFinding) ConnectX.deserialize("cxJSON1", new String(ib.verifiedObjectBytes, "UTF-8"),
                                     dev.droppinganvil.v3.network.events.PeerFinding.class);
                            // dev.droppinganvil.v3.network.events.PeerFinding pff = dev.droppinganvil.v3.network.events.PeerFinding) connectX.encryptionProvider.verifyAndStrip()
 

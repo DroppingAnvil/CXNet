@@ -1,37 +1,32 @@
 package dev.droppinganvil.v3.test;
 
 import dev.droppinganvil.v3.ConnectX;
-import dev.droppinganvil.v3.network.CXPath;
 import dev.droppinganvil.v3.network.events.EventType;
-import dev.droppinganvil.v3.network.events.NetworkEvent;
 import dev.droppinganvil.v3.network.nodemesh.Node;
-import dev.droppinganvil.v3.network.nodemesh.OutputBundle;
 import dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider;
-import dev.droppinganvil.v3.network.nodemesh.bridge.http.HTTPBridgeProvider;
 
 /**
  * HTTP Bridge Test
  *
  * Tests cxHTTP1 bridge provider with RProx reverse proxy
+ * This test is also what is being used to serve as a bootstrap server
  *
  * CONFIGURATION REQUIRED:
  * 1. Enable RProx at AnvilDevelopment.US/rprox.html
  * 2. Configure target: http://[YOUR_IP]:8080
- * 3. Public URL will be: https://CXNET.AnvilDevelopment.US/cx
  *
  * This test will:
  * - Start HTTP server on localhost:8080
- * - Wait for RProx to be configured
  * - Accept test messages from another client
  */
-public class HTTPBridgeTest {
+public class BootstrapServerTest {
 
     public static final int HTTP_PORT = 8080;   // HTTP bridge (for RProx/HTTP clients)
     public static final int P2P_PORT = 49152;   // P2P mesh (for direct CX connections)
     // EPOCH NMI UUID - persistent identifier for the network master node
     public static final String SERVER_ID = "00000000-0000-0000-0000-000000000001";
     public static final String NETWORK_NAME = "CXNET";
-    public static final String CXNET_DIR = "C:\\Users\\Alexw\\Documents\\AD\\CXNET";
+    public static final String CXNET_DIR = "ConnectX-EPOCH";
     public static final Boolean addEpoch = false;
     public static final Boolean messages = false;
 
@@ -53,7 +48,7 @@ public class HTTPBridgeTest {
         try {
             // Enable EPOCH mode - this node IS the NMI (Network Master Identity)
             // TODO: Remove after HTTP bridge seed download is implemented
-            ((dev.droppinganvil.v3.crypt.pgpainless.PainlessCryptProvider) server.encryptionProvider).setEpochMode(true);
+            server.encryptionProvider.setEpochMode(true);
 
             // Generate new key pair with password "cxnet" for EPOCH
             server.encryptionProvider.setup(SERVER_ID, "cxnet", server.cxRoot);

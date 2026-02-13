@@ -12,5 +12,7 @@ public abstract class CXPlugin {
     public CXPlugin(String serviceName) {
         this.serviceName = serviceName;
     }
-    public boolean handleEvent(NetworkEvent ne) {return true;}
+    public Class<?> type = null;
+    public DataLevel dataLevel = null;
+    public boolean handleEvent(Object data) {return true;}
 }

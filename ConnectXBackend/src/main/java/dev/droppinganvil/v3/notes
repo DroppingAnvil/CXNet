@@ -1,9 +1,0 @@
-Encryption Layers
-NetworkContainer - Signed by transmitter
-NetworkEvent - Signed by event sender or E2E
-NetworkEvent/Data - Event specific, functions displayed by ConnectX core are mostly signed because those functions are intended to run globally inside an application it should always be E2E
-
-
-
-
-have resource managemenet class iterate and verify resources

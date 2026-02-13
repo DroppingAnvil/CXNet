@@ -16,11 +16,12 @@ import java.util.UUID;
 
 /**
  * In this test Peer1 will create two networks, CXNET (The global network, created on this peer for concept) and TESTNET (This network will be primarily used for testing purposes)
+ * MultiPeerTest is still used in favor of this test for now
  */
 public class CXPeer1Test {
     public static final boolean addEpoch = true;
     public static final String NETWORK_NAME = "CXNET";
-    public static final String EPOCH_DIR = "C:\\Users\\Alexw\\Documents\\AD\\CXNET";
+    public static final String EPOCH_DIR = "ConnectX-EPOCH";
     public static final String SERVER_ID = "00000000-0000-0000-0000-000000000001";
     public static final int EPOCH_P2P_PORT = 49152;
     public static final int EPOCH_HTTP_PORT = 8080;
@@ -109,7 +110,7 @@ public class CXPeer1Test {
         try {
             // Enable EPOCH mode - this node IS the NMI (Network Master Identity)
             // TODO: Remove after HTTP bridge seed download is implemented
-            ((dev.droppinganvil.v3.crypt.pgpainless.PainlessCryptProvider) server.encryptionProvider).setEpochMode(true);
+            server.encryptionProvider.setEpochMode(true);
 
             // Generate new key pair with password "cxnet" for EPOCH
             server.encryptionProvider.setup(SERVER_ID, "cxnet", server.cxRoot);
@@ -142,10 +143,7 @@ public class CXPeer1Test {
 
         // Initialize and add EPOCH to peer directory for signature verification
         if (addEpoch) {
-            if (server.nodeMesh.peerDirectory.hv == null) {
-                server.nodeMesh.peerDirectory.hv = new java.util.concurrent.ConcurrentHashMap<>();
-            }
-            server.nodeMesh.peerDirectory.hv.put(SERVER_ID, serverNode);
+            server.registerHVPeer(serverNode);
             System.out.println("  ✓ EPOCH added to peer directory");
         }
 

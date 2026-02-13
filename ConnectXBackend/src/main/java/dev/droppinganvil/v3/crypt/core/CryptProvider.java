@@ -119,6 +119,15 @@ public abstract class CryptProvider {
     public void setup(String cxID, String s, File dir) throws Exception {
 
     }
+
+    /**
+     * Set epoch (NMI) mode for this crypto provider.
+     * When true, this node's own key is used as the network master key.
+     * Subclasses should override this if they support epoch mode.
+     */
+    public void setEpochMode(boolean epochMode) {
+        // Default no-op; override in implementations that support epoch mode
+    }
     public boolean cacheCert(String cxID, boolean tryImport, boolean sync, ConnectX connectX) {return false;}
     public void shutdown() {
 

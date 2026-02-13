@@ -776,7 +776,7 @@ public class NodeMesh {
             try {
                 et = EventType.valueOf(ib.ne.eT);
             } catch (Exception ignored) {}
-            if (et == null & !ConnectX.sendPluginEvent(ib.ne, ib.ne.eT)) {
+            if (et == null & !connectX.sendPluginEvent(ib, ib.ne.eT)) {
                 Analytics.addData(AnalyticData.Tear, "Unsupported event - "+ib.ne.eT);
                 System.out.print("UNABLE TO PROCESS UNKNOWN EVENT");
                 if (NodeConfig.supportUnavailableServices) {
@@ -1100,7 +1100,7 @@ public class NodeMesh {
         boolean handledLocally = false;
 
         // Step 1: Try plugin system for application-level handling
-        if (ConnectX.sendPluginEvent(ne, ne.eT)) {
+        if (connectX.sendPluginEvent(ib, ne.eT)) {
             handledLocally = true;
         }
 
@@ -1754,7 +1754,7 @@ public class NodeMesh {
                             // Check if CXNET-level or network-specific block
                             if ("CXNET".equals(networkID)) {
                                 // CXNET-level block: blocks ALL transmissions from node globally
-                                ConnectX.blockNodeCXNET(nodeID, reason);
+                                connectX.blockNodeCXNET(nodeID, reason);
                             } else {
                                 // Network-specific block (stored in local DataContainer)
                                 connectX.dataContainer.blockNode(networkID, nodeID, reason);
@@ -1786,7 +1786,7 @@ public class NodeMesh {
                             // Check if CXNET-level or network-specific unblock
                             if ("CXNET".equals(networkID)) {
                                 // CXNET-level unblock
-                                ConnectX.unblockNodeCXNET(nodeID);
+                                connectX.unblockNodeCXNET(nodeID);
                             } else {
                                 // Network-specific unblock (stored in local DataContainer)
                                 String removedReason = connectX.dataContainer.unblockNode(networkID, nodeID);

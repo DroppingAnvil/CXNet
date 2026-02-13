@@ -121,10 +121,10 @@ public class CXNetwork {
         return networkPermissions.allowed(deviceID, permission);
     }
 
-    public boolean checkGlobalPermission(String deviceID, String permission) {
+    public boolean checkGlobalPermission(String deviceID, String permission, ConnectX connectX) {
         // Note: Global permissions are managed by CXNET, not individual networks
         // Zero trust mode only affects network-level permissions, not global ones
-        return ConnectX.checkGlobalPermission(deviceID, permission);
+        return connectX.checkGlobalPermission(deviceID, permission);
     }
 
     public Integer getVariableNetworkPermission(String deviceID, String permission) {

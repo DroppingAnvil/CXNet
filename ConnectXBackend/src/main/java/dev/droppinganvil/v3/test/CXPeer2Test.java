@@ -8,6 +8,10 @@ package dev.droppinganvil.v3.test;
 import dev.droppinganvil.v3.ConnectX;
 import dev.droppinganvil.v3.network.events.EventType;
 
+/**
+ * This class exist to test the ease of use of ConnectX API as well as test networking functionality
+ * Peer2 will be created or loaded send message "Hello from peer2!" to 01
+ */
 public class CXPeer2Test {
     public static ConnectX peer2 = null;
 

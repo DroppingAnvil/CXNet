@@ -61,7 +61,9 @@ public class ConnectX {
     private final ConcurrentHashMap<String, CXNetwork> networkMap = new ConcurrentHashMap<>();
     public CryptProvider encryptionProvider = null;
     private static final transient ConcurrentHashMap<String, SerializationProvider> serializationProviders = new ConcurrentHashMap<>();
-    public static final ConcurrentHashMap<String, CXBridge> bridgeMap = new ConcurrentHashMap<>(); // Legacy - deprecated
+    /** @deprecated Use per-instance bridge providers via {@link #addBridgeProvider} instead. */
+    @Deprecated
+    public static final ConcurrentHashMap<String, CXBridge> bridgeMap = new ConcurrentHashMap<>();
 
     // IMPORTANT: Per-instance bridge providers to support multiple ConnectX instances in same JVM
     // Each instance gets its own bridge provider instances (e.g., separate HTTP servers on different ports)
@@ -78,10 +80,9 @@ public class ConnectX {
     public File cxRoot = new File("ConnectX");
     public File nodemesh;
     public File resources;
-    private transient static CXNetwork cx;
     private transient Node self;
     public int listeningPort = 0;
-    private static ConcurrentHashMap<String, CXPlugin> plugins = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, CXPlugin> plugins = new ConcurrentHashMap<>();
     private static transient List<String> reserved = Arrays.asList("SYSTEM", "CX", "cxJSON1", "CXNET");
 
     /**
@@ -93,7 +94,7 @@ public class ConnectX {
      * When a node is blocked at CXNET level, ALL transmissions from that node are rejected
      * This is separate from network-specific blocks (stored in CXNetwork.blockedNodes)
      */
-    private static ConcurrentHashMap<String, String> cxnetBlockedNodes = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> cxnetBlockedNodes = new ConcurrentHashMap<>();
 
     public NodeMesh nodeMesh;
     public BlockchainPersistence blockchainPersistence;
@@ -851,6 +852,20 @@ public class ConnectX {
 
     public Node getSelf() {
         return self;
+    }
+
+    /**
+     * Register a high-value peer (e.g., NMI/EPOCH) in the peer directory.
+     * Use this instead of accessing nodeMesh.peerDirectory.hv directly.
+     *
+     * @param node The trusted node to register
+     */
+    public void registerHVPeer(Node node) {
+        if (nodeMesh == null || node == null || node.cxID == null) return;
+        if (nodeMesh.peerDirectory.hv == null) {
+            nodeMesh.peerDirectory.hv = new java.util.concurrent.ConcurrentHashMap<>();
+        }
+        nodeMesh.peerDirectory.hv.put(node.cxID, node);
     }
 
     /**
@@ -1891,10 +1906,11 @@ public class ConnectX {
         }
     }
 
-    public static boolean checkGlobalPermission(String cxID, String permission) {
-        assert cx != null;
+    public boolean checkGlobalPermission(String cxID, String permission) {
         assert !cxID.contains("SYSTEM");
-        return cx.checkNetworkPermission(cxID, permission);
+        CXNetwork cxnet = getNetwork("CXNET");
+        if (cxnet == null) return false;
+        return cxnet.checkNetworkPermission(cxID, permission);
     }
 
     /**
@@ -1903,7 +1919,7 @@ public class ConnectX {
      * @param nodeID Node UUID to check
      * @return true if node is blocked at CXNET level
      */
-    public static boolean isCXNETBlocked(String nodeID) {
+    public boolean isCXNETBlocked(String nodeID) {
         return cxnetBlockedNodes.containsKey(nodeID);
     }
 
@@ -1913,7 +1929,7 @@ public class ConnectX {
      * @param nodeID Node UUID to block
      * @param reason Block reason/metadata
      */
-    public static void blockNodeCXNET(String nodeID, String reason) {
+    public void blockNodeCXNET(String nodeID, String reason) {
         cxnetBlockedNodes.put(nodeID, reason);
         System.out.println("[CXNET] Blocked node globally: " + nodeID + " (reason: " + reason + ")");
     }
@@ -1923,7 +1939,7 @@ public class ConnectX {
      * This should only be called when processing an UNBLOCK_NODE event where network="CXNET"
      * @param nodeID Node UUID to unblock
      */
-    public static void unblockNodeCXNET(String nodeID) {
+    public void unblockNodeCXNET(String nodeID) {
         String reason = cxnetBlockedNodes.remove(nodeID);
         if (reason != null) {
             System.out.println("[CXNET] Unblocked node globally: " + nodeID + " (was blocked for: " + reason + ")");
@@ -1953,7 +1969,7 @@ public class ConnectX {
     public static File locateResourceDIR(ConnectX cx, Resource r) {
         return cx.locateResourceDIR(r);
     }
-    public static boolean addPlugin(CXPlugin cxp) {
+    public boolean addPlugin(CXPlugin cxp) {
         try {
             checkSafety(cxp.serviceName);
         } catch (Exception e) {
@@ -1963,9 +1979,26 @@ public class ConnectX {
         plugins.put(cxp.serviceName, cxp);
         return true;
     }
-    public static boolean sendPluginEvent(NetworkEvent ne, String eventType) {
+    public boolean sendPluginEvent(InputBundle ib, String eventType) {
         if (!plugins.containsKey(eventType)) return false;
-        return plugins.get(eventType).handleEvent(ne);
+        CXPlugin plugin = plugins.get(eventType);
+        try {
+            switch (plugin.dataLevel != null ? plugin.dataLevel : dev.droppinganvil.v3.api.DataLevel.NETWORK_EVENT) {
+                case INPUT_BUNDLE:
+                    return plugin.handleEvent(ib);
+                case OBJECT:
+                    if (plugin.type == null || ib.verifiedObjectBytes == null) return false;
+                    String se = (ib.nc != null && ib.nc.se != null) ? ib.nc.se : "cxJSON1";
+                    if (!ib.readyObject(plugin.type, se, this)) return false;
+                    return plugin.handleEvent(ib.object);
+                case NETWORK_EVENT:
+                default:
+                    return plugin.handleEvent(ib.ne);
+            }
+        } catch (Exception e) {
+            System.err.println("[Plugin] Error dispatching event to plugin '" + eventType + "': " + e.getMessage());
+            return false;
+        }
     }
     /**
      * Record a NetworkEvent to the blockchain

@@ -1,7 +1,24 @@
 # ConnectX (CX) Protocol Documentation
 
-**Version:** 3.1
-**Last Updated:** 2025-01-01 (Zero Trust & Consensus)
+**Version:** 3.2
+**Last Updated:** 2026-02-12 (Plugin System, Per-Instance Architecture)
+**Status:** Early Development — core networking and event API are functional; many subsystems are incomplete or in progress
+
+---
+
+## Recent Updates (v3.2)
+
+### Plugin System
+- `CXPlugin` base class with `handleEvent(Object data)` and `DataLevel` dispatch
+- `DataLevel` enum: `NETWORK_EVENT`, `INPUT_BUNDLE`, `OBJECT`
+- `CXMessagePlugin` convenience base for plain-text message handling
+- `ConnectX.addPlugin()` / `sendPluginEvent(InputBundle, eventType)` — fully per-instance
+
+### Per-Instance Architecture Completion
+- `plugins` and `cxnetBlockedNodes` moved from static to per-instance fields
+- `blockNodeCXNET`, `unblockNodeCXNET`, `isCXNETBlocked`, `addPlugin`, `sendPluginEvent` are now instance methods
+- `ConnectX.registerHVPeer(Node)` replaces direct `peerDirectory.hv` access
+- `CryptProvider.setEpochMode(boolean)` promoted to base class — no implementation cast required
 
 ---
 
@@ -41,7 +58,8 @@
 5. [Blockchain Structure](#blockchain-structure)
 6. [Event System](#event-system)
 7. [Permissions & Access Control](#permissions--access-control)
-8. [Implementation Notes](#implementation-notes)
+8. [Plugin System](#plugin-system)
+9. [Implementation Notes](#implementation-notes)
 
 ---
 
@@ -155,7 +173,7 @@ Trusted infrastructure servers for specific network services.
 Regular participants in networks.
 
 **Storage:**
-- `PeerDirectory.hv` - High-value peer cache (active peers)
+- `PeerDirectory.hv` - High-value peer cache (active peers) — use `ConnectX.registerHVPeer(Node)` to add
 - `PeerDirectory.lan` - LAN peers
 - `PeerDirectory.peerCache` - General peer cache
 - `PeerDirectory.seen` - Last seen timestamps
@@ -3608,6 +3626,55 @@ Events marked with `executeOnSync = true` are queued during blockchain sync to r
 - ZERO_TRUST_ACTIVATION
 - BLOCK_NODE
 - UNBLOCK_NODE
+
+---
+
+## Plugin System
+
+Plugins allow application code to intercept any event type by registering against a service name that matches an `EventType` string. The framework dispatches events to plugins before its own internal handlers, so plugins can handle custom or extended event types.
+
+### Registration
+
+```java
+connectX.addPlugin(myCXPlugin);
+```
+
+Service names matching reserved types (`SYSTEM`, `CX`, `cxJSON1`, `CXNET`) are rejected.
+
+### DataLevel
+
+The `DataLevel` field on `CXPlugin` controls what data is passed to `handleEvent(Object)`:
+
+| Level           | `handleEvent` receives                                     |
+|-----------------|------------------------------------------------------------|
+| `NETWORK_EVENT` | `NetworkEvent` — raw event with type, sender ID, payload   |
+| `INPUT_BUNDLE`  | `InputBundle` — signed bytes, verified bytes, container    |
+| `OBJECT`        | Deserialized object of `plugin.type` via `nc.se` provider  |
+
+Default (null) falls back to `NETWORK_EVENT`.
+
+### CXMessagePlugin
+
+A prebuilt abstract base for `MESSAGE` events. Override `onMessage(String senderID, String message)`:
+
+```java
+peer.addPlugin(new CXMessagePlugin() {
+    public void onMessage(String from, String message) {
+        System.out.println(from + ": " + message);
+    }
+});
+```
+
+### Dispatch Flow
+
+```
+NodeMesh receives event
+  → connectX.sendPluginEvent(ib, eventType)
+      → if OBJECT: ib.readyObject(type, nc.se, connectX) then handleEvent(ib.object)
+      → if INPUT_BUNDLE: handleEvent(ib)
+      → if NETWORK_EVENT: handleEvent(ib.ne)
+  → if no plugin handled it, NodeMesh processes known EventTypes internally
+```
 
 ---
 

@@ -1,0 +1,37 @@
+# Build output
+ConnectXBackend/target/
+
+# Test peer runtime directories (generated at runtime)
+ConnectX-Peer*/blockchain/
+ConnectX-Peer*/nodemesh/
+ConnectX-Peer*/seeds/
+ConnectXBackend/ConnectX-Peer*/blockchain/
+ConnectXBackend/ConnectX-Peer*/nodemesh/
+ConnectXBackend/ConnectX-Peer*/seeds/
+CX-PEER*/
+ConnectX-LANTest*/
+ConnectX-LateJoiner/
+
+# EPOCH node data (contains private keys - never commit)
+ConnectX-EPOCH/
+
+# Test logs
+*.log
+multipeer_test.log
+multipeer_complete_test.log
+multipeer_cxi_test.log
+epoch_complete_test.log
+
+# Windows NUL device artifact
+nul
+ConnectXBackend/nul
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# OS
+.DS_Store
+Thumbs.db

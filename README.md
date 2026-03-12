@@ -1,6 +1,6 @@
 # ConnectX
 
-> **Early Development — Work in Progress**
+> **Early Development - Work in Progress**
 > The core networking, encryption, and event API are functional and tested. Many subsystems (blockchain sync, Zero Trust activation, LAN discovery, resource management, login, remote directory) are partially or not yet implemented.
 
 A decentralized P2P mesh network framework with end-to-end PGP encryption, blockchain-based event persistence, and a fluent Java API.
@@ -9,7 +9,7 @@ A decentralized P2P mesh network framework with end-to-end PGP encryption, block
 
 ## Quick Start
 
-### Spin up a peer and send a signed message — 4 lines
+### Spin up a peer and send a signed message - 4 lines
 
 ```java
 ConnectX peer = new ConnectX("CX-PEER3", 49158, "03006000-0400-0500-0000-007000000001", "Peer3");
@@ -18,7 +18,7 @@ peer.setPublicBridgeAddress("cxHTTP1", "https://cx7.anvildevelopment.us/cx");
 peer.buildEvent(EventType.MESSAGE, "Hello network!".getBytes()).toPeer("00000000-0000-0000-0000-000000000001").signData().queue();
 ```
 
-### Receive messages with a plugin — 3 lines
+### Receive messages with a plugin - 3 lines
 
 ```java
 peer.addPlugin(new CXMessagePlugin() {
@@ -34,22 +34,41 @@ The constructor handles key generation, filesystem setup, HTTP bridge registrati
 
 ## What is ConnectX?
 
-ConnectX (CX) is a peer-to-peer mesh network protocol and Java framework built for distributed applications. Each node connects directly to peers, routes events through a mesh, signs every transmission with PGP, and optionally persists events to a per-network blockchain — all without a central server.
+ConnectX (CX) is a peer-to-peer mesh network protocol and Java framework built for managed decentralized networks. Each node connects directly to peers, routes events through a mesh, signs every transmission with PGP, and optionally persists events to a per-network blockchain, all without a central server.
 
 **CXNET** is the global bootstrap network. Private networks (`CXNetwork`) run on top of it with their own identity, permissions, and blockchain.
 
 ---
 
+## Security Model
+
+ConnectX treats cryptographic identity as the sole basis for trust at the protocol level. Every message, event, and state transition is signed or encrypted by the originating peer before it touches the wire. This is not defense-in-depth. It is exploit-class elimination.
+
+**What this means in practice:** Traditional exploit vectors like use-after-free, buffer overflows, or data races that corrupt in-memory state cannot escalate into protocol-level attacks. If memory corruption mangles a message in transit, it does not become a privilege escalation. It becomes an invalid signature. The data is either authentically from who it claims to be from, or it gets rejected. There is no middle ground where corrupted data gets treated as legitimate.
+
+The protocol enforces this through a **three-layer signature and encryption system**: transport-level signing on every hop (NetworkContainer), message-level signing by the original sender (NetworkEvent), and payload-level encryption for application data. Any tampering at any layer breaks the signature chain and the data is dropped.
+
+The entire attack surface collapses to one well-understood problem: key compromise. CXNet does not pretend to prevent that. No system can. What it does is eliminate every *other* path to network-level damage, and then gives network owners the governance tools to manage the reality of key compromise.
+
+**Managed network governance:** The Network Master Identity (NMI) provisions nodes, assigns permissions through an embedded permissions framework, and configures the trust structure. Ideally nodes operate at equal authority levels within the permission model. When the network owner is ready, Zero Trust mode can be activated, an irreversible decision that permanently locks the trust structure and removes even the NMI's ability to modify it.
+
+**Honest about what cryptography can and can't do:** For real data networks (not cryptocurrency where you can mathematically verify value), there is no way to determine whether an authenticated action was intended or not. If a node's key is compromised and the attacker sends valid signed messages, those are authentic as far as the network is concerned. Same way a stolen badge gets you through a door. The network cannot read minds. What it *can* guarantee is that nobody gets through the door without a badge, which is the part most systems actually fail at.
+
+The same trust boundary every secure system ultimately relies on. CXNet just removes all the other ways to cheat.
+
+---
+
 ## Features
 
-- **Fluent event API** — `buildEvent().toPeer().signData().queue()`
-- **PGP encryption at every layer** — transport (hop-by-hop) and end-to-end
-- **HTTP bridge** — punch through firewalls, no open port required
-- **LAN discovery** — automatic peer discovery on local networks via CXHELLO
-- **3-chain blockchain** per network — Admin (`c1`), Resources (`c2`), Events (`c3`)
-- **Zero Trust mode** — irreversible decentralization, NMI relinquishes control
-- **Plugin system** — extend with `CXPlugin` / `CXMessagePlugin` for custom event handling
-- **Per-instance design** — run multiple independent nodes in the same JVM
+* **Fluent event API** - `buildEvent().toPeer().signData().queue()`
+* **PGP encryption at every layer** - transport (hop-by-hop) and end-to-end
+* **Pluggable cryptography** - PGPainless default, fully swappable via abstract `CryptProvider`
+* **HTTP bridge** - punch through firewalls, no open port required
+* **LAN discovery** - automatic peer discovery on local networks via CXHELLO
+* **3-chain blockchain** per network - Admin (`c1`), Resources (`c2`), Events (`c3`)
+* **Zero Trust mode** - irreversible decentralization, NMI relinquishes control
+* **Plugin system** - extend with `CXPlugin` / `CXMessagePlugin` for custom event handling
+* **Per-instance design** - run multiple independent nodes in the same JVM
 
 ---
 
@@ -57,18 +76,19 @@ ConnectX (CX) is a peer-to-peer mesh network protocol and Java framework built f
 
 ```
 CXNET (Global Bootstrap Network)
-  └── CXNetwork  (e.g. "TESTNET", "MyApp")
-       ├── NMI  (Network Master Identity — creates/controls the network)
-       ├── Backend nodes  (trusted infrastructure, priority routing)
-       └── Peer nodes  (regular participants)
+  |-- CXNetwork  (e.g. "TESTNET", "MyApp")
+       |-- NMI  (Network Master Identity - creates/controls the network)
+       |-- Backend nodes  (trusted infrastructure, priority routing)
+       |-- Peer nodes  (regular participants)
 ```
 
 Each node runs:
-- **NodeMesh** — peer connections, event routing, PeerDirectory
-- **CXNetwork(s)** — one or more logical networks with independent blockchains
-- **CryptProvider** — PGP key management and signing (PGPainless)
-- **HTTP bridge** — Jetty-based servlet for internet-reachable peers
-- **Plugin registry** — application-level event handlers
+
+* **NodeMesh** - peer connections, event routing, PeerDirectory
+* **CXNetwork(s)** - one or more logical networks with independent blockchains
+* **CryptProvider** - PGP key management and signing (PGPainless)
+* **HTTP bridge** - Jetty-based servlet for internet-reachable peers
+* **Plugin registry** - application-level event handlers
 
 ---
 
@@ -76,11 +96,11 @@ Each node runs:
 
 Plugins intercept events by service name (matching `EventType`). Three data levels control what is passed to `handleEvent`:
 
-| `DataLevel`     | Receives                                      |
-|-----------------|-----------------------------------------------|
-| `NETWORK_EVENT` | Raw `NetworkEvent` (default)                  |
-| `INPUT_BUNDLE`  | Full `InputBundle` — signed bytes, container  |
-| `OBJECT`        | Deserialized typed object via `plugin.type`   |
+| `DataLevel` | Receives |
+|---|---|
+| `NETWORK_EVENT` | Raw `NetworkEvent` (default) |
+| `INPUT_BUNDLE` | Full `InputBundle` - signed bytes, container |
+| `OBJECT` | Deserialized typed object via `plugin.type` |
 
 ```java
 // Custom typed plugin example
@@ -114,7 +134,7 @@ peer.buildEvent(EventType.MESSAGE, data).viaBridge("cxHTTP1", "https://example.c
 
 ## Protocol Documentation
 
-See [`ConnectXBackend/CX-PROTOCOL.md`](ConnectXBackend/CX-PROTOCOL.md) for the full protocol specification — encryption layers, blockchain structure, event types, permission system, Zero Trust mode, and consensus mechanism.
+See [`ConnectXBackend/CX-PROTOCOL.md`](ConnectXBackend/CX-PROTOCOL.md) for the full protocol specification covering encryption layers, blockchain structure, event types, permission system, Zero Trust mode, and consensus mechanism.
 
 ---
 

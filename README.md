@@ -134,7 +134,7 @@ peer.buildEvent(EventType.MESSAGE, data).viaBridge("cxHTTP1", "https://example.c
 
 ## Protocol Documentation
 
-See [`ConnectXBackend/CX-PROTOCOL.md`](ConnectXBackend/CX-PROTOCOL.md) for the full protocol specification covering encryption layers, blockchain structure, event types, permission system, Zero Trust mode, and consensus mechanism.
+See [`CX-PROTOCOL.md`](ConnectXBackend/CX-PROTOCOL.md) for the full protocol specification covering encryption layers, blockchain structure, event types, permission system, Zero Trust mode, and consensus mechanism.
 
 ---
 

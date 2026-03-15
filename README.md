@@ -124,10 +124,10 @@ The `EventBuilder` supports three routing modes:
 peer.buildEvent(EventType.MESSAGE, data).toPeer(targetID).signData().queue();
 
 // Network broadcast
-peer.buildEvent(EventType.MESSAGE, data).toNetwork("CXNET").queue();
+peer.buildEvent(EventType.MESSAGE, data).toNetwork("CXNET").signData().queue();
 
 // Explicit bridge
-peer.buildEvent(EventType.MESSAGE, data).viaBridge("cxHTTP1", "https://example.com/cx").queue();
+peer.buildEvent(EventType.MESSAGE, data).viaBridge("cxHTTP1", "https://example.com/cx").signData().queue();
 ```
 
 ---

@@ -1409,41 +1409,54 @@ queueEvent(newNodeBundle);
 **Used in:** LAN Discovery (LANScanner.java:204-240)
 
 ```java
-// Step 1: Create payload
-Map<String, Object> payload = new HashMap<>();
-payload.put("peerID", connectX.getOwnID());
-payload.put("port", primaryPort);
-payload.put("localIP", getLocalIP());
-String payloadJson = ConnectX.serialize("cxJSON1", payload);
+// Step 1: Sign our Node object for .cxi persistence on receiver
+String nodeJson = ConnectX.serialize("cxJSON1", connectX.getSelf());
+ByteArrayOutputStream signedNodeOutput = new ByteArrayOutputStream();
+connectX.encryptionProvider.sign(new ByteArrayInputStream(nodeJson.getBytes("UTF-8")), signedNodeOutput);
+byte[] signedNodeBlob = signedNodeOutput.toByteArray();
 
-// Step 2: Manually create NetworkEvent
-NetworkEvent helloEvent = new NetworkEvent(EventType.CXHELLO, payloadJson.getBytes("UTF-8"));
+// Step 2: Build CXHello payload object
+CXHello helloPayload = new CXHello(
+    connectX.getOwnID(),
+    primaryPort,
+    signedNodeBlob,
+    connectX.getSelf().addr  // preferred reachable address (null = derive from socket)
+);
+String payloadJson = ConnectX.serialize("cxJSON1", helloPayload);
+
+// Step 3: PGP-sign the entire CXHello payload
+ByteArrayOutputStream signedPayloadOutput = new ByteArrayOutputStream();
+connectX.encryptionProvider.sign(new ByteArrayInputStream(payloadJson.getBytes("UTF-8")), signedPayloadOutput);
+byte[] signedPayload = signedPayloadOutput.toByteArray();
+
+// Step 4: Manually create NetworkEvent (signed bytes as payload)
+NetworkEvent helloEvent = new NetworkEvent(EventType.CXHELLO, signedPayload);
 helloEvent.eT = EventType.CXHELLO.name();
-helloEvent.iD = java.util.UUID.randomUUID().toString();
+helloEvent.iD = UUID.randomUUID().toString();
 // DON'T set event.p - leave null for direct transmission fallback
 
-// Step 3: Create target node with address only (NO peer ID)
+// Step 5: Create target node with address only (NO peer ID)
 Node targetNode = new Node();
 targetNode.addr = targetIP + ":" + targetPort;  // e.g., "192.168.1.100:49152"
 // targetNode.cxID = null (unknown - that's the point of discovery!)
 
-// Step 4: Manually create NetworkContainer
+// Step 6: Manually create NetworkContainer
 NetworkContainer nc = new NetworkContainer();
 nc.se = "cxJSON1";
-nc.s = false;  // Not signed (unknown peer, no key exchange yet)
+nc.s = false;   // Not E2E encrypted (no shared key yet)
+nc.iD = connectX.getSelf().cxID;  // Sender ID (like NewNode pattern)
 
-// Step 5: Create OutputBundle directly
+// Step 7: Create OutputBundle and queue
 OutputBundle bundle = new OutputBundle(helloEvent, targetNode, null, null, nc);
-
-// Step 6: Queue directly
 connectX.queueEvent(bundle);
 ```
 
 **Why This Works for CXHELLO:**
-- We DON'T know the peer's ID (discovering them!)
-- We DO know their address (from LAN scan)
-- We DON'T set event.p (Permission/CXPath) - leave null
-- This triggers direct transmission fallback in OutConnectionController (line 252-266)
+- We DON'T know the peer's ID (discovering them!) — `event.p` is null
+- We DO know their address (from LAN scan) — set on `targetNode.addr`
+- The null `event.p` triggers the direct transmission fallback in `OutConnectionController`
+- The payload is PGP-signed so the receiver can verify sender identity before key import
+- The embedded `signedNode` lets the receiver persist our identity without a prior key exchange
 
 ### Routing Logic in OutConnectionController
 
@@ -2604,39 +2617,26 @@ for (NetworkEvent event : block.networkEvents.values()) {
 
 ### Sync Strategy
 
-**Recommended Approach:**
+> **Note:** Blockchain sync is being made fully automatic. When a network is loaded or joined, ConnectX already automatically sends a `CHAIN_STATUS_REQUEST` to the NMI and, upon receiving the response, calls `initiateSyncFromPeer` to request any missing blocks. Full automatic sync on peer discovery (multi-peer consensus path) is still in development.
 
-1. **Query Chain Status**
-   ```java
-   sendChainStatusRequest("CXNET");
-   // Response: {c1: 10, c2: 25, c3: 150}
-   ```
+**How It Works (Automatic Flow):**
 
-2. **Identify Gaps**
-   ```java
-   int localHeight = network.c3.current.block;  // e.g., 0
-   int remoteHeight = 150;
-   int blocksToSync = remoteHeight - localHeight;  // 150 blocks
-   ```
+1. **On network load/join** — ConnectX sends `CHAIN_STATUS_REQUEST` to the configured NMI automatically.
 
-3. **Request Blocks Sequentially**
-   ```java
-   for (long blockID = localHeight + 1; blockID <= remoteHeight; blockID++) {
-       sendBlockRequest("CXNET", 3, blockID);
-       // Wait for BLOCK_RESPONSE
-       // Validate chronologically
-       // Apply to local blockchain
-   }
-   ```
+2. **On `CHAIN_STATUS_RESPONSE` from NMI** — gaps are identified and `BLOCK_REQUEST` events are issued for each missing block.
 
-4. **Verify Final State**
-   ```java
-   // Compare final block heights with peer
-   // Verify merkle roots (if implemented)
-   // Sync complete!
-   ```
+3. **On `BLOCK_RESPONSE`** — blocks are validated and applied to the local chain.
 
-**Optimization:**
+**Underlying Protocol (for reference):**
+
+The `CHAIN_STATUS_REQUEST` response contains chain heights:
+```json
+{ "network": "CXNET", "status": { "c1": 10, "c2": 25, "c3": 150 } }
+```
+
+Missing blocks are then fetched via `BLOCK_REQUEST` / `BLOCK_RESPONSE` in order.
+
+**Optimization (planned):**
 - Request from multiple peers in parallel (Byzantine fault tolerance)
 - Verify blocks match across peers before applying
 - Cache commonly requested blocks
@@ -2710,32 +2710,40 @@ For each peer in broadcast, tries:
 
 #### CXHELLO
 **Description:** LAN peer discovery request
-**Payload:**
+**Payload class:** `CXHello` (serialized to JSON, then PGP-signed — `NetworkEvent.d` contains the signed bytes)
 ```json
 {
   "peerID": "uuid-of-sender",
   "port": 49152,
-  "requestID": "request-uuid"
+  "address": "192.168.1.5:49152",
+  "signedNode": "<base64 PGP-signed Node blob>"
 }
 ```
+- `address` — sender's preferred reachable address (may differ from socket source); `null` means derive from socket
+- `signedNode` — PGP-signed serialized `Node` object; receiver persists it as a `.cxi` file for future reconnection
+
+**Envelope:** The entire `CXHello` JSON is PGP-signed by the sender before being placed in `NetworkEvent.d`. The `NetworkContainer` carries the sender's `cxID` but is not E2E encrypted (`nc.s = false`). `event.p` (CXPath) is **null** — direct transmission fallback in `OutConnectionController` is used because the sender does not know the peer ID yet.
+
 **Recorded To:** Not recorded to blockchain (ephemeral)
 **ExecuteOnSync:** `false`
-**Purpose:** Sent to discover peers on LAN. Peer responds with CXHELLO_RESPONSE. Address automatically recorded by passive discovery.
+**Purpose:** Sent to a LAN-scanned address to discover whether a ConnectX node is listening. The embedded `signedNode` allows the receiver to persist the sender's identity without a prior key exchange.
 
 #### CXHELLO_RESPONSE
-**Description:** Response to CXHELLO request
-**Payload:**
+**Description:** Response to a CXHELLO request
+**Payload class:** `CXHello` (same structure as CXHELLO — serialized to JSON, sent via `EventBuilder.signData()`)
 ```json
 {
   "peerID": "uuid-of-responder",
   "port": 49152,
-  "requestID": "original-request-uuid",
-  "networks": []
+  "address": "192.168.1.10:49152",
+  "signedNode": "<base64 PGP-signed Node blob>"
 }
 ```
+**Envelope:** Sent using `buildEvent(...).toPeer(requesterID).signData().queue()` — full three-layer signature applied. Routed via CXS directly to the requester now that their ID is known.
+
 **Recorded To:** Not recorded to blockchain (ephemeral)
 **ExecuteOnSync:** `false`
-**Purpose:** Confirms peer identity and port. Address already recorded by passive discovery.
+**Purpose:** Confirms peer identity and listening port; provides the responder's signed Node blob so the requester can persist it. Address recorded by passive discovery on both sides.
 
 ### Benefits
 

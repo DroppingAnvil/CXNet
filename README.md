@@ -132,6 +132,28 @@ peer.buildEvent(EventType.MESSAGE, data).viaBridge("cxHTTP1", "https://example.c
 
 ---
 
+## Port Reference
+
+| Port | Purpose |
+|---|---|
+| `49152` | Default P2P port (`connect()` no-arg, EPOCH bootstrap node) |
+| `49153–49162` | Standard peer P2P range (increment per node) |
+| `8080` | Default HTTP bridge port (bootstrap/EPOCH) |
+| `8081+` | HTTP bridge ports for additional peers |
+
+**P2P constructor:** the second argument is the P2P listening port.
+
+```java
+new ConnectX("CX-PEER2", 49153, cxID, password); // P2P on 49153
+peer.updateHTTPBridgePort(8081);                  // HTTP bridge on 8081
+```
+
+**LAN discovery scope:** CXHELLO (LAN peer discovery) scans the range `49152–49162` plus a few alternate ranges. If a node binds to a port outside this range, **LAN discovery will not find it**. Peers outside the scanned range must be reached via an HTTP bridge — set one up with `setPublicBridgeAddress()` on the target node and `updateHTTPBridgePort()` to expose it.
+
+**Internet peers:** Direct P2P connections require the remote port to be reachable (open firewall/port forward). If that is not possible, use the HTTP bridge — it works through firewalls and NAT with no open port required on the connecting side.
+
+---
+
 ## Protocol Documentation
 
 See [`CX-PROTOCOL.md`](CX-PROTOCOL.md) for the full protocol specification covering encryption layers, blockchain structure, event types, permission system, Zero Trust mode, and consensus mechanism.

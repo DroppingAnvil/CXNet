@@ -92,6 +92,68 @@ Each node runs:
 
 ---
 
+## Threading Model
+
+ConnectX routes every message through a **5-stage pipeline** where each stage runs on dedicated threads. Incoming data never blocks application logic, and the heaviest cryptographic work is parallelized across two independent 4-thread pools — one on ingress, one on egress.
+
+```
+Wire
+ │
+ ▼
+SocketWatcher (1 thread)
+  Accept TCP connection, read into 8 KB buffer, wrap in NetworkInputIOJob,
+  push to jobQueue.
+ │
+ ▼
+IOThread pool (4 threads)  ← first crypto burst
+  Pull from jobQueue.
+  Strip + verify NetworkContainer signature (Layer 1).
+  Verify NetworkEvent signature (Layer 2).
+  Duplicate detection, unknown-sender policy.
+  Produce InputBundle, push to eventQueue.
+ │
+ ▼
+EventProcessor (1 thread)  ← logic layer
+  Pull from eventQueue.
+  E2E decrypt payload if encrypted (Layer 3).
+  Verify payload data signature (Layer 4).
+  Permission and whitelist enforcement.
+  Route to NodeMesh event handlers (CXHELLO, NewNode, MESSAGE, etc.).
+  Plugin dispatch.
+  Produce OutputBundle(s), push to outputQueue.
+ │
+ ▼
+OutputProcessor pool (4 threads)  ← second crypto burst
+  Pull from outputQueue.
+  Sign NetworkEvent.
+  Sign NetworkContainer.
+  Route: CXS (single peer) or CXN (mesh broadcast).
+  Transmit via direct socket or HTTP bridge.
+  On failure → RetryBundle → retryQueue.
+ │
+ ▼
+RetryProcessor (1 thread)
+  Exponential backoff retry.
+  Falls back from CXS to CXN with E2E encryption after repeated failure.
+ │
+ ▼
+Wire
+```
+
+**Why this matters for multilayer cryptography:** PGP signing and verification are CPU-bound. By distributing them across two pools — 4 threads verifying incoming signatures while 4 others sign outgoing events — a single node sustains high event throughput even under the cost of per-hop and end-to-end crypto on every message. The single-threaded EventProcessor in the middle means all event handling and state transitions are serialized, eliminating data races without locks.
+
+| Stage | Threads | Queue | Key work |
+|---|---|---|---|
+| SocketWatcher | 1 | → `jobQueue` | TCP accept, buffer read |
+| IOThread pool | 4 | `jobQueue` → `eventQueue` | Sig verify (Layers 1–2), deserialize |
+| EventProcessor | 1 | `eventQueue` → `outputQueue` | Decrypt, sig verify (Layers 3–4), logic |
+| OutputProcessor pool | 4 | `outputQueue` → `retryQueue` | Sign, route, transmit |
+| RetryProcessor | 1 | `retryQueue` | Backoff retry |
+
+All inter-stage communication uses `ConcurrentLinkedQueue`. Thread counts are configurable via `NodeConfig`.
+
+---
+
 ## Plugin System
 
 Plugins intercept events by service name (matching `EventType`). Three data levels control what is passed to `handleEvent`:

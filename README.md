@@ -48,27 +48,13 @@ ConnectX treats cryptographic identity as the sole basis for trust at the protoc
 
 The protocol enforces this through a **three-layer signature and encryption system**: transport-level signing on every hop (NetworkContainer), message-level signing by the original sender (NetworkEvent), and payload-level encryption for application data. Any tampering at any layer breaks the signature chain and the data is dropped.
 
-The entire attack surface collapses to one well-understood problem: key compromise. CXNet does not pretend to prevent that. No system can. What it does is eliminate every *other* path to network-level damage, and then gives network owners the governance tools to manage the reality of key compromise.
+The entire attack surface collapses to one well-understood problem: key compromise. CXNet does not pretend to prevent that. No system can. What it does is eliminate every other path to network-level damage, and then gives network owners the governance tools to manage the reality of key compromise.
 
 **Managed network governance:** The Network Master Identity (NMI) provisions nodes, assigns permissions through an embedded permissions framework, and configures the trust structure. Ideally nodes operate at equal authority levels within the permission model. When the network owner is ready, Zero Trust mode can be activated, an irreversible decision that permanently locks the trust structure and removes even the NMI's ability to modify it.
 
-**Honest about what cryptography can and can't do:** For real data networks (not cryptocurrency where you can mathematically verify value), there is no way to determine whether an authenticated action was intended or not. If a node's key is compromised and the attacker sends valid signed messages, those are authentic as far as the network is concerned. Same way a stolen badge gets you through a door. The network cannot read minds. What it *can* guarantee is that nobody gets through the door without a badge, which is the part most systems actually fail at.
+**Honest about what cryptography can and cannot do:** For real data networks (not cryptocurrency where you can mathematically verify value), there is no way to determine whether an authenticated action was intended or not. If a node's key is compromised and the attacker sends valid signed messages, those are authentic as far as the network is concerned. Same way a stolen badge gets you through a door. The network cannot read minds. What it can guarantee is that nobody gets through the door without a badge, which is the part most systems actually fail at.
 
 The same trust boundary every secure system ultimately relies on. CXNet just removes all the other ways to cheat.
-
----
-
-## Features
-
-* **Fluent event API** - `buildEvent().toPeer().signData().queue()`
-* **PGP encryption at every layer** - transport (hop-by-hop) and end-to-end
-* **Pluggable cryptography** - PGPainless default, fully swappable via abstract `CryptProvider`
-* **HTTP bridge** - punch through firewalls, no open port required
-* **LAN discovery** - automatic peer discovery on local networks via CXHELLO
-* **3-chain blockchain** per network - Admin (`c1`), Resources (`c2`), Events (`c3`)
-* **Zero Trust mode** - irreversible decentralization, NMI relinquishes control
-* **Plugin system** - extend with `CXPlugin` / `CXMessagePlugin` for custom event handling
-* **Per-instance design** - run multiple independent nodes in the same JVM
 
 ---
 
@@ -94,26 +80,26 @@ Each node runs:
 
 ## Threading Model
 
-ConnectX routes every message through a **5-stage pipeline** where each stage runs on dedicated threads. Incoming data never blocks application logic, and the heaviest cryptographic work is parallelized across two independent 4-thread pools — one on ingress, one on egress.
+ConnectX routes every message through a **5-stage concurrent pipeline**. Each stage runs on its own dedicated thread or thread pool. Incoming data never blocks event processing, and the heaviest cryptographic work is split across two independent 4-thread pools: one on ingress and one on egress.
 
 ```
 Wire
- │
- ▼
+ |
+ v
 SocketWatcher (1 thread)
   Accept TCP connection, read into 8 KB buffer, wrap in NetworkInputIOJob,
   push to jobQueue.
- │
- ▼
-IOThread pool (4 threads)  ← first crypto burst
+ |
+ v
+IOThread pool (4 threads)  <-- first crypto burst
   Pull from jobQueue.
   Strip + verify NetworkContainer signature (Layer 1).
   Verify NetworkEvent signature (Layer 2).
   Duplicate detection, unknown-sender policy.
   Produce InputBundle, push to eventQueue.
- │
- ▼
-EventProcessor (1 thread)  ← logic layer
+ |
+ v
+EventProcessor (1 thread)  <-- logic layer
   Pull from eventQueue.
   E2E decrypt payload if encrypted (Layer 3).
   Verify payload data signature (Layer 4).
@@ -121,33 +107,35 @@ EventProcessor (1 thread)  ← logic layer
   Route to NodeMesh event handlers (CXHELLO, NewNode, MESSAGE, etc.).
   Plugin dispatch.
   Produce OutputBundle(s), push to outputQueue.
- │
- ▼
-OutputProcessor pool (4 threads)  ← second crypto burst
+ |
+ v
+OutputProcessor pool (4 threads)  <-- second crypto burst
   Pull from outputQueue.
   Sign NetworkEvent.
   Sign NetworkContainer.
   Route: CXS (single peer) or CXN (mesh broadcast).
   Transmit via direct socket or HTTP bridge.
-  On failure → RetryBundle → retryQueue.
- │
- ▼
+  On failure: RetryBundle pushed to retryQueue.
+ |
+ v
 RetryProcessor (1 thread)
   Exponential backoff retry.
   Falls back from CXS to CXN with E2E encryption after repeated failure.
- │
- ▼
+ |
+ v
 Wire
 ```
 
-**Why this matters for multilayer cryptography:** PGP signing and verification are CPU-bound. By distributing them across two pools — 4 threads verifying incoming signatures while 4 others sign outgoing events — a single node sustains high event throughput even under the cost of per-hop and end-to-end crypto on every message. The single-threaded EventProcessor in the middle means all event handling and state transitions are serialized, eliminating data races without locks.
+**Why this design matters for multilayer cryptography:** PGP signing and verification are CPU-bound operations. Splitting them across two pools means 4 threads verify incoming signatures concurrently while 4 others sign outgoing events, so neither direction blocks the other. The single-threaded EventProcessor between them means all event handling and state transitions are serialized, eliminating data races without locks.
+
+This is meaningfully different from frameworks that bolt encryption onto an existing message bus. Here the pipeline stages exist specifically to distribute cryptographic cost across cores and keep throughput high even when every message carries multiple signature layers.
 
 | Stage | Threads | Queue | Key work |
 |---|---|---|---|
-| SocketWatcher | 1 | → `jobQueue` | TCP accept, buffer read |
-| IOThread pool | 4 | `jobQueue` → `eventQueue` | Sig verify (Layers 1–2), deserialize |
-| EventProcessor | 1 | `eventQueue` → `outputQueue` | Decrypt, sig verify (Layers 3–4), logic |
-| OutputProcessor pool | 4 | `outputQueue` → `retryQueue` | Sign, route, transmit |
+| SocketWatcher | 1 | -> `jobQueue` | TCP accept, buffer read |
+| IOThread pool | 4 | `jobQueue` -> `eventQueue` | Sig verify (Layers 1-2), deserialize |
+| EventProcessor | 1 | `eventQueue` -> `outputQueue` | Decrypt, sig verify (Layers 3-4), logic |
+| OutputProcessor pool | 4 | `outputQueue` -> `retryQueue` | Sign, route, transmit |
 | RetryProcessor | 1 | `retryQueue` | Backoff retry |
 
 All inter-stage communication uses `ConcurrentLinkedQueue`. Thread counts are configurable via `NodeConfig`.
@@ -199,7 +187,7 @@ peer.buildEvent(EventType.MESSAGE, data).viaBridge("cxHTTP1", "https://example.c
 | Port | Purpose |
 |---|---|
 | `49152` | Default P2P port (`connect()` no-arg, EPOCH bootstrap node) |
-| `49153–49162` | Standard peer P2P range (increment per node) |
+| `49153-49162` | Standard peer P2P range (increment per node) |
 | `8080` | Default HTTP bridge port (bootstrap/EPOCH) |
 | `8081+` | HTTP bridge ports for additional peers |
 
@@ -210,9 +198,24 @@ new ConnectX("CX-PEER2", 49153, cxID, password); // P2P on 49153
 peer.updateHTTPBridgePort(8081);                  // HTTP bridge on 8081
 ```
 
-**LAN discovery scope:** CXHELLO (LAN peer discovery) scans the range `49152–49162` plus a few alternate ranges. If a node binds to a port outside this range, **LAN discovery will not find it**. Peers outside the scanned range must be reached via an HTTP bridge — set one up with `setPublicBridgeAddress()` on the target node and `updateHTTPBridgePort()` to expose it.
+**LAN discovery scope:** CXHELLO (LAN peer discovery) scans the range `49152-49162` plus a few alternate ranges. If a node binds to a port outside this range, LAN discovery will not find it. Peers outside the scanned range must be reached via an HTTP bridge. Use `setPublicBridgeAddress()` on the target node and `updateHTTPBridgePort()` to expose one.
 
-**Internet peers:** Direct P2P connections require the remote port to be reachable (open firewall/port forward). If that is not possible, use the HTTP bridge — it works through firewalls and NAT with no open port required on the connecting side.
+**Internet peers:** Direct P2P connections require the remote port to be reachable (open firewall/port forward). If that is not possible, use the HTTP bridge. It works through firewalls and NAT with no open port required on the connecting side.
+
+---
+
+## Features
+
+* **Fluent event API** - `buildEvent().toPeer().signData().queue()`
+* **PGP encryption at every layer** - transport (hop-by-hop) and end-to-end
+* **Concurrent crypto pipeline** - 4-thread ingress and 4-thread egress pools distribute signing/verification across cores
+* **Pluggable cryptography** - PGPainless default, fully swappable via abstract `CryptProvider`
+* **HTTP bridge** - punch through firewalls, no open port required
+* **LAN discovery** - automatic peer discovery on local networks via CXHELLO
+* **3-chain blockchain** per network - Admin (`c1`), Resources (`c2`), Events (`c3`)
+* **Zero Trust mode** - irreversible decentralization, NMI relinquishes control
+* **Plugin system** - extend with `CXPlugin` / `CXMessagePlugin` for custom event handling
+* **Per-instance design** - run multiple independent nodes in the same JVM
 
 ---
 

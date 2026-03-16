@@ -2,7 +2,7 @@
 
 **Version:** 3.2
 **Last Updated:** 2026-02-12 (Plugin System, Per-Instance Architecture)
-**Status:** Early Development — core networking and event API are functional; many subsystems are incomplete or in progress
+**Status:** Early Development. Core networking and event API are functional; many subsystems are incomplete or in progress.
 
 ---
 
@@ -12,13 +12,13 @@
 - `CXPlugin` base class with `handleEvent(Object data)` and `DataLevel` dispatch
 - `DataLevel` enum: `NETWORK_EVENT`, `INPUT_BUNDLE`, `OBJECT`
 - `CXMessagePlugin` convenience base for plain-text message handling
-- `ConnectX.addPlugin()` / `sendPluginEvent(InputBundle, eventType)` — fully per-instance
+- `ConnectX.addPlugin()` / `sendPluginEvent(InputBundle, eventType)` - fully per-instance
 
 ### Per-Instance Architecture Completion
 - `plugins` and `cxnetBlockedNodes` moved from static to per-instance fields
 - `blockNodeCXNET`, `unblockNodeCXNET`, `isCXNETBlocked`, `addPlugin`, `sendPluginEvent` are now instance methods
 - `ConnectX.registerHVPeer(Node)` replaces direct `peerDirectory.hv` access
-- `CryptProvider.setEpochMode(boolean)` promoted to base class — no implementation cast required
+- `CryptProvider.setEpochMode(boolean)` promoted to base class, no implementation cast required
 
 ---
 
@@ -173,7 +173,7 @@ Trusted infrastructure servers for specific network services.
 Regular participants in networks.
 
 **Storage:**
-- `PeerDirectory.hv` - High-value peer cache (active peers) — use `ConnectX.registerHVPeer(Node)` to add
+- `PeerDirectory.hv` - High-value peer cache (active peers). Use `ConnectX.registerHVPeer(Node)` to add.
 - `PeerDirectory.lan` - LAN peers
 - `PeerDirectory.peerCache` - General peer cache
 - `PeerDirectory.seen` - Last seen timestamps
@@ -1452,8 +1452,8 @@ connectX.queueEvent(bundle);
 ```
 
 **Why This Works for CXHELLO:**
-- We DON'T know the peer's ID (discovering them!) — `event.p` is null
-- We DO know their address (from LAN scan) — set on `targetNode.addr`
+- We DON'T know the peer's ID (discovering them!). `event.p` is null.
+- We DO know their address (from LAN scan). Set on `targetNode.addr`.
 - The null `event.p` triggers the direct transmission fallback in `OutConnectionController`
 - The payload is PGP-signed so the receiver can verify sender identity before key import
 - The embedded `signedNode` lets the receiver persist our identity without a prior key exchange
@@ -2621,11 +2621,11 @@ for (NetworkEvent event : block.networkEvents.values()) {
 
 **How It Works (Automatic Flow):**
 
-1. **On network load/join** — ConnectX sends `CHAIN_STATUS_REQUEST` to the configured NMI automatically.
+1. **On network load/join:** ConnectX sends `CHAIN_STATUS_REQUEST` to the configured NMI automatically.
 
-2. **On `CHAIN_STATUS_RESPONSE` from NMI** — gaps are identified and `BLOCK_REQUEST` events are issued for each missing block.
+2. **On `CHAIN_STATUS_RESPONSE` from NMI:** gaps are identified and `BLOCK_REQUEST` events are issued for each missing block.
 
-3. **On `BLOCK_RESPONSE`** — blocks are validated and applied to the local chain.
+3. **On `BLOCK_RESPONSE`:** blocks are validated and applied to the local chain.
 
 **Underlying Protocol (for reference):**
 
@@ -2710,7 +2710,7 @@ For each peer in broadcast, tries:
 
 #### CXHELLO
 **Description:** LAN peer discovery request
-**Payload class:** `CXHello` (serialized to JSON, then PGP-signed — `NetworkEvent.d` contains the signed bytes)
+**Payload class:** `CXHello` (serialized to JSON, then PGP-signed; `NetworkEvent.d` contains the signed bytes)
 ```json
 {
   "peerID": "uuid-of-sender",
@@ -2719,10 +2719,10 @@ For each peer in broadcast, tries:
   "signedNode": "<base64 PGP-signed Node blob>"
 }
 ```
-- `address` — sender's preferred reachable address (may differ from socket source); `null` means derive from socket
-- `signedNode` — PGP-signed serialized `Node` object; receiver persists it as a `.cxi` file for future reconnection
+- `address` - sender's preferred reachable address (may differ from socket source); `null` means derive from socket
+- `signedNode` - PGP-signed serialized `Node` object; receiver persists it as a `.cxi` file for future reconnection
 
-**Envelope:** The entire `CXHello` JSON is PGP-signed by the sender before being placed in `NetworkEvent.d`. The `NetworkContainer` carries the sender's `cxID` but is not E2E encrypted (`nc.s = false`). `event.p` (CXPath) is **null** — direct transmission fallback in `OutConnectionController` is used because the sender does not know the peer ID yet.
+**Envelope:** The entire `CXHello` JSON is PGP-signed by the sender before being placed in `NetworkEvent.d`. The `NetworkContainer` carries the sender's `cxID` but is not E2E encrypted (`nc.s = false`). `event.p` (CXPath) is **null**; the direct transmission fallback in `OutConnectionController` is used because the sender does not know the peer ID yet.
 
 **Recorded To:** Not recorded to blockchain (ephemeral)
 **ExecuteOnSync:** `false`
@@ -2730,7 +2730,7 @@ For each peer in broadcast, tries:
 
 #### CXHELLO_RESPONSE
 **Description:** Response to a CXHELLO request
-**Payload class:** `CXHello` (same structure as CXHELLO — serialized to JSON, sent via `EventBuilder.signData()`)
+**Payload class:** `CXHello` (same structure as CXHELLO, serialized to JSON, sent via `EventBuilder.signData()`)
 ```json
 {
   "peerID": "uuid-of-responder",
@@ -2739,7 +2739,7 @@ For each peer in broadcast, tries:
   "signedNode": "<base64 PGP-signed Node blob>"
 }
 ```
-**Envelope:** Sent using `buildEvent(...).toPeer(requesterID).signData().queue()` — full three-layer signature applied. Routed via CXS directly to the requester now that their ID is known.
+**Envelope:** Sent using `buildEvent(...).toPeer(requesterID).signData().queue()`. Full three-layer signature applied. Routed via CXS directly to the requester now that their ID is known.
 
 **Recorded To:** Not recorded to blockchain (ephemeral)
 **ExecuteOnSync:** `false`
@@ -3655,8 +3655,8 @@ The `DataLevel` field on `CXPlugin` controls what data is passed to `handleEvent
 
 | Level           | `handleEvent` receives                                     |
 |-----------------|------------------------------------------------------------|
-| `NETWORK_EVENT` | `NetworkEvent` — raw event with type, sender ID, payload   |
-| `INPUT_BUNDLE`  | `InputBundle` — signed bytes, verified bytes, container    |
+| `NETWORK_EVENT` | `NetworkEvent` - raw event with type, sender ID, payload   |
+| `INPUT_BUNDLE`  | `InputBundle` - signed bytes, verified bytes, container    |
 | `OBJECT`        | Deserialized object of `plugin.type` via `nc.se` provider  |
 
 Default (null) falls back to `NETWORK_EVENT`.

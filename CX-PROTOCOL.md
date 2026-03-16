@@ -1,8 +1,38 @@
 # ConnectX (CX) Protocol Documentation
 
-**Version:** 3.2
-**Last Updated:** 2026-02-12 (Plugin System, Per-Instance Architecture)
+**Version:** 3.3
+**Last Updated:** 2026-03-16 (Threading Model, Pre-Validation IO Refactor Plan)
 **Status:** Early Development. Core networking and event API are functional; many subsystems are incomplete or in progress.
+
+---
+
+## Recent Updates (v3.3)
+
+### Threading Model Documentation
+- Full 5-stage concurrent pipeline documented (SocketWatcher, IOThread pool, EventProcessor, OutputProcessor pool, RetryProcessor)
+- Cryptographic operation distribution across pipeline stages documented
+
+### Pre-Validation IO Refactor (Planned)
+
+Currently two expensive cryptographic operations run on the single-threaded EventProcessor, blocking all other event handling while they complete. Both are candidates to move into the 4-thread IOThread pool as pre-validation steps:
+
+**Event payload signature verification (EventProcessor line 762)**
+`verifyAndStrip(ib.ne.d, ib.ne.p.oCXID)` - verifies the inner event payload is authentically from the origin sender. The required `oCXID` value comes from `parsedEvent.p.oCXID`, which is available after event deserialization already performed in IOThread. The verified stripped bytes would be stored on InputBundle for EventProcessor to consume without redoing the work.
+
+**E2E decryption (EventProcessor line 710)**
+`decrypt(ib.ne.d)` - decrypts end-to-end encrypted payloads. The `ne.e2e` flag is available after event deserialization in IOThread, and decryption requires only the local private key. Can move to IOThread with the decrypted result stored on InputBundle.
+
+**CXHELLO bootstrap path - no change needed**
+The first-contact flow already correctly handles unknown senders entirely within IOThread: strip payload without verification, deserialize Node to extract the public key, import the key, then re-verify the container signature and signedNode blob with the now-imported key, rolling back the import if either verification fails. This is the intended model for all pre-validation and requires no changes.
+
+**Redundant verification to remove**
+EventProcessor line 849 re-verifies the CXHELLO signedNode blob using the same key and same bytes that IOThread already verified at line 407. This is a confirmed duplicate. Removing it requires carrying the verified result on InputBundle so the node lookup/add logic in EventProcessor can proceed without re-doing the PGP operation.
+
+**Security trade-off**
+Moving verifications earlier means pre-verified data objects sit in the eventQueue between IOThread and EventProcessor. For standard deployments this is acceptable since data has already passed signature verification. For high-security deployments, re-verification before execution is desirable.
+
+**Higher Security Mode (`NetworkContainer.s`)**
+`NetworkContainer` already carries a boolean field `s` (currently unused, marked "Higher security mode - Not implemented, do not use"). When `nc.s = true`, NodeMesh will re-verify the event payload signature immediately before acting on it, regardless of pre-validation results. This provides an optional second verification gate for sensitive operations.
 
 ---
 
@@ -59,7 +89,8 @@
 6. [Event System](#event-system)
 7. [Permissions & Access Control](#permissions--access-control)
 8. [Plugin System](#plugin-system)
-9. [Implementation Notes](#implementation-notes)
+9. [Threading Model](#threading-model)
+10. [Implementation Notes](#implementation-notes)
 
 ---
 
@@ -3686,16 +3717,107 @@ NodeMesh receives event
 
 ---
 
+## Threading Model
+
+ConnectX processes every inbound message through a 5-stage concurrent pipeline. Each stage runs on its own thread or thread pool. The design separates socket IO, cryptographic pre-validation, logic/dispatch, and transmission so that no stage blocks another and so that the most CPU-intensive work (PGP signing and verification) is parallelized across two independent 4-thread pools.
+
+### Pipeline Stages
+
+```
+Wire
+ |
+ v
+SocketWatcher (1 thread)
+  Accept TCP connection. Read into 8 KB buffer. Wrap in NetworkInputIOJob.
+  Push to jobQueue.
+ |
+ v
+IOThread pool (4 threads)   <-- first crypto burst
+  Pull from jobQueue.
+  Strip + verify NetworkContainer signature (Layer 1).
+  Verify NetworkEvent signature (Layer 2).
+  Duplicate detection, unknown-sender policy.
+  Bootstrap path (CXHELLO/NewNode): strip, import public key, re-verify, rollback on failure.
+  Produce InputBundle. Push to eventQueue.
+ |
+ v
+EventProcessor (1 thread)   <-- logic layer
+  Pull from eventQueue.
+  E2E decrypt payload if encrypted (Layer 3).        [planned: move to IOThread]
+  Verify event payload data signature (Layer 4).     [planned: move to IOThread]
+  Permission and whitelist enforcement.
+  Route to NodeMesh event handlers.
+  Plugin dispatch.
+  Produce OutputBundle(s). Push to outputQueue.
+ |
+ v
+OutputProcessor pool (4 threads)   <-- second crypto burst
+  Pull from outputQueue.
+  Sign NetworkEvent.
+  Sign NetworkContainer.
+  Route via CXS (single peer) or CXN (mesh broadcast).
+  Transmit via direct socket or HTTP bridge.
+  On failure: push RetryBundle to retryQueue.
+ |
+ v
+RetryProcessor (1 thread)
+  Exponential backoff retry.
+  Falls back from CXS to CXN on repeated failure.
+ |
+ v
+Wire
+```
+
+### Thread Count and Queue Summary
+
+| Stage | Threads | Input Queue | Output Queue |
+|---|---|---|---|
+| SocketWatcher | 1 | TCP socket | `jobQueue` |
+| IOThread pool | 4 | `jobQueue` | `eventQueue` |
+| EventProcessor | 1 | `eventQueue` | `outputQueue` |
+| OutputProcessor pool | 4 | `outputQueue` | `retryQueue` / wire |
+| RetryProcessor | 1 | `retryQueue` | wire |
+
+All queues are `ConcurrentLinkedQueue`. Thread counts are configurable via `NodeConfig`.
+
+### Cryptographic Operation Distribution
+
+The IOThread pool handles all cryptographic work for ingress and the OutputProcessor pool handles all cryptographic work for egress. The EventProcessor between them handles only logic and dispatch, keeping it unblocked by PGP operations.
+
+**IOThread pool (ingress):**
+- `stripSignature()` on NetworkContainer to peek at transmitter ID
+- `verifyAndStrip()` on NetworkContainer once sender is known (Layer 1)
+- `stripSignature()` on NetworkEvent to extract event type
+- CXHELLO/NewNode bootstrap: strip payload, import public key, `verifyAndStrip()` container and Node blob, rollback on failure
+
+**EventProcessor (current - to be reduced):**
+- `decrypt()` for E2E encrypted payloads (Layer 3)
+- `verifyAndStrip()` on event payload data using origin sender ID (Layer 4)
+- `sign()` for CXHELLO_RESPONSE (stays - this is response creation, not pre-validation)
+
+**OutputProcessor pool (egress):**
+- `sign()` on NetworkEvent
+- `sign()` on NetworkContainer
+
+### Pre-Validation IO Refactor (Planned)
+
+Two operations currently on the single-threaded EventProcessor are planned for migration into the IOThread pool:
+
+**Event payload signature verification** (`verifyAndStrip` at EventProcessor line 762): uses `oCXID` from the deserialized NetworkEvent, which is already available in IOThread after event deserialization. The verified stripped bytes will be stored on InputBundle and consumed by EventProcessor without repeating the PGP operation.
+
+**E2E decryption** (`decrypt` at EventProcessor line 710): the `ne.e2e` flag is available after event deserialization in IOThread. Decryption requires only the local private key. Decrypted result will be stored on InputBundle.
+
+Moving these operations distributes all four cryptographic layers across the IOThread pool rather than blocking the EventProcessor. The trade-off is that pre-verified data objects sit in the eventQueue awaiting logic processing. This is acceptable for standard deployments.
+
+**Redundant operation to remove:** EventProcessor line 849 re-verifies the CXHELLO signedNode blob that IOThread already verified at line 407. This is a confirmed duplicate and will be eliminated, with the verified result carried on InputBundle instead.
+
+### Higher Security Mode
+
+`NetworkContainer.s` (currently reserved, not yet active) will enable re-verification of the event payload signature inside NodeMesh immediately before an action is taken, independent of pre-validation results. When `nc.s = true`, NodeMesh performs an additional `verifyAndStrip` pass at execution time. This allows senders to signal that critical operations must be re-verified before execution even if the pipeline has already pre-validated the data.
+
+---
+
 ## Implementation Notes
-
-### Threading Model
-
-| Thread | Purpose | Queue |
-|--------|---------|-------|
-| IOThread (×N) | Process I/O jobs | Job queue |
-| SocketWatcher | Accept connections | N/A |
-| EventProcessor | Process incoming events | eventQueue |
-| OutputProcessor | Process outgoing events | outputQueue |
 
 ### Thread Safety
 

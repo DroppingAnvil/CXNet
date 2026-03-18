@@ -10,8 +10,11 @@ import dev.droppinganvil.v3.network.events.EventType;
 import dev.droppinganvil.v3.network.events.NodeModeration;
 import dev.droppinganvil.v3.network.events.NodeRegistration;
 import dev.droppinganvil.v3.network.events.PermissionChange;
+import dev.droppinganvil.v3.network.events.BlockExchange;
 import dev.droppinganvil.v3.network.events.ChainStatus;
 import dev.droppinganvil.v3.network.events.SeedExchange;
+import dev.droppinganvil.v3.network.events.ZeroTrustActivation;
+import dev.droppinganvil.v3.network.events.ZeroTrustActivation;
 /**
  * This class exist to test the ease of use of ConnectX API as well as test networking functionality
  * Peer3 will be created or loaded send message "1234" to 01
@@ -57,5 +60,16 @@ public class CXPeer3Test {
         // CHAIN_STATUS_REQUEST test
         peer3.buildEvent(EventType.CHAIN_STATUS_REQUEST, ConnectX.serialize("cxJSON1", new ChainStatus("CXNET")).getBytes("UTF-8"))
             .toPeer("00000000-0000-0000-0000-000000000001").signData().queue();
+
+        // BLOCK_REQUEST test
+        peer3.buildEvent(EventType.BLOCK_REQUEST, ConnectX.serialize("cxJSON1", new BlockExchange("CXNET", 1L, 0L)).getBytes("UTF-8"))
+            .toPeer("00000000-0000-0000-0000-000000000001").signData().queue();
+
+        // ZERO_TRUST_ACTIVATION test - disabled, do not fire against live network
+        if (false) {
+            ZeroTrustActivation zt = new ZeroTrustActivation("CXNET", System.currentTimeMillis(), null);
+            peer3.buildEvent(EventType.ZERO_TRUST_ACTIVATION, ConnectX.serialize("cxJSON1", zt).getBytes("UTF-8"))
+                .toPeer("00000000-0000-0000-0000-000000000001").signData().queue();
+        }
     }
 }

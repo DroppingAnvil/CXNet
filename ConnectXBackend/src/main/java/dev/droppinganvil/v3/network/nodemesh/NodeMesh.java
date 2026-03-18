@@ -1561,13 +1561,12 @@ public class NodeMesh {
                     case BLOCK_REQUEST:
                         System.out.println("[" + connectX.getOwnID() + "] Block request received from " + nc.iD);
                         try {
-                            // Parse request
-                            String requestJson = new String(eventPayload, "UTF-8");
-                            java.util.Map<String, Object> request =
-                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", requestJson, java.util.Map.class);
-                            String networkID = (String) request.get("network");
-                            Long chainID = ((Number) request.get("chain")).longValue();
-                            Long blockID = ((Number) request.get("block")).longValue();
+                            ib.readyObject(dev.droppinganvil.v3.network.events.BlockExchange.class, ib.nc.se, connectX);
+                            dev.droppinganvil.v3.network.events.BlockExchange blockReq =
+                                (dev.droppinganvil.v3.network.events.BlockExchange) ib.object;
+                            String networkID = blockReq.network;
+                            Long chainID = blockReq.chain;
+                            Long blockID = blockReq.block;
 
                             CXNetwork network = connectX.getNetwork(networkID);
                             if (network != null) {
@@ -1591,8 +1590,11 @@ public class NodeMesh {
                                     }
 
                                     if (block != null) {
-                                        // Serialize block as payload
-                                        String blockJson = ConnectX.serialize("cxJSON1", block);
+                                        // Wrap block in BlockExchange for typed response
+                                        dev.droppinganvil.v3.network.events.BlockExchange blockResp =
+                                            new dev.droppinganvil.v3.network.events.BlockExchange(networkID, chainID, blockID);
+                                        blockResp.blockData = block;
+                                        String blockJson = ConnectX.serialize("cxJSON1", blockResp);
 
                                         // Send response using EventBuilder pattern
                                         ConnectX.EventBuilder eb = connectX.buildEvent(EventType.BLOCK_RESPONSE, blockJson.getBytes("UTF-8"))
@@ -1628,17 +1630,16 @@ public class NodeMesh {
                     case BLOCK_RESPONSE:
                         System.out.println("[" + connectX.getOwnID() + "] Block response received from " + nc.iD);
                         try {
-                            // Deserialize block
-                            String blockJson = new String(eventPayload, "UTF-8");
-                            dev.droppinganvil.v3.edge.NetworkBlock block =
-                                (dev.droppinganvil.v3.edge.NetworkBlock) ConnectX.deserialize("cxJSON1", blockJson, dev.droppinganvil.v3.edge.NetworkBlock.class);
+                            ib.readyObject(dev.droppinganvil.v3.network.events.BlockExchange.class, ib.nc.se, connectX);
+                            dev.droppinganvil.v3.network.events.BlockExchange blockResp =
+                                (dev.droppinganvil.v3.network.events.BlockExchange) ib.object;
+                            dev.droppinganvil.v3.edge.NetworkBlock block = blockResp.blockData;
 
                             System.out.println("[BLOCK_RESPONSE] Received block " + block.block +
                                              " (" + block.networkEvents.size() + " events)");
 
-                            // Get network ID from NetworkEvent path (CXN scope includes network)
-                            String networkID = ne.p != null ? ne.p.network : null;
-                            Long chainID = block.chain;
+                            String networkID = blockResp.network;
+                            Long chainID = blockResp.chain;
 
                             if (networkID == null) {
                                 System.err.println("[BLOCK_RESPONSE] Cannot determine network ID from event path");
@@ -1867,19 +1868,15 @@ public class NodeMesh {
                     case ZERO_TRUST_ACTIVATION:
                         System.out.println("[" + connectX.getOwnID() + "] ZERO_TRUST_ACTIVATION event received from " + nc.iD);
                         try {
-                            // Parse payload: {network: "NETWORKID", seed: {...}}
-                            String ztJson = new String(eventPayload, "UTF-8");
-                            java.util.Map<String, Object> ztData =
-                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", ztJson, java.util.Map.class);
+                            ib.readyObject(dev.droppinganvil.v3.network.events.ZeroTrustActivation.class, ib.nc.se, connectX);
+                            dev.droppinganvil.v3.network.events.ZeroTrustActivation ztData =
+                                (dev.droppinganvil.v3.network.events.ZeroTrustActivation) ib.object;
 
-                            String networkID = (String) ztData.get("network");
-                            java.util.Map<String, Object> seedData = (java.util.Map<String, Object>) ztData.get("seed");
-
-                            System.out.println("[ZERO_TRUST_ACTIVATION] Activating zero trust mode for network " + networkID);
+                            System.out.println("[ZERO_TRUST_ACTIVATION] Activating zero trust mode for network " + ztData.network);
                             System.out.println("[ZERO_TRUST_ACTIVATION] WARNING: This operation is IRREVERSIBLE");
 
                             // Get the network
-                            CXNetwork network = connectX.getNetwork(networkID);
+                            CXNetwork network = connectX.getNetwork(ztData.network);
                             if (network != null) {
                                 // Verify sender is NMI (first backend)
                                 boolean isNMI = network.configuration != null &&
@@ -1903,23 +1900,18 @@ public class NodeMesh {
                                 // Activate zero trust mode
                                 network.zT = true;
                                 System.out.println("[ZERO_TRUST_ACTIVATION] Set network.zT = true");
+                                System.out.println("[ZERO_TRUST_ACTIVATION] Seed zT flag: " + ztData.zT);
 
-                                // Apply seed data updates if provided
-                                if (seedData != null && seedData.containsKey("zT")) {
-                                    Boolean ztFlag = (Boolean) seedData.get("zT");
-                                    System.out.println("[ZERO_TRUST_ACTIVATION] Seed zT flag: " + ztFlag);
-                                }
-
-                                System.out.println("[ZERO_TRUST_ACTIVATION] Zero trust mode activated for " + networkID);
+                                System.out.println("[ZERO_TRUST_ACTIVATION] Zero trust mode activated for " + ztData.network);
                                 System.out.println("[ZERO_TRUST_ACTIVATION] NMI permissions are now blocked");
                                 System.out.println("[ZERO_TRUST_ACTIVATION] Network is fully decentralized");
 
                                 // Persist network configuration
                                 try {
                                     if (connectX.blockchainPersistence != null) {
-                                        connectX.blockchainPersistence.saveChainMetadata(network.c1, networkID);
-                                        connectX.blockchainPersistence.saveChainMetadata(network.c2, networkID);
-                                        connectX.blockchainPersistence.saveChainMetadata(network.c3, networkID);
+                                        connectX.blockchainPersistence.saveChainMetadata(network.c1, ztData.network);
+                                        connectX.blockchainPersistence.saveChainMetadata(network.c2, ztData.network);
+                                        connectX.blockchainPersistence.saveChainMetadata(network.c3, ztData.network);
                                         System.out.println("[ZERO_TRUST_ACTIVATION] Network configuration persisted");
                                     }
                                 } catch (Exception persistEx) {
@@ -1930,7 +1922,7 @@ public class NodeMesh {
                                 // This will be implemented when multi-peer block querying and reconciliation are ready
 
                             } else {
-                                System.err.println("[ZERO_TRUST_ACTIVATION] Network not found: " + networkID);
+                                System.err.println("[ZERO_TRUST_ACTIVATION] Network not found: " + ztData.network);
                             }
 
                             // This is a state-modifying event that should be recorded to c1 (Admin) chain
@@ -2399,13 +2391,8 @@ public class NodeMesh {
                                      long startBlock, long endBlock, Node remotePeer) {
         try {
             for (long blockNum = startBlock; blockNum <= endBlock; blockNum++) {
-                // Create BLOCK_REQUEST event
-                java.util.Map<String, Object> request = new java.util.HashMap<>();
-                request.put("network", networkID);
-                request.put("chain", chainID);
-                request.put("block", blockNum);
-
-                String requestJson = ConnectX.serialize("cxJSON1", request);
+                String requestJson = ConnectX.serialize("cxJSON1",
+                    new dev.droppinganvil.v3.network.events.BlockExchange(networkID, chainID, blockNum));
 
                 // Send request using EventBuilder pattern
                 ConnectX.EventBuilder eb = connectX.buildEvent(EventType.BLOCK_REQUEST, requestJson.getBytes("UTF-8"))

@@ -3827,18 +3827,18 @@ Every event type that carries structured data must have a dedicated payload clas
 
 `CXHello` is the reference implementation: the same class is used for both `CXHELLO` (request) and `CXHELLO_RESPONSE`, with `signedNode` and `address` populated in both directions and null fields simply ignored by each side.
 
-**Pending migration** - the following event types currently use raw Map construction and deserialization and need proper payload classes:
+**Completed migrations** - all event types now use typed payload classes:
 
-| Event type | Fields |
-|---|---|
-| `SEED_REQUEST` / `SEED_RESPONSE` | `network`, `dynamicSeed`, `epochSeed`, `authoritative`, `senderID`, `chainHeights` |
-| `CHAIN_STATUS_REQUEST` / `CHAIN_STATUS_RESPONSE` | `network`, `c1`, `c2`, `c3` |
-| `BLOCK_REQUEST` / `BLOCK_RESPONSE` | `network`, `chain`, `block`, `blockData` |
-| `BLOCK_NODE` / `UNBLOCK_NODE` | `network`, `nodeID`, `reason` |
-| `REGISTER_NODE` | `network`, `nodeID`, `approver` |
-| `GRANT_PERMISSION` / `REVOKE_PERMISSION` | `network`, `nodeID`, `permission`, `chain`, `priority` |
-| `ZERO_TRUST_ACTIVATION` | `network`, `seed` |
-| `PeerFinding` | `ips` field missing from existing `PeerFinding` class |
+| Event type | Class | Fields |
+|---|---|---|
+| `BLOCK_REQUEST` / `BLOCK_RESPONSE` | `BlockExchange` | `network`, `chain`, `block`, `blockData` |
+| `ZERO_TRUST_ACTIVATION` | `ZeroTrustActivation` | `network`, `zT`, `timestamp`, `nmi` |
+| `SEED_REQUEST` / `SEED_RESPONSE` | `SeedExchange` | `network`, `dynamicSeed`, `epochSeed`, `authoritative`, `senderID`, `c1`, `c2`, `c3` |
+| `CHAIN_STATUS_REQUEST` / `CHAIN_STATUS_RESPONSE` | `ChainStatus` | `network`, `c1`, `c2`, `c3` |
+| `BLOCK_NODE` / `UNBLOCK_NODE` | `NodeModeration` | `network`, `nodeID`, `reason` |
+| `REGISTER_NODE` | `NodeRegistration` | `network`, `nodeID`, `approver` |
+| `GRANT_PERMISSION` / `REVOKE_PERMISSION` | `PermissionChange` | `network`, `nodeID`, `permission`, `chain`, `priority` |
+| `PeerFinding` | `PeerFinding` | `ips` field added |
 
 ---
 

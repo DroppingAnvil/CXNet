@@ -33,6 +33,10 @@ public class PeerFinding {
     Uses byte[] to match InputBundle/NetworkContainer pattern for signed crypto objects
      */
     public List<byte[]> signedNodes;
+    /*
+    Raw IP addresses shared during peer discovery, distinct from bridge/socket addresses in peers
+     */
+    public List<String> ips = new ArrayList<>();
     public String t;
 
     public PeerFinding() {}

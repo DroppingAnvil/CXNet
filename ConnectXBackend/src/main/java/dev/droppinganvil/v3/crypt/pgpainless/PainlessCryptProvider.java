@@ -206,12 +206,12 @@ public class PainlessCryptProvider extends CryptProvider {
                 System.out.println("Primary User ID (again): " + info.getPrimaryUserId());
                 //System.out.println("Preferred Hash Algorithms: " + info.getPreferredHashAlgorithms());
             }
+            //TODO IMPLEMENT BETTER, we are using this override to fix bootstrapping issues
             EncryptionStream encryptor = PGPainless.encryptAndOrSign()
                     .onOutputStream(os)
                     .withOptions(ProducerOptions.sign(new SigningOptions()
-                                    .addInlineSignature(protector, secretKey, DocumentSignatureType.CANONICAL_TEXT_DOCUMENT)
-                            //TODO IMPLEMENT BETTER, we are using this override to fix bootstrapping issues
                                     .overrideHashAlgorithm(HashAlgorithm.SHA512)
+                                    .addInlineSignature(protector, secretKey, DocumentSignatureType.CANONICAL_TEXT_DOCUMENT)
                             ).setAsciiArmor(false)
                     );
             // CRITICAL: Must pipe data and close stream to finalize signature

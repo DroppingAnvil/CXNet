@@ -1668,17 +1668,9 @@ public class ConnectX {
         // Set zT flag in network configuration
         network.zT = true;
 
-        // Create updated seed data with zT=true
-        java.util.Map<String, Object> seedData = new java.util.HashMap<>();
-        seedData.put("network", networkID);
-        seedData.put("zT", true);
-        seedData.put("timestamp", System.currentTimeMillis());
-        seedData.put("nmi", network.configuration.nmiPub);
-
-        // Create event payload
-        java.util.Map<String, Object> payload = new java.util.HashMap<>();
-        payload.put("network", networkID);
-        payload.put("seed", seedData);
+        dev.droppinganvil.v3.network.events.ZeroTrustActivation payload =
+            new dev.droppinganvil.v3.network.events.ZeroTrustActivation(
+                networkID, System.currentTimeMillis(), network.configuration.nmiPub);
 
         String payloadJson = serialize("cxJSON1", payload);
         System.out.println("[Zero Trust] Created ZERO_TRUST_ACTIVATION event payload");

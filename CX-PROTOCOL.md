@@ -3819,6 +3819,29 @@ Moving these operations distributes all four cryptographic layers across the IOT
 
 ## Implementation Notes
 
+### Event Payload Object Spec
+
+Every event type that carries structured data must have a dedicated payload class in `dev.droppinganvil.v3.network.events`. Raw `Map<String, Object>` deserialization in NodeMesh and ConnectX is a known issue and is being migrated.
+
+**Symmetry rule:** one class per event type, shared between the request and response direction. Fields that do not apply to a given direction are left null. There is no need for separate Request and Response types - the `EventType` itself already encodes direction.
+
+`CXHello` is the reference implementation: the same class is used for both `CXHELLO` (request) and `CXHELLO_RESPONSE`, with `signedNode` and `address` populated in both directions and null fields simply ignored by each side.
+
+**Pending migration** - the following event types currently use raw Map construction and deserialization and need proper payload classes:
+
+| Event type | Fields |
+|---|---|
+| `SEED_REQUEST` / `SEED_RESPONSE` | `network`, `dynamicSeed`, `epochSeed`, `authoritative`, `senderID`, `chainHeights` |
+| `CHAIN_STATUS_REQUEST` / `CHAIN_STATUS_RESPONSE` | `network`, `c1`, `c2`, `c3` |
+| `BLOCK_REQUEST` / `BLOCK_RESPONSE` | `network`, `chain`, `block`, `blockData` |
+| `BLOCK_NODE` / `UNBLOCK_NODE` | `network`, `nodeID`, `reason` |
+| `REGISTER_NODE` | `network`, `nodeID`, `approver` |
+| `GRANT_PERMISSION` / `REVOKE_PERMISSION` | `network`, `nodeID`, `permission`, `chain`, `priority` |
+| `ZERO_TRUST_ACTIVATION` | `network`, `seed` |
+| `PeerFinding` | `ips` field missing from existing `PeerFinding` class |
+
+---
+
 ### Thread Safety
 
 - Queues use `synchronized` blocks

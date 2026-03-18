@@ -3,6 +3,7 @@ package dev.droppinganvil.v3.test;
 import dev.droppinganvil.v3.ConnectX;
 import dev.droppinganvil.v3.network.CXNetwork;
 import dev.droppinganvil.v3.network.events.EventType;
+import dev.droppinganvil.v3.network.events.SeedExchange;
 import dev.droppinganvil.v3.network.nodemesh.PeerDirectory;
 
 import java.util.ArrayList;
@@ -665,9 +666,7 @@ public class MultiPeerTest {
         System.out.println("  Sending SEED_REQUEST for TESTNET to EPOCH...");
 
         for (int i = 0; i < 3; i++) {  // First 3 peers request TESTNET
-            java.util.Map<String, Object> seedReq = new java.util.HashMap<>();
-            seedReq.put("network", "TESTNET");
-            String reqJson = ConnectX.serialize("cxJSON1", seedReq);
+            String reqJson = ConnectX.serialize("cxJSON1", new SeedExchange("TESTNET"));
 
             peers.get(i).buildEvent(EventType.SEED_REQUEST, reqJson.getBytes())
                 .toPeer("00000000-0000-0000-0000-000000000001")  // EPOCH UUID

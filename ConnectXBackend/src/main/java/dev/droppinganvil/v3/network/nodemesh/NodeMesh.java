@@ -1314,16 +1314,12 @@ public class NodeMesh {
                         try {
                             // Parse request to get network ID
                             String requestedNetwork = "CXNET";
-                            if (ne.d != null && ne.d.length > 0) {
-                                try {
-                                    String requestJson = new String(eventPayload, "UTF-8");
-                                    java.util.Map<String, Object> req = (java.util.Map<String, Object>)
-                                        ConnectX.deserialize("cxJSON1", requestJson, java.util.Map.class);
-                                    if (req.containsKey("network")) {
-                                        requestedNetwork = (String) req.get("network");
-                                    }
-                                } catch (Exception e) {
-                                    // Use default CXNET
+                            ib.readyObject(dev.droppinganvil.v3.network.events.SeedExchange.class, ib.nc.se, connectX);
+                            if (ib.object != null) {
+                                dev.droppinganvil.v3.network.events.SeedExchange seedReq =
+                                    (dev.droppinganvil.v3.network.events.SeedExchange) ib.object;
+                                if (seedReq.network != null) {
+                                    requestedNetwork = seedReq.network;
                                 }
                             }
 
@@ -1354,19 +1350,17 @@ public class NodeMesh {
                                     isAuthoritative = network.configuration.backendSet.contains(connectX.getOwnID());
                                 }
 
-                                // Build response with BOTH seeds
-                                java.util.Map<String, Object> response = new java.util.HashMap<>();
-                                response.put("dynamicSeed", dynamicSeed);           // Current peer state
-                                response.put("epochSeed", epochSeed);               // Signed seed from EPOCH (null if not available)
-                                response.put("authoritative", isAuthoritative);     // Is this EPOCH/NMI?
-                                response.put("senderID", connectX.getOwnID());
-
-                                // Add blockchain heights for consensus
-                                java.util.Map<String, Long> chainHeights = new java.util.HashMap<>();
-                                chainHeights.put("c1", network.c1.current != null ? network.c1.current.block : 0L);
-                                chainHeights.put("c2", network.c2.current != null ? network.c2.current.block : 0L);
-                                chainHeights.put("c3", network.c3.current != null ? network.c3.current.block : 0L);
-                                response.put("chainHeights", chainHeights);
+                                // Build response
+                                dev.droppinganvil.v3.network.events.SeedExchange response =
+                                    new dev.droppinganvil.v3.network.events.SeedExchange();
+                                response.network = requestedNetwork;
+                                response.dynamicSeed = dynamicSeed;
+                                response.epochSeed = epochSeed;
+                                response.authoritative = isAuthoritative;
+                                response.senderID = connectX.getOwnID();
+                                response.c1 = network.c1.current != null ? network.c1.current.block : 0L;
+                                response.c2 = network.c2.current != null ? network.c2.current.block : 0L;
+                                response.c3 = network.c3.current != null ? network.c3.current.block : 0L;
 
                                 System.out.println("[SEED] Responding to " + nc.iD.substring(0, 8));
                                 System.out.println("[SEED]   Dynamic peers: " + dynamicSeed.hvPeers.size());
@@ -1400,20 +1394,22 @@ public class NodeMesh {
                     case SEED_RESPONSE:
                         System.out.println("[" + connectX.getOwnID() + "] Seed response received from " + nc.iD);
                         try {
-                            // Parse response with consensus metadata
-                            String responseJson = new String(eventPayload, "UTF-8");
-                            java.util.Map<String, Object> response =
-                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", responseJson, java.util.Map.class);
+                            ib.readyObject(dev.droppinganvil.v3.network.events.SeedExchange.class, ib.nc.se, connectX);
+                            dev.droppinganvil.v3.network.events.SeedExchange seedResp =
+                                (dev.droppinganvil.v3.network.events.SeedExchange) ib.object;
 
-                            // Extract and store response data
+                            // Map wire object to consensus tracker
                             ConnectX.SeedResponseData responseData = new ConnectX.SeedResponseData();
-                            responseData.dynamicSeed = (dev.droppinganvil.v3.network.Seed) response.get("dynamicSeed");
-                            responseData.epochSeed = (dev.droppinganvil.v3.network.Seed) response.get("epochSeed");
-                            responseData.authoritative = response.containsKey("authoritative") ?
-                                (Boolean) response.get("authoritative") : false;
+                            responseData.dynamicSeed = seedResp.dynamicSeed;
+                            responseData.epochSeed = seedResp.epochSeed;
+                            responseData.authoritative = seedResp.authoritative != null && seedResp.authoritative;
                             responseData.senderID = nc.iD;
                             responseData.timestamp = System.currentTimeMillis();
-                            responseData.chainHeights = (java.util.Map<String, Number>) response.get("chainHeights");
+                            java.util.Map<String, Number> chainHeights = new java.util.HashMap<>();
+                            chainHeights.put("c1", seedResp.c1 != null ? seedResp.c1 : 0L);
+                            chainHeights.put("c2", seedResp.c2 != null ? seedResp.c2 : 0L);
+                            chainHeights.put("c3", seedResp.c3 != null ? seedResp.c3 : 0L);
+                            responseData.chainHeights = chainHeights;
 
                             // Determine target network
                             String targetNetwork = "CXNET";
@@ -1490,28 +1486,20 @@ public class NodeMesh {
                     case CHAIN_STATUS_REQUEST:
                         System.out.println("[" + connectX.getOwnID() + "] Chain status request received from " + nc.iD);
                         try {
-                            // Parse request to get network ID
-                            //STRIP SIG FIRST
-                            ByteArrayInputStream bais = new ByteArrayInputStream(eventPayload);
-                            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                            connectX.encryptionProvider.stripSignature(bais, baos);
-                            String requestJson = baos.toString("UTF-8");
-                            java.util.Map<String, Object> request =
-                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", requestJson, java.util.Map.class);
-                            String networkID = (String) request.get("network");
+                            ib.readyObject(dev.droppinganvil.v3.network.events.ChainStatus.class, ib.nc.se, connectX);
+                            dev.droppinganvil.v3.network.events.ChainStatus chainReq =
+                                (dev.droppinganvil.v3.network.events.ChainStatus) ib.object;
+                            String networkID = chainReq != null ? chainReq.network : null;
 
                             CXNetwork network = connectX.getNetwork(networkID);
                             if (network != null) {
-                                // Build response with current block heights
-                                java.util.Map<String, Long> chainStatus = new java.util.HashMap<>();
-                                chainStatus.put("c1", network.c1.current != null ? network.c1.current.block : 0L);
-                                chainStatus.put("c2", network.c2.current != null ? network.c2.current.block : 0L);
-                                chainStatus.put("c3", network.c3.current != null ? network.c3.current.block : 0L);
-
-                                // Create response with network ID and status
-                                java.util.Map<String, Object> response = new java.util.HashMap<>();
-                                response.put("network", networkID);
-                                response.put("status", chainStatus);
+                                dev.droppinganvil.v3.network.events.ChainStatus response =
+                                    new dev.droppinganvil.v3.network.events.ChainStatus(
+                                        networkID,
+                                        network.c1.current != null ? network.c1.current.block : 0L,
+                                        network.c2.current != null ? network.c2.current.block : 0L,
+                                        network.c3.current != null ? network.c3.current.block : 0L
+                                    );
 
                                 String statusJson = ConnectX.serialize("cxJSON1", response);
 
@@ -1522,9 +1510,9 @@ public class NodeMesh {
                                     .queue();
 
                                 System.out.println("[CHAIN_STATUS] Sent status for " + networkID +
-                                                 " (c1:" + chainStatus.get("c1") +
-                                                 " c2:" + chainStatus.get("c2") +
-                                                 " c3:" + chainStatus.get("c3") + ")");
+                                                 " (c1:" + response.c1 +
+                                                 " c2:" + response.c2 +
+                                                 " c3:" + response.c3 + ")");
                             } else {
                                 System.err.println("[CHAIN_STATUS] Network not found: " + networkID);
                             }
@@ -1537,20 +1525,17 @@ public class NodeMesh {
                     case CHAIN_STATUS_RESPONSE:
                         System.out.println("[" + connectX.getOwnID() + "] Chain status response received from " + nc.iD);
                         try {
-                            String statusJson = new String(eventPayload, "UTF-8");
-                            java.util.Map<String, Object> response =
-                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", statusJson, java.util.Map.class);
+                            ib.readyObject(dev.droppinganvil.v3.network.events.ChainStatus.class, ib.nc.se, connectX);
+                            dev.droppinganvil.v3.network.events.ChainStatus chainResp =
+                                (dev.droppinganvil.v3.network.events.ChainStatus) ib.object;
 
-                            String networkID = (String) response.get("network");
-                            java.util.Map<String, Number> chainStatus = (java.util.Map<String, Number>) response.get("status");
-
-                            System.out.println("[CHAIN_STATUS] Remote chain heights for " + networkID + " from " + nc.iD.substring(0, 8) + ":");
-                            System.out.println("  c1: " + chainStatus.get("c1"));
-                            System.out.println("  c2: " + chainStatus.get("c2"));
-                            System.out.println("  c3: " + chainStatus.get("c3"));
+                            System.out.println("[CHAIN_STATUS] Remote chain heights for " + chainResp.network + " from " + nc.iD.substring(0, 8) + ":");
+                            System.out.println("  c1: " + chainResp.c1);
+                            System.out.println("  c2: " + chainResp.c2);
+                            System.out.println("  c3: " + chainResp.c3);
 
                             // Store response for multipeer verification
-                            CXNetwork network = connectX.getNetwork(networkID);
+                            CXNetwork network = connectX.getNetwork(chainResp.network);
                             if (network != null) {
                                 // Check if this response is from NMI (always trust NMI)
                                 boolean isNMI = network.configuration.backendSet != null &&
@@ -1559,7 +1544,7 @@ public class NodeMesh {
                                 if (isNMI) {
                                     System.out.println("[CHAIN_STATUS] Response from NMI/Backend - TRUSTED");
                                     // NMI response is authoritative, initiate sync immediately
-                                    initiateSyncFromPeer(connectX, network, networkID, chainStatus, nc.iD);
+                                    initiateSyncFromPeer(connectX, network, chainResp.network, chainResp, nc.iD);
                                 } else {
                                     // Peer response - store for multipeer verification
                                     System.out.println("[CHAIN_STATUS] Response from peer - storing for verification");
@@ -1740,28 +1725,19 @@ public class NodeMesh {
                     case BLOCK_NODE:
                         System.out.println("[" + connectX.getOwnID() + "] BLOCK_NODE event received from " + nc.iD);
                         try {
-                            // Parse payload: {network: "NETWORKID", nodeID: "UUID", reason: "spam"}
-                            String blockJson = new String(eventPayload, "UTF-8");
-                            java.util.Map<String, Object> blockData =
-                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", blockJson, java.util.Map.class);
+                            ib.readyObject(dev.droppinganvil.v3.network.events.NodeModeration.class, ib.nc.se, connectX);
+                            dev.droppinganvil.v3.network.events.NodeModeration blockData =
+                                (dev.droppinganvil.v3.network.events.NodeModeration) ib.object;
 
-                            String networkID = (String) blockData.get("network");
-                            String nodeID = (String) blockData.get("nodeID");
-                            String reason = (String) blockData.get("reason");
+                            System.out.println("[BLOCK_NODE] Blocking node " + blockData.nodeID + " on network " + blockData.network + " (reason: " + blockData.reason + ")");
 
-                            System.out.println("[BLOCK_NODE] Blocking node " + nodeID + " on network " + networkID + " (reason: " + reason + ")");
-
-                            // Check if CXNET-level or network-specific block
-                            if ("CXNET".equals(networkID)) {
-                                // CXNET-level block: blocks ALL transmissions from node globally
-                                connectX.blockNodeCXNET(nodeID, reason);
+                            if ("CXNET".equals(blockData.network)) {
+                                connectX.blockNodeCXNET(blockData.nodeID, blockData.reason);
                             } else {
-                                // Network-specific block (stored in local DataContainer)
-                                connectX.dataContainer.blockNode(networkID, nodeID, reason);
-                                System.out.println("[BLOCK_NODE] Node " + nodeID + " blocked from network " + networkID);
+                                connectX.dataContainer.blockNode(blockData.network, blockData.nodeID, blockData.reason);
+                                System.out.println("[BLOCK_NODE] Node " + blockData.nodeID + " blocked from network " + blockData.network);
                             }
 
-                            // This is a state-modifying event that should be recorded to c1 (Admin) chain
                             ne.executeOnSync = true;
 
                         } catch (Exception e) {
@@ -1773,30 +1749,22 @@ public class NodeMesh {
                     case UNBLOCK_NODE:
                         System.out.println("[" + connectX.getOwnID() + "] UNBLOCK_NODE event received from " + nc.iD);
                         try {
-                            // Parse payload: {network: "NETWORKID", nodeID: "UUID"}
-                            String unblockJson = new String(eventPayload, "UTF-8");
-                            java.util.Map<String, Object> unblockData =
-                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", unblockJson, java.util.Map.class);
+                            ib.readyObject(dev.droppinganvil.v3.network.events.NodeModeration.class, ib.nc.se, connectX);
+                            dev.droppinganvil.v3.network.events.NodeModeration unblockData =
+                                (dev.droppinganvil.v3.network.events.NodeModeration) ib.object;
 
-                            String networkID = (String) unblockData.get("network");
-                            String nodeID = (String) unblockData.get("nodeID");
+                            System.out.println("[UNBLOCK_NODE] Unblocking node " + unblockData.nodeID + " from network " + unblockData.network);
 
-                            System.out.println("[UNBLOCK_NODE] Unblocking node " + nodeID + " from network " + networkID);
-
-                            // Check if CXNET-level or network-specific unblock
-                            if ("CXNET".equals(networkID)) {
-                                // CXNET-level unblock
-                                connectX.unblockNodeCXNET(nodeID);
+                            if ("CXNET".equals(unblockData.network)) {
+                                connectX.unblockNodeCXNET(unblockData.nodeID);
                             } else {
-                                // Network-specific unblock (stored in local DataContainer)
-                                String removedReason = connectX.dataContainer.unblockNode(networkID, nodeID);
+                                String removedReason = connectX.dataContainer.unblockNode(unblockData.network, unblockData.nodeID);
                                 if (removedReason != null) {
-                                    System.out.println("[UNBLOCK_NODE] Node " + nodeID + " unblocked from network " + networkID +
+                                    System.out.println("[UNBLOCK_NODE] Node " + unblockData.nodeID + " unblocked from network " + unblockData.network +
                                                      " (was blocked for: " + removedReason + ")");
                                 }
                             }
 
-                            // This is a state-modifying event that should be recorded to c1 (Admin) chain
                             ne.executeOnSync = true;
 
                         } catch (Exception e) {
@@ -1808,26 +1776,18 @@ public class NodeMesh {
                     case REGISTER_NODE:
                         System.out.println("[" + connectX.getOwnID() + "] REGISTER_NODE event received from " + nc.iD);
                         try {
-                            // Parse payload: {network: "NETWORKID", nodeID: "UUID", approver: "APPROVER_UUID"}
-                            String registerJson = new String(eventPayload, "UTF-8");
-                            java.util.Map<String, Object> registerData =
-                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", registerJson, java.util.Map.class);
+                            ib.readyObject(dev.droppinganvil.v3.network.events.NodeRegistration.class, ib.nc.se, connectX);
+                            dev.droppinganvil.v3.network.events.NodeRegistration registerData =
+                                (dev.droppinganvil.v3.network.events.NodeRegistration) ib.object;
 
-                            String networkID = (String) registerData.get("network");
-                            String nodeID = (String) registerData.get("nodeID");
-                            String approver = (String) registerData.get("approver");
+                            System.out.println("[REGISTER_NODE] Registering node " + registerData.nodeID + " to network " + registerData.network +
+                                             " (approved by " + registerData.approver + ")");
 
-                            System.out.println("[REGISTER_NODE] Registering node " + nodeID + " to network " + networkID +
-                                             " (approved by " + approver + ")");
-
-                            // Add to registered nodes set (stored in local DataContainer)
-                            connectX.dataContainer.networkRegisteredNodes.computeIfAbsent(networkID, k -> new java.util.HashSet<>()).add(nodeID);
-                            System.out.println("[REGISTER_NODE] Node " + nodeID + " registered to network " + networkID);
+                            connectX.dataContainer.networkRegisteredNodes.computeIfAbsent(registerData.network, k -> new java.util.HashSet<>()).add(registerData.nodeID);
+                            System.out.println("[REGISTER_NODE] Node " + registerData.nodeID + " registered to network " + registerData.network);
                             System.out.println("[REGISTER_NODE] Total registered nodes: " +
-                                connectX.dataContainer.networkRegisteredNodes.get(networkID).size());
+                                connectX.dataContainer.networkRegisteredNodes.get(registerData.network).size());
 
-                            // This is a state-modifying event that should be recorded to c1 (Admin) chain
-                            // System reads c1 to rebuild registeredNodes set during bootstrap/sync
                             ne.executeOnSync = true;
 
                         } catch (Exception e) {
@@ -1839,42 +1799,27 @@ public class NodeMesh {
                     case GRANT_PERMISSION:
                         System.out.println("[" + connectX.getOwnID() + "] GRANT_PERMISSION event received from " + nc.iD);
                         try {
-                            // Parse payload: {network: "NETWORKID", nodeID: "UUID", permission: "Record", chain: 3, priority: 10}
-                            String grantJson = new String(eventPayload, "UTF-8");
-                            java.util.Map<String, Object> grantData =
-                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", grantJson, java.util.Map.class);
+                            ib.readyObject(dev.droppinganvil.v3.network.events.PermissionChange.class, ib.nc.se, connectX);
+                            dev.droppinganvil.v3.network.events.PermissionChange grantData =
+                                (dev.droppinganvil.v3.network.events.PermissionChange) ib.object;
 
-                            String networkID = (String) grantData.get("network");
-                            String nodeID = (String) grantData.get("nodeID");
-                            String permission = (String) grantData.get("permission");
-                            Object chainObj = grantData.get("chain");
-                            Long chainID = chainObj instanceof Integer ? ((Integer) chainObj).longValue() : (Long) chainObj;
-                            Object priorityObj = grantData.get("priority");
-                            int priority = priorityObj instanceof Integer ? (Integer) priorityObj : 10;
+                            int priority = grantData.priority != null ? grantData.priority : 10;
+                            System.out.println("[GRANT_PERMISSION] Granting " + grantData.permission + " permission to node " + grantData.nodeID +
+                                             " on network " + grantData.network + " chain " + grantData.chain + " (priority: " + priority + ")");
 
-                            System.out.println("[GRANT_PERMISSION] Granting " + permission + " permission to node " + nodeID +
-                                             " on network " + networkID + " chain " + chainID + " (priority: " + priority + ")");
-
-                            // Get the network
-                            CXNetwork network = connectX.getNetwork(networkID);
+                            CXNetwork network = connectX.getNetwork(grantData.network);
                             if (network != null) {
-                                // Create permission entry
-                                String permKey = permission + "-" + chainID;
+                                String permKey = grantData.permission + "-" + grantData.chain;
                                 us.anvildevelopment.util.tools.permissions.Entry entry =
                                     new us.anvildevelopment.util.tools.permissions.BasicEntry(permKey, true, priority);
-
-                                // Add to network permissions
                                 java.util.Map<String, us.anvildevelopment.util.tools.permissions.Entry> nodePerms =
-                                    network.networkPermissions.permissionSet.computeIfAbsent(nodeID, k -> new java.util.HashMap<>());
+                                    network.networkPermissions.permissionSet.computeIfAbsent(grantData.nodeID, k -> new java.util.HashMap<>());
                                 nodePerms.put(permKey, entry);
-
                                 System.out.println("[GRANT_PERMISSION] Permission granted successfully");
                             } else {
-                                System.err.println("[GRANT_PERMISSION] Network not found: " + networkID);
+                                System.err.println("[GRANT_PERMISSION] Network not found: " + grantData.network);
                             }
 
-                            // This is a state-modifying event that should be recorded to c1 (Admin) chain
-                            // System reads c1 to rebuild permissions during bootstrap/sync
                             ne.executeOnSync = true;
 
                         } catch (Exception e) {
@@ -1886,42 +1831,31 @@ public class NodeMesh {
                     case REVOKE_PERMISSION:
                         System.out.println("[" + connectX.getOwnID() + "] REVOKE_PERMISSION event received from " + nc.iD);
                         try {
-                            // Parse payload: {network: "NETWORKID", nodeID: "UUID", permission: "Record", chain: 3}
-                            String revokeJson = new String(eventPayload, "UTF-8");
-                            java.util.Map<String, Object> revokeData =
-                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", revokeJson, java.util.Map.class);
+                            ib.readyObject(dev.droppinganvil.v3.network.events.PermissionChange.class, ib.nc.se, connectX);
+                            dev.droppinganvil.v3.network.events.PermissionChange revokeData =
+                                (dev.droppinganvil.v3.network.events.PermissionChange) ib.object;
 
-                            String networkID = (String) revokeData.get("network");
-                            String nodeID = (String) revokeData.get("nodeID");
-                            String permission = (String) revokeData.get("permission");
-                            Object chainObj = revokeData.get("chain");
-                            Long chainID = chainObj instanceof Integer ? ((Integer) chainObj).longValue() : (Long) chainObj;
+                            System.out.println("[REVOKE_PERMISSION] Revoking " + revokeData.permission + " permission from node " + revokeData.nodeID +
+                                             " on network " + revokeData.network + " chain " + revokeData.chain);
 
-                            System.out.println("[REVOKE_PERMISSION] Revoking " + permission + " permission from node " + nodeID +
-                                             " on network " + networkID + " chain " + chainID);
-
-                            // Get the network
-                            CXNetwork network = connectX.getNetwork(networkID);
+                            CXNetwork network = connectX.getNetwork(revokeData.network);
                             if (network != null) {
-                                // Remove permission entry
-                                String permKey = permission + "-" + chainID;
+                                String permKey = revokeData.permission + "-" + revokeData.chain;
                                 java.util.Map<String, us.anvildevelopment.util.tools.permissions.Entry> nodePerms =
-                                    network.networkPermissions.permissionSet.get(nodeID);
+                                    network.networkPermissions.permissionSet.get(revokeData.nodeID);
                                 if (nodePerms != null) {
                                     nodePerms.remove(permKey);
                                     if (nodePerms.isEmpty()) {
-                                        network.networkPermissions.permissionSet.remove(nodeID);
+                                        network.networkPermissions.permissionSet.remove(revokeData.nodeID);
                                     }
                                     System.out.println("[REVOKE_PERMISSION] Permission revoked successfully");
                                 } else {
                                     System.out.println("[REVOKE_PERMISSION] Node had no permissions to revoke");
                                 }
                             } else {
-                                System.err.println("[REVOKE_PERMISSION] Network not found: " + networkID);
+                                System.err.println("[REVOKE_PERMISSION] Network not found: " + revokeData.network);
                             }
 
-                            // This is a state-modifying event that should be recorded to c1 (Admin) chain
-                            // System reads c1 to rebuild permissions during bootstrap/sync
                             ne.executeOnSync = true;
 
                         } catch (Exception e) {
@@ -2409,11 +2343,11 @@ public class NodeMesh {
     }
 
     private void initiateSyncFromPeer(ConnectX connectX, CXNetwork network, String networkID,
-                                     java.util.Map<String, Number> remoteChainStatus, String peerID) {
+                                     dev.droppinganvil.v3.network.events.ChainStatus remoteChainStatus, String peerID) {
         try {
-            long remoteC1 = remoteChainStatus.get("c1").longValue();
-            long remoteC2 = remoteChainStatus.get("c2").longValue();
-            long remoteC3 = remoteChainStatus.get("c3").longValue();
+            long remoteC1 = remoteChainStatus.c1 != null ? remoteChainStatus.c1 : 0L;
+            long remoteC2 = remoteChainStatus.c2 != null ? remoteChainStatus.c2 : 0L;
+            long remoteC3 = remoteChainStatus.c3 != null ? remoteChainStatus.c3 : 0L;
 
             long localC1 = network.c1.current != null ? network.c1.current.block : -1;
             long localC2 = network.c2.current != null ? network.c2.current.block : -1;

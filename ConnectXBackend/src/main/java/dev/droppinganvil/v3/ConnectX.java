@@ -1173,7 +1173,8 @@ public class ConnectX {
 
             // Send SEED_REQUEST using EventBuilder pattern with signature
             String[] bridgeParts2 = EPOCH_BRIDGE_ADDRESS.split(":", 2);
-            buildEvent(dev.droppinganvil.v3.network.events.EventType.SEED_REQUEST, "CXNET".getBytes("UTF-8"))
+            buildEvent(dev.droppinganvil.v3.network.events.EventType.SEED_REQUEST,
+                serialize("cxJSON1", new dev.droppinganvil.v3.network.events.SeedExchange("CXNET")).getBytes("UTF-8"))
                 .toPeer(EPOCH_UUID)
                 .viaBridge(bridgeParts2[0], bridgeParts2[1])
                 .signData()
@@ -2489,9 +2490,7 @@ public class ConnectX {
             System.out.println("[Auto-Sync] Requesting chain status from NMI " + nmiID.substring(0, 8) + "...");
 
             // Create CHAIN_STATUS_REQUEST
-            java.util.Map<String, Object> request = new java.util.HashMap<>();
-            request.put("network", networkID);
-            String requestJson = serialize("cxJSON1", request);
+            String requestJson = serialize("cxJSON1", new dev.droppinganvil.v3.network.events.ChainStatus(networkID));
 
             // Send request using EventBuilder pattern with automatic signature
             EventBuilder eb = buildEvent(

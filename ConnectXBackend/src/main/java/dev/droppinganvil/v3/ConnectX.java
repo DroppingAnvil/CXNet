@@ -29,10 +29,6 @@ import dev.droppinganvil.v3.network.nodemesh.OutputBundle;
 import dev.droppinganvil.v3.network.nodemesh.PeerDirectory;
 import dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider;
 import dev.droppinganvil.v3.network.nodemesh.bridge.CXBridge;
-import dev.droppinganvil.v3.resourcecore.Availability;
-import dev.droppinganvil.v3.resourcecore.Resource;
-import dev.droppinganvil.v3.resourcecore.ResourceType;
-
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -1939,29 +1935,7 @@ public class ConnectX {
         }
     }
 
-    public Resource locateResource(String networkID, ResourceType type, Availability availability) {
-        //TODO implement resource location
-        return null;
-    }
 
-    public File locateResourceDIR(Resource r) {
-        if (r.p == null) return null;
-        File f = null;
-        switch (r.p.getScope()) {
-            case CXN:
-                f = new File(resources, r.p.network);
-                break;
-            case CXS:
-                f = new File(resources, r.p.cxID);
-                break;
-        }
-        return f;
-    }
-
-    @Deprecated
-    public static File locateResourceDIR(ConnectX cx, Resource r) {
-        return cx.locateResourceDIR(r);
-    }
     public boolean addPlugin(CXPlugin cxp) {
         try {
             checkSafety(cxp.serviceName);

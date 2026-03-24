@@ -14,6 +14,7 @@ import us.anvildevelopment.util.tools.database.annotations.MemoryOnly;
 import java.io.File;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class PeerDirectory implements Serializable {
@@ -23,10 +24,11 @@ public class PeerDirectory implements Serializable {
      */
     public ConcurrentHashMap<String,Node> seen = new ConcurrentHashMap<>();
     /**
-     * More resource friendly way to store seen peers, by reference
+     * More resource friendly way to store seen peers, by reference.
+     * Thread-safe: backed by ConcurrentHashMap for O(1) contains/add under concurrent IOThreads.
      * //TODO Optimize older uses of seen map
      */
-    public ArrayList<String> seenCXIDs = new ArrayList<>();
+    public Set<String> seenCXIDs = ConcurrentHashMap.newKeySet();
     public ConcurrentHashMap<String, Node> lan = new ConcurrentHashMap<>();
     public ConcurrentHashMap<String,Node> hv = new ConcurrentHashMap<>();
     public File peers;

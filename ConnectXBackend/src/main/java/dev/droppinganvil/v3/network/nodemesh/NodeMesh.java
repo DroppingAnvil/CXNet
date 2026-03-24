@@ -2,26 +2,32 @@ package dev.droppinganvil.v3.network.nodemesh;
 
 import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import dev.droppinganvil.v3.ConnectX;
+import dev.droppinganvil.v3.Permission;
 import dev.droppinganvil.v3.analytics.AnalyticData;
 import dev.droppinganvil.v3.analytics.Analytics;
 import dev.droppinganvil.v3.crypt.core.exceptions.DecryptionFailureException;
 import dev.droppinganvil.v3.crypt.pgpainless.PainlessCryptProvider;
+import dev.droppinganvil.v3.edge.NetworkBlock;
+import dev.droppinganvil.v3.edge.NetworkRecord;
+import dev.droppinganvil.v3.io.IOThread;
 import dev.droppinganvil.v3.network.*;
-import dev.droppinganvil.v3.network.events.CXHello;
-import dev.droppinganvil.v3.network.events.EventType;
-import dev.droppinganvil.v3.network.events.NetworkContainer;
-import dev.droppinganvil.v3.network.events.NetworkEvent;
+import dev.droppinganvil.v3.network.events.*;
+import dev.droppinganvil.v3.network.threads.EventProcessor;
+import dev.droppinganvil.v3.network.threads.OutputProcessor;
+import dev.droppinganvil.v3.network.threads.RetryProcessor;
+import dev.droppinganvil.v3.network.threads.SocketWatcher;
 import org.bouncycastle.openpgp.PGPPublicKeyRing;
 import org.pgpainless.decryption_verification.OpenPgpMetadata;
+import us.anvildevelopment.util.tools.permissions.BasicEntry;
+import us.anvildevelopment.util.tools.permissions.Entry;
 
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.Objects;
+import java.util.*;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 
@@ -29,12 +35,14 @@ public class NodeMesh {
     // Global static fields for security (shared across all peers)
     public static ConcurrentHashMap<String, Integer> timeout = new ConcurrentHashMap<>();
     public static ConcurrentHashMap<String, String> blacklist = new ConcurrentHashMap<>();
-    public HashSet<String> ownAddresses = new HashSet<>();
+    public Set<String> ownAddresses = ConcurrentHashMap.newKeySet();
     public static ThreadPoolExecutor threadPool = (ThreadPoolExecutor) Executors.newFixedThreadPool(NodeConfig.pThreads);
 
     // Instance fields (per-peer)
     public ServerSocket serverSocket;
-    public ConcurrentHashMap<String, ArrayList<String>> transmissionIDMap = new ConcurrentHashMap<>();
+    public ConcurrentHashMap<String, Set<String>> transmissionIDMap = new ConcurrentHashMap<>();
+    /** Guards against two IOThreads concurrently importing the same unknown peer (NewNode/CXHELLO). */
+    private final ConcurrentHashMap<String, Boolean> inFlightImports = new ConcurrentHashMap<>();
     public PeerDirectory peerDirectory = null;
     public InConnectionManager in;
     public Connections connections = new Connections();
@@ -47,7 +55,7 @@ public class NodeMesh {
      * Key: IP address
      * Value: List of request timestamps (in milliseconds)
      */
-    private ConcurrentHashMap<String, java.util.List<Long>> peerRequestTimestamps = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<String, List<Long>> peerRequestTimestamps = new ConcurrentHashMap<>();
     private static final int PEER_REQUEST_LIMIT = 3;
     private static final long PEER_REQUEST_WINDOW_MS = 60 * 60 * 1000; // 1 hour in milliseconds
 
@@ -66,7 +74,7 @@ public class NodeMesh {
      * @param outController Outbound connection controller
      * @return NodeMesh instance
      */
-    public static NodeMesh initializeNetwork(dev.droppinganvil.v3.ConnectX connectX, int port, OutConnectionController outController) throws IOException {
+    public static NodeMesh initializeNetwork(ConnectX connectX, int port, OutConnectionController outController) throws IOException {
         // Create NodeMesh instance
         NodeMesh nodeMesh = new NodeMesh(connectX);
 
@@ -75,7 +83,7 @@ public class NodeMesh {
 
         // Start IO worker threads for job queue processing
         for (int i = 0; i < NodeConfig.ioThreads; i++) {
-            dev.droppinganvil.v3.io.IOThread ioWorker = new dev.droppinganvil.v3.io.IOThread(NodeConfig.IO_THREAD_SLEEP, connectX, nodeMesh);
+            IOThread ioWorker = new IOThread(NodeConfig.IO_THREAD_SLEEP, connectX, nodeMesh);
             ioWorker.run = true; // Enable the worker
             Thread ioThread = new Thread(ioWorker);
             ioThread.setName("IOThread-" + i);
@@ -83,12 +91,12 @@ public class NodeMesh {
         }
 
         // Start SocketWatcher for incoming connections
-        Thread socketWatcher = new Thread(new dev.droppinganvil.v3.network.threads.SocketWatcher(connectX, nodeMesh));
+        Thread socketWatcher = new Thread(new SocketWatcher(connectX, nodeMesh));
         socketWatcher.setName("SocketWatcher");
         socketWatcher.start();
 
         // Start EventProcessor for processing eventQueue
-        Thread eventProcessor = new Thread(new dev.droppinganvil.v3.network.threads.EventProcessor(nodeMesh));
+        Thread eventProcessor = new Thread(new EventProcessor(nodeMesh));
         eventProcessor.setName("EventProcessor");
         eventProcessor.start();
 
@@ -96,13 +104,13 @@ public class NodeMesh {
         // This significantly improves CXHELLO discovery timing by processing events concurrently
         System.out.println("[NodeMesh] Starting " + NodeConfig.outputProcessorThreads + " OutputProcessor threads");
         for (int i = 0; i < NodeConfig.outputProcessorThreads; i++) {
-            Thread outputProcessor = new Thread(new dev.droppinganvil.v3.network.threads.OutputProcessor(outController));
+            Thread outputProcessor = new Thread(new OutputProcessor(outController));
             outputProcessor.setName("OutputProcessor-" + i);
             outputProcessor.start();
         }
 
         // Start RetryProcessor for handling failed events with exponential backoff
-        Thread retryProcessor = new Thread(new dev.droppinganvil.v3.network.threads.RetryProcessor(outController));
+        Thread retryProcessor = new Thread(new RetryProcessor(outController));
         retryProcessor.setName("RetryProcessor");
         retryProcessor.start();
 
@@ -112,7 +120,7 @@ public class NodeMesh {
         //TODO optimize streams
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         //TODO max size
-        NetworkContainer nc;
+        NetworkContainer nc = null;
         NetworkEvent ne;
         ByteArrayOutputStream baoss = new ByteArrayOutputStream();
         ByteArrayInputStream bais;
@@ -266,6 +274,11 @@ public class NodeMesh {
                         ownAddresses.add(socket.getLocalSocketAddress().toString());
                         return;
                     }
+                    // Guard: prevent two concurrent IOThreads from importing the same peer simultaneously
+                    if (inFlightImports.putIfAbsent(nc.iD, Boolean.TRUE) != null) {
+                        System.out.println("[NodeMesh] Skipping duplicate in-flight import for " + nc.iD.substring(0, 8));
+                        return;
+                    }
                     System.out.println("[NodeMesh] Processing " + parsedEvent.eT + " event from " + nc.iD);
 
                     // Import node BEFORE verification (we need the public key)
@@ -287,9 +300,9 @@ public class NodeMesh {
 
 
                                 // CXHELLO payload: CXHello class with signedNode byte array
-                                dev.droppinganvil.v3.network.events.CXHello cxhelloData =
-                                    (dev.droppinganvil.v3.network.events.CXHello) ConnectX.deserialize("cxJSON1", payloadJson,
-                                        dev.droppinganvil.v3.network.events.CXHello.class);
+                                CXHello cxhelloData =
+                                    (CXHello) ConnectX.deserialize("cxJSON1", payloadJson,
+                                        CXHello.class);
 
                                 //SET OBJECT IN INPUT BUNDLE
                                 //IMPORTANT
@@ -303,8 +316,8 @@ public class NodeMesh {
                                     // Pattern: strip -> deserialize -> import -> verify -> rollback if verification fails
 
                                     // Step 1: Strip signature WITHOUT verification (we don't have their key yet for unknown peers)
-                                    java.io.ByteArrayInputStream signedNodeInput = new java.io.ByteArrayInputStream(signedNodeBlob);
-                                    java.io.ByteArrayOutputStream nodeOutput = new java.io.ByteArrayOutputStream();
+                                    ByteArrayInputStream signedNodeInput = new ByteArrayInputStream(signedNodeBlob);
+                                    ByteArrayOutputStream nodeOutput = new ByteArrayOutputStream();
                                     connectX.encryptionProvider.stripSignature(signedNodeInput, nodeOutput);
                                     signedNodeInput.close();
 
@@ -438,6 +451,7 @@ public class NodeMesh {
                     ne = parsedEvent;
                     networkEvent = strippedEventJson;
                     System.out.print("Reached event data, data is never used and will be cleaned up by GC shortly");
+                    inFlightImports.remove(nc.iD);
 
                 } else {
                     // Standard event: Verify signature (we already have public key)
@@ -504,8 +518,8 @@ public class NodeMesh {
             bais.close();
             baoss.close();
 
-            // Track seen peers (memory-efficient using seenCXIDs list)
-            if (nc.iD != null && !peerDirectory.seenCXIDs.contains(nc.iD)) {
+            // Track seen peers (memory-efficient using seenCXIDs set)
+            if (nc.iD != null) {
                 peerDirectory.seenCXIDs.add(nc.iD);
             }
 
@@ -538,6 +552,8 @@ public class NodeMesh {
             if (e instanceof MismatchedInputException) {
                 return;
             }
+            // Release in-flight import guard if this exception came from a NewNode/CXHELLO path
+            if (nc != null && nc.iD != null) inFlightImports.remove(nc.iD);
             e.printStackTrace();
             if (!NodeConfig.devMode && socketAddress != null) {
                 if (NodeMesh.timeout.containsKey(socketAddress)) {
@@ -560,26 +576,23 @@ public class NodeMesh {
         // DUPLICATE DETECTION: Check if we've already processed this event
         // In a P2P mesh network, the same event can arrive via multiple relay paths
         // We only want to process each unique event (ne.iD) exactly once
-        ArrayList<String> seenFrom = transmissionIDMap.get(ne.iD);
+        // putIfAbsent is atomic - prevents two concurrent IOThreads from both passing for the same event ID
+        Set<String> transmitters = ConcurrentHashMap.newKeySet();
+        transmitters.add(nc.iD);
+        Set<String> seenFrom = transmissionIDMap.putIfAbsent(ne.iD, transmitters);
         if (seenFrom != null) {
             // We've already seen this event - drop it (don't process or relay again)
-            // Add this transmitter to the list for tracking purposes
-            if (!seenFrom.contains(nc.iD)) {
-                seenFrom.add(nc.iD);
-            }
+            seenFrom.add(nc.iD); // thread-safe tracking add
             if (socket != null) socket.close();
             return; // Duplicate event - drop silently
         } else {
-            // First time seeing this event - record it and continue processing
-            ArrayList<String> transmitters = new ArrayList<>();
-            transmitters.add(nc.iD);
-            transmissionIDMap.put(ne.iD, transmitters);
+            // First time seeing this event - already recorded via putIfAbsent above
 
             // Cleanup old entries to prevent unbounded memory growth
             // Keep last 10000 event IDs
             if (transmissionIDMap.size() > 10000) {
                 // Remove oldest 1000 entries (simple FIFO cleanup)
-                java.util.Iterator<String> iterator = transmissionIDMap.keySet().iterator();
+                Iterator<String> iterator = transmissionIDMap.keySet().iterator();
                 int removeCount = 1000;
                 while (iterator.hasNext() && removeCount > 0) {
                     iterator.next();
@@ -626,7 +639,7 @@ public class NodeMesh {
             EventType et = EventType.valueOf(ne.eT);
             if ((et == EventType.CXHELLO || et == EventType.CXHELLO_RESPONSE) && ne.d != null) {
 
-                dev.droppinganvil.v3.network.events.CXHello helloData;
+                CXHello helloData;
 
                 /// If for some reason old method is used try it, otherwise use new InputBundle features
                 if (ib.object == null) {
@@ -644,13 +657,13 @@ public class NodeMesh {
 
                     // Deserialize CXHello class
                     helloData =
-                            (dev.droppinganvil.v3.network.events.CXHello) ConnectX.deserialize("cxJSON1", helloJson,
-                                    dev.droppinganvil.v3.network.events.CXHello.class);
+                            (CXHello) ConnectX.deserialize("cxJSON1", helloJson,
+                                    CXHello.class);
                 } else {
                     helloData = (CXHello) ib.object;
                 }
                 } else {
-                    helloData = (dev.droppinganvil.v3.network.events.CXHello) ib.object;
+                    helloData = (CXHello) ib.object;
                 }
 
                 //NEW INPUT BUNDLE HANDLING!! I AM SAVED
@@ -800,7 +813,7 @@ public class NodeMesh {
                             // Verify and deserialize the signed Node blob (signed by origin sender)
                             Node node = (Node) connectX.getSignedObject(
                                 ib.ne.p.oCXID, // Origin sender's cxID for signature verification
-                                new java.io.ByteArrayInputStream(signedNodeBlob),
+                                new ByteArrayInputStream(signedNodeBlob),
                                 Node.class,
                                 "cxJSON1"
                             );
@@ -838,14 +851,14 @@ public class NodeMesh {
                       //      dev.droppinganvil.v3.network.events.CXHello cxhelloData =
                       //          (dev.droppinganvil.v3.network.events.CXHello) ConnectX.deserialize("cxJSON1", cxhelloPayloadJson,
                       //              dev.droppinganvil.v3.network.events.CXHello.class);
-                            dev.droppinganvil.v3.network.events.CXHello cxhelloData = (dev.droppinganvil.v3.network.events.CXHello) ib.object;
+                            CXHello cxhelloData = (CXHello) ib.object;
                             // Get signed Node blob from payload
                             byte[] cxhelloSignedBlob = cxhelloData.signedNode;
 
                             if (cxhelloSignedBlob != null) {
                                 // Verify and deserialize the signed Node blob (using sender's ID from container)
-                                java.io.ByteArrayInputStream signedInput = new java.io.ByteArrayInputStream(cxhelloSignedBlob);
-                                java.io.ByteArrayOutputStream verifiedOutput = new java.io.ByteArrayOutputStream();
+                                ByteArrayInputStream signedInput = new ByteArrayInputStream(cxhelloSignedBlob);
+                                ByteArrayOutputStream verifiedOutput = new ByteArrayOutputStream();
                                 boolean verified = connectX.encryptionProvider.verifyAndStrip(signedInput, verifiedOutput, ib.nc.iD);
                                 signedInput.close();
 
@@ -871,8 +884,8 @@ public class NodeMesh {
 
                                         // Sign our Node for .cxi persistence on receiver
                                         String ourNodeJson = ConnectX.serialize("cxJSON1", connectX.getSelf());
-                                        java.io.ByteArrayInputStream nodeInput = new java.io.ByteArrayInputStream(ourNodeJson.getBytes("UTF-8"));
-                                        java.io.ByteArrayOutputStream signedOutput = new java.io.ByteArrayOutputStream();
+                                        ByteArrayInputStream nodeInput = new ByteArrayInputStream(ourNodeJson.getBytes("UTF-8"));
+                                        ByteArrayOutputStream signedOutput = new ByteArrayOutputStream();
                                         connectX.encryptionProvider.sign(nodeInput, signedOutput);
                                         nodeInput.close();
                                         byte[] ourSignedBlob = signedOutput.toByteArray();
@@ -884,14 +897,14 @@ public class NodeMesh {
                                         // Get public/local address of our receiving socket
                                         String ourAddress = null;
                                         if (in.serverSocket != null && listeningPort > 0) {
-                                            String localIP = dev.droppinganvil.v3.network.nodemesh.LANScanner.getLocalIP();
+                                            String localIP = LANScanner.getLocalIP();
                                             if (localIP != null) {
                                                 ourAddress = localIP + ":" + listeningPort;
                                             }
                                         }
 
-                                        dev.droppinganvil.v3.network.events.CXHello responsePayload =
-                                            new dev.droppinganvil.v3.network.events.CXHello(connectX.getOwnID(), listeningPort, ourSignedBlob, ourAddress);
+                                        CXHello responsePayload =
+                                            new CXHello(connectX.getOwnID(), listeningPort, ourSignedBlob, ourAddress);
 
                                         String responsePayloadJson = ConnectX.serialize("cxJSON1", responsePayload);
 
@@ -912,7 +925,7 @@ public class NodeMesh {
                         case CXHELLO_RESPONSE:
                             // CXHELLO_RESPONSE payload: CXHello class with signed Node blob
                             System.out.println("[" + connectX.getOwnID() + "] CXHELLO_RESPONSE received from " + ib.nc.iD);
-                            dev.droppinganvil.v3.network.events.CXHello responseData;
+                            CXHello responseData;
                             /// NEW InputBundle features handling
                             if (ib.object != null) {
                                 //Try new method first
@@ -920,21 +933,21 @@ public class NodeMesh {
                                     System.out.println("[NodeMesh] Using depreciated method, use new InputBundle instead 002");
                                     String responsePayloadJson = new String(eventData, "UTF-8");
                                     responseData =
-                                            (dev.droppinganvil.v3.network.events.CXHello) ConnectX.deserialize("cxJSON1", responsePayloadJson,
-                                                    dev.droppinganvil.v3.network.events.CXHello.class);
+                                            (CXHello) ConnectX.deserialize("cxJSON1", responsePayloadJson,
+                                                    CXHello.class);
                                 } else {
                                     responseData = (CXHello) ib.object;
                                 }
                             } else {
-                                responseData = (dev.droppinganvil.v3.network.events.CXHello) ib.object;
+                                responseData = (CXHello) ib.object;
                             }
                             // Get signed Node blob from CXHello payload
                             byte[] respSignedBlob = responseData.signedNode;
 
                             if (respSignedBlob != null) {
                                 // Verify and deserialize the signed Node blob
-                                java.io.ByteArrayInputStream respSignedInput = new java.io.ByteArrayInputStream(respSignedBlob);
-                                java.io.ByteArrayOutputStream respVerifiedOutput = new java.io.ByteArrayOutputStream();
+                                ByteArrayInputStream respSignedInput = new ByteArrayInputStream(respSignedBlob);
+                                ByteArrayOutputStream respVerifiedOutput = new ByteArrayOutputStream();
                                 boolean respVerified = connectX.encryptionProvider.verifyAndStrip(respSignedInput, respVerifiedOutput, ib.nc.iD);
                                 respSignedInput.close();
 
@@ -1007,7 +1020,7 @@ public class NodeMesh {
                             }
 
                             // Check if sender has Record permission for this chain
-                            boolean hasPermission = network.checkChainPermission(senderID, dev.droppinganvil.v3.Permission.Record.name(), chainID);
+                            boolean hasPermission = network.checkChainPermission(senderID, Permission.Record.name(), chainID);
 
                             if (hasPermission) {
                                 // Record event to blockchain with signed bytes
@@ -1040,9 +1053,9 @@ public class NodeMesh {
         long cutoff = now - PEER_REQUEST_WINDOW_MS;
 
         // Get or create timestamp list for this IP
-        java.util.List<Long> timestamps = peerRequestTimestamps.computeIfAbsent(
+        List<Long> timestamps = peerRequestTimestamps.computeIfAbsent(
             ipAddress,
-            k -> new java.util.concurrent.CopyOnWriteArrayList<>()
+            k -> new CopyOnWriteArrayList<>()
         );
 
         // Remove timestamps older than 1 hour
@@ -1059,9 +1072,9 @@ public class NodeMesh {
      */
     private void recordPeerRequest(String ipAddress) {
         long now = System.currentTimeMillis();
-        java.util.List<Long> timestamps = peerRequestTimestamps.computeIfAbsent(
+        List<Long> timestamps = peerRequestTimestamps.computeIfAbsent(
             ipAddress,
-            k -> new java.util.concurrent.CopyOnWriteArrayList<>()
+            k -> new CopyOnWriteArrayList<>()
         );
         timestamps.add(now);
     }
@@ -1079,8 +1092,8 @@ public class NodeMesh {
         // For CXN broadcasts, cxID may be null but oCXID always identifies the signer
         if (signedEventBytes != null && ne != null && ne.p != null && ne.p.oCXID != null) {
             try {
-                java.io.ByteArrayInputStream verifyStream = new java.io.ByteArrayInputStream(signedEventBytes);
-                java.io.ByteArrayOutputStream verifiedOutput = new java.io.ByteArrayOutputStream();
+                ByteArrayInputStream verifyStream = new ByteArrayInputStream(signedEventBytes);
+                ByteArrayOutputStream verifiedOutput = new ByteArrayOutputStream();
                 boolean verified = connectX.encryptionProvider.verifyAndStrip(verifyStream, verifiedOutput, ne.p.oCXID);
                 verifyStream.close();
 
@@ -1122,9 +1135,9 @@ public class NodeMesh {
                     case PeerFinding:
                         try {
                             // Parse PeerFinding request/response
-                            dev.droppinganvil.v3.network.events.PeerFinding pf =
-                                (dev.droppinganvil.v3.network.events.PeerFinding) ConnectX.deserialize("cxJSON1", new String(ib.verifiedObjectBytes, "UTF-8"),
-                                    dev.droppinganvil.v3.network.events.PeerFinding.class);
+                            PeerFinding pf =
+                                (PeerFinding) ConnectX.deserialize("cxJSON1", new String(ib.verifiedObjectBytes, "UTF-8"),
+                                    PeerFinding.class);
                            // dev.droppinganvil.v3.network.events.PeerFinding pff = dev.droppinganvil.v3.network.events.PeerFinding) connectX.encryptionProvider.verifyAndStrip()
 
                             if ("request".equals(pf.t)) {
@@ -1138,15 +1151,15 @@ public class NodeMesh {
 
                                 if (network != null) {
                                     // Build response with signed node blobs (up to 50 random peers)
-                                    dev.droppinganvil.v3.network.events.PeerFinding response =
-                                        new dev.droppinganvil.v3.network.events.PeerFinding();
+                                    PeerFinding response =
+                                        new PeerFinding();
                                     response.t = "response";
                                     response.network = requestedNetwork;
-                                    response.signedNodes = new java.util.ArrayList<>();
+                                    response.signedNodes = new ArrayList<>();
 
                                     // Collect peers from PeerDirectory
-                                    java.util.List<String> peerIDs = new java.util.ArrayList<>(peerDirectory.hv.keySet());
-                                    java.util.Collections.shuffle(peerIDs); // Randomize
+                                    List<String> peerIDs = new ArrayList<>(peerDirectory.hv.keySet());
+                                    Collections.shuffle(peerIDs); // Randomize
 
                                     int count = 0;
                                     for (String peerID : peerIDs) {
@@ -1164,26 +1177,26 @@ public class NodeMesh {
                                     System.out.println("[PeerFinding] Responding with " + count + " signed peers");
 
                                     // Populate peers field: 30% of seen peers, then 30% of their addresses (max 20)
-                                    java.util.Set<String> allAddresses = new java.util.HashSet<>();
+                                    Set<String> allAddresses = new HashSet<>();
 
                                     // Select 30% of seen peers
-                                    java.util.List<String> seenPeerIDs = new java.util.ArrayList<>(peerDirectory.seenCXIDs);
-                                    java.util.Collections.shuffle(seenPeerIDs);
+                                    List<String> seenPeerIDs = new ArrayList<>(peerDirectory.seenCXIDs);
+                                    Collections.shuffle(seenPeerIDs);
                                     // 30% rule 0.3
                                     int seenPeerCount = (int) Math.ceil(seenPeerIDs.size() * 0.3);
 
                                     for (int i = 0; i < Math.min(seenPeerCount, seenPeerIDs.size()); i++) {
                                         String peerID = seenPeerIDs.get(i);
                                         // Get all addresses for this peer
-                                        java.util.List<String> peerAddresses = peerDirectory.getAllAddresses(peerID, connectX);
+                                        List<String> peerAddresses = peerDirectory.getAllAddresses(peerID, connectX);
                                         allAddresses.addAll(peerAddresses);
                                     }
 
                                     // Select 30% of addresses (max 20)
-                                    java.util.List<String> addressList = new java.util.ArrayList<>(allAddresses);
-                                    java.util.Collections.shuffle(addressList);
+                                    List<String> addressList = new ArrayList<>(allAddresses);
+                                    Collections.shuffle(addressList);
                                     int addressCount = Math.min(20, (int) Math.ceil(addressList.size() * 0.3));
-                                    java.util.List<String> selectedAddresses = addressList.subList(0, Math.min(addressCount, addressList.size()));
+                                    List<String> selectedAddresses = addressList.subList(0, Math.min(addressCount, addressList.size()));
 
                                     //Set response
                                     response.peers.addAll(addressList);
@@ -1250,8 +1263,8 @@ public class NodeMesh {
 
                                             // Import node WITHOUT verification first (need public key from node)
                                             // Pattern: strip -> deserialize -> import -> verify -> rollback if fail
-                                            java.io.ByteArrayInputStream signedInput = new java.io.ByteArrayInputStream(signedNodeBytes);
-                                            java.io.ByteArrayOutputStream strippedOutput = new java.io.ByteArrayOutputStream();
+                                            ByteArrayInputStream signedInput = new ByteArrayInputStream(signedNodeBytes);
+                                            ByteArrayOutputStream strippedOutput = new ByteArrayOutputStream();
                                             connectX.encryptionProvider.stripSignature(signedInput, strippedOutput);
                                             signedInput.close();
 
@@ -1264,8 +1277,8 @@ public class NodeMesh {
                                                 peerDirectory.addNode(discoveredPeer, signedNodeBytes, connectX.cxRoot);
 
                                                 // Now verify the signature using the imported public key
-                                                java.io.ByteArrayInputStream verifyInput = new java.io.ByteArrayInputStream(signedNodeBytes);
-                                                java.io.ByteArrayOutputStream verifyOutput = new java.io.ByteArrayOutputStream();
+                                                ByteArrayInputStream verifyInput = new ByteArrayInputStream(signedNodeBytes);
+                                                ByteArrayOutputStream verifyOutput = new ByteArrayOutputStream();
                                                 boolean verified = connectX.encryptionProvider.verifyAndStrip(
                                                     verifyInput, verifyOutput, discoveredPeer.cxID);
                                                 verifyInput.close();
@@ -1314,10 +1327,10 @@ public class NodeMesh {
                         try {
                             // Parse request to get network ID
                             String requestedNetwork = "CXNET";
-                            ib.readyObject(dev.droppinganvil.v3.network.events.SeedExchange.class, ib.nc.se, connectX);
+                            ib.readyObject(SeedExchange.class, ib.nc.se, connectX);
                             if (ib.object != null) {
-                                dev.droppinganvil.v3.network.events.SeedExchange seedReq =
-                                    (dev.droppinganvil.v3.network.events.SeedExchange) ib.object;
+                                SeedExchange seedReq =
+                                    (SeedExchange) ib.object;
                                 if (seedReq.network != null) {
                                     requestedNetwork = seedReq.network;
                                 }
@@ -1326,21 +1339,21 @@ public class NodeMesh {
                             CXNetwork network = connectX.getNetwork(requestedNetwork);
                             if (network != null) {
                                 // Create dynamic seed from current peer state
-                                dev.droppinganvil.v3.network.Seed dynamicSeed = dev.droppinganvil.v3.network.Seed.fromCurrentPeers(peerDirectory);
-                                dynamicSeed.seedID = java.util.UUID.randomUUID().toString();
+                                Seed dynamicSeed = Seed.fromCurrentPeers(peerDirectory);
+                                dynamicSeed.seedID = UUID.randomUUID().toString();
                                 dynamicSeed.timestamp = System.currentTimeMillis();
                                 dynamicSeed.networkID = requestedNetwork;
-                                dynamicSeed.networks = new java.util.ArrayList<>();
+                                dynamicSeed.networks = new ArrayList<>();
                                 dynamicSeed.networks.add(network);
 
                                 // Try to load EPOCH's signed seed from disk
-                                dev.droppinganvil.v3.network.Seed epochSeed = null;
+                                Seed epochSeed = null;
                                 if (network.configuration != null && network.configuration.currentSeedID != null) {
-                                    java.io.File seedsDir = new java.io.File(connectX.cxRoot, "seeds");
-                                    java.io.File seedFile = new java.io.File(seedsDir, network.configuration.currentSeedID + ".cxn");
+                                    File seedsDir = new File(connectX.cxRoot, "seeds");
+                                    File seedFile = new File(seedsDir, network.configuration.currentSeedID + ".cxn");
 
                                     if (seedFile.exists()) {
-                                        epochSeed = dev.droppinganvil.v3.network.Seed.load(seedFile);
+                                        epochSeed = Seed.load(seedFile);
                                     }
                                 }
 
@@ -1351,8 +1364,8 @@ public class NodeMesh {
                                 }
 
                                 // Build response
-                                dev.droppinganvil.v3.network.events.SeedExchange response =
-                                    new dev.droppinganvil.v3.network.events.SeedExchange();
+                                SeedExchange response =
+                                    new SeedExchange();
                                 response.network = requestedNetwork;
                                 response.dynamicSeed = dynamicSeed;
                                 response.epochSeed = epochSeed;
@@ -1394,9 +1407,9 @@ public class NodeMesh {
                     case SEED_RESPONSE:
                         System.out.println("[" + connectX.getOwnID() + "] Seed response received from " + nc.iD);
                         try {
-                            ib.readyObject(dev.droppinganvil.v3.network.events.SeedExchange.class, ib.nc.se, connectX);
-                            dev.droppinganvil.v3.network.events.SeedExchange seedResp =
-                                (dev.droppinganvil.v3.network.events.SeedExchange) ib.object;
+                            ib.readyObject(SeedExchange.class, ib.nc.se, connectX);
+                            SeedExchange seedResp =
+                                (SeedExchange) ib.object;
 
                             // Map wire object to consensus tracker
                             ConnectX.SeedResponseData responseData = new ConnectX.SeedResponseData();
@@ -1405,7 +1418,7 @@ public class NodeMesh {
                             responseData.authoritative = seedResp.authoritative != null && seedResp.authoritative;
                             responseData.senderID = nc.iD;
                             responseData.timestamp = System.currentTimeMillis();
-                            java.util.Map<String, Number> chainHeights = new java.util.HashMap<>();
+                            Map<String, Number> chainHeights = new HashMap<>();
                             chainHeights.put("c1", seedResp.c1 != null ? seedResp.c1 : 0L);
                             chainHeights.put("c2", seedResp.c2 != null ? seedResp.c2 : 0L);
                             chainHeights.put("c3", seedResp.c3 != null ? seedResp.c3 : 0L);
@@ -1446,7 +1459,7 @@ public class NodeMesh {
                             // PRIORITY 3: Multi-peer consensus for dynamic seeds
                             // Store response in consensus map
                             if (!connectX.seedConsensusMap.containsKey(targetNetwork)) {
-                                connectX.seedConsensusMap.put(targetNetwork, new java.util.concurrent.ConcurrentHashMap<>());
+                                connectX.seedConsensusMap.put(targetNetwork, new ConcurrentHashMap<>());
                             }
                             connectX.seedConsensusMap.get(targetNetwork).put(nc.iD, responseData);
 
@@ -1455,7 +1468,7 @@ public class NodeMesh {
                                 connectX.seedConsensusMap.get(targetNetwork).size());
 
                             // Trigger consensus if we have enough responses (3) or if EPOCH responded
-                            java.util.concurrent.ConcurrentHashMap<String, ConnectX.SeedResponseData> responses =
+                            ConcurrentHashMap<String, ConnectX.SeedResponseData> responses =
                                 connectX.seedConsensusMap.get(targetNetwork);
 
                             boolean hasEpochResponse = false;
@@ -1486,15 +1499,15 @@ public class NodeMesh {
                     case CHAIN_STATUS_REQUEST:
                         System.out.println("[" + connectX.getOwnID() + "] Chain status request received from " + nc.iD);
                         try {
-                            ib.readyObject(dev.droppinganvil.v3.network.events.ChainStatus.class, ib.nc.se, connectX);
-                            dev.droppinganvil.v3.network.events.ChainStatus chainReq =
-                                (dev.droppinganvil.v3.network.events.ChainStatus) ib.object;
+                            ib.readyObject(ChainStatus.class, ib.nc.se, connectX);
+                            ChainStatus chainReq =
+                                (ChainStatus) ib.object;
                             String networkID = chainReq != null ? chainReq.network : null;
 
                             CXNetwork network = connectX.getNetwork(networkID);
                             if (network != null) {
-                                dev.droppinganvil.v3.network.events.ChainStatus response =
-                                    new dev.droppinganvil.v3.network.events.ChainStatus(
+                                ChainStatus response =
+                                    new ChainStatus(
                                         networkID,
                                         network.c1.current != null ? network.c1.current.block : 0L,
                                         network.c2.current != null ? network.c2.current.block : 0L,
@@ -1525,9 +1538,9 @@ public class NodeMesh {
                     case CHAIN_STATUS_RESPONSE:
                         System.out.println("[" + connectX.getOwnID() + "] Chain status response received from " + nc.iD);
                         try {
-                            ib.readyObject(dev.droppinganvil.v3.network.events.ChainStatus.class, ib.nc.se, connectX);
-                            dev.droppinganvil.v3.network.events.ChainStatus chainResp =
-                                (dev.droppinganvil.v3.network.events.ChainStatus) ib.object;
+                            ib.readyObject(ChainStatus.class, ib.nc.se, connectX);
+                            ChainStatus chainResp =
+                                (ChainStatus) ib.object;
 
                             System.out.println("[CHAIN_STATUS] Remote chain heights for " + chainResp.network + " from " + nc.iD.substring(0, 8) + ":");
                             System.out.println("  c1: " + chainResp.c1);
@@ -1561,9 +1574,9 @@ public class NodeMesh {
                     case BLOCK_REQUEST:
                         System.out.println("[" + connectX.getOwnID() + "] Block request received from " + nc.iD);
                         try {
-                            ib.readyObject(dev.droppinganvil.v3.network.events.BlockExchange.class, ib.nc.se, connectX);
-                            dev.droppinganvil.v3.network.events.BlockExchange blockReq =
-                                (dev.droppinganvil.v3.network.events.BlockExchange) ib.object;
+                            ib.readyObject(BlockExchange.class, ib.nc.se, connectX);
+                            BlockExchange blockReq =
+                                (BlockExchange) ib.object;
                             String networkID = blockReq.network;
                             Long chainID = blockReq.chain;
                             Long blockID = blockReq.block;
@@ -1571,14 +1584,14 @@ public class NodeMesh {
                             CXNetwork network = connectX.getNetwork(networkID);
                             if (network != null) {
                                 // Get the requested chain
-                                dev.droppinganvil.v3.edge.NetworkRecord targetChain = null;
+                                NetworkRecord targetChain = null;
                                 if (chainID.equals(network.networkDictionary.c1)) targetChain = network.c1;
                                 else if (chainID.equals(network.networkDictionary.c2)) targetChain = network.c2;
                                 else if (chainID.equals(network.networkDictionary.c3)) targetChain = network.c3;
 
                                 if (targetChain != null) {
                                     // Try to get block from memory first
-                                    dev.droppinganvil.v3.edge.NetworkBlock block = targetChain.blockMap.get(blockID);
+                                    NetworkBlock block = targetChain.blockMap.get(blockID);
 
                                     // If not in memory, try loading from disk
                                     if (block == null) {
@@ -1591,8 +1604,8 @@ public class NodeMesh {
 
                                     if (block != null) {
                                         // Wrap block in BlockExchange for typed response
-                                        dev.droppinganvil.v3.network.events.BlockExchange blockResp =
-                                            new dev.droppinganvil.v3.network.events.BlockExchange(networkID, chainID, blockID);
+                                        BlockExchange blockResp =
+                                            new BlockExchange(networkID, chainID, blockID);
                                         blockResp.blockData = block;
                                         String blockJson = ConnectX.serialize("cxJSON1", blockResp);
 
@@ -1630,10 +1643,10 @@ public class NodeMesh {
                     case BLOCK_RESPONSE:
                         System.out.println("[" + connectX.getOwnID() + "] Block response received from " + nc.iD);
                         try {
-                            ib.readyObject(dev.droppinganvil.v3.network.events.BlockExchange.class, ib.nc.se, connectX);
-                            dev.droppinganvil.v3.network.events.BlockExchange blockResp =
-                                (dev.droppinganvil.v3.network.events.BlockExchange) ib.object;
-                            dev.droppinganvil.v3.edge.NetworkBlock block = blockResp.blockData;
+                            ib.readyObject(BlockExchange.class, ib.nc.se, connectX);
+                            BlockExchange blockResp =
+                                (BlockExchange) ib.object;
+                            NetworkBlock block = blockResp.blockData;
 
                             System.out.println("[BLOCK_RESPONSE] Received block " + block.block +
                                              " (" + block.networkEvents.size() + " events)");
@@ -1656,7 +1669,7 @@ public class NodeMesh {
                             }
 
                             // Determine target chain based on block's chain ID from metadata
-                            dev.droppinganvil.v3.edge.NetworkRecord targetChain = null;
+                            NetworkRecord targetChain = null;
                             if (block.chain != null) {
                                 chainID = block.chain;
                                 if (chainID.equals(network.networkDictionary.c1)) targetChain = network.c1;
@@ -1697,7 +1710,7 @@ public class NodeMesh {
 
                                     if (consensusReached) {
                                         // Get consensus block
-                                        dev.droppinganvil.v3.edge.NetworkBlock consensusBlock =
+                                        NetworkBlock consensusBlock =
                                             connectX.blockConsensusTracker.getConsensusBlock(requestKey);
 
                                         if (consensusBlock != null) {
@@ -1726,9 +1739,9 @@ public class NodeMesh {
                     case BLOCK_NODE:
                         System.out.println("[" + connectX.getOwnID() + "] BLOCK_NODE event received from " + nc.iD);
                         try {
-                            ib.readyObject(dev.droppinganvil.v3.network.events.NodeModeration.class, ib.nc.se, connectX);
-                            dev.droppinganvil.v3.network.events.NodeModeration blockData =
-                                (dev.droppinganvil.v3.network.events.NodeModeration) ib.object;
+                            ib.readyObject(NodeModeration.class, ib.nc.se, connectX);
+                            NodeModeration blockData =
+                                (NodeModeration) ib.object;
 
                             System.out.println("[BLOCK_NODE] Blocking node " + blockData.nodeID + " on network " + blockData.network + " (reason: " + blockData.reason + ")");
 
@@ -1750,9 +1763,9 @@ public class NodeMesh {
                     case UNBLOCK_NODE:
                         System.out.println("[" + connectX.getOwnID() + "] UNBLOCK_NODE event received from " + nc.iD);
                         try {
-                            ib.readyObject(dev.droppinganvil.v3.network.events.NodeModeration.class, ib.nc.se, connectX);
-                            dev.droppinganvil.v3.network.events.NodeModeration unblockData =
-                                (dev.droppinganvil.v3.network.events.NodeModeration) ib.object;
+                            ib.readyObject(NodeModeration.class, ib.nc.se, connectX);
+                            NodeModeration unblockData =
+                                (NodeModeration) ib.object;
 
                             System.out.println("[UNBLOCK_NODE] Unblocking node " + unblockData.nodeID + " from network " + unblockData.network);
 
@@ -1777,14 +1790,14 @@ public class NodeMesh {
                     case REGISTER_NODE:
                         System.out.println("[" + connectX.getOwnID() + "] REGISTER_NODE event received from " + nc.iD);
                         try {
-                            ib.readyObject(dev.droppinganvil.v3.network.events.NodeRegistration.class, ib.nc.se, connectX);
-                            dev.droppinganvil.v3.network.events.NodeRegistration registerData =
-                                (dev.droppinganvil.v3.network.events.NodeRegistration) ib.object;
+                            ib.readyObject(NodeRegistration.class, ib.nc.se, connectX);
+                            NodeRegistration registerData =
+                                (NodeRegistration) ib.object;
 
                             System.out.println("[REGISTER_NODE] Registering node " + registerData.nodeID + " to network " + registerData.network +
                                              " (approved by " + registerData.approver + ")");
 
-                            connectX.dataContainer.networkRegisteredNodes.computeIfAbsent(registerData.network, k -> new java.util.HashSet<>()).add(registerData.nodeID);
+                            connectX.dataContainer.networkRegisteredNodes.computeIfAbsent(registerData.network, k -> new HashSet<>()).add(registerData.nodeID);
                             System.out.println("[REGISTER_NODE] Node " + registerData.nodeID + " registered to network " + registerData.network);
                             System.out.println("[REGISTER_NODE] Total registered nodes: " +
                                 connectX.dataContainer.networkRegisteredNodes.get(registerData.network).size());
@@ -1800,9 +1813,9 @@ public class NodeMesh {
                     case GRANT_PERMISSION:
                         System.out.println("[" + connectX.getOwnID() + "] GRANT_PERMISSION event received from " + nc.iD);
                         try {
-                            ib.readyObject(dev.droppinganvil.v3.network.events.PermissionChange.class, ib.nc.se, connectX);
-                            dev.droppinganvil.v3.network.events.PermissionChange grantData =
-                                (dev.droppinganvil.v3.network.events.PermissionChange) ib.object;
+                            ib.readyObject(PermissionChange.class, ib.nc.se, connectX);
+                            PermissionChange grantData =
+                                (PermissionChange) ib.object;
 
                             int priority = grantData.priority != null ? grantData.priority : 10;
                             System.out.println("[GRANT_PERMISSION] Granting " + grantData.permission + " permission to node " + grantData.nodeID +
@@ -1811,10 +1824,10 @@ public class NodeMesh {
                             CXNetwork network = connectX.getNetwork(grantData.network);
                             if (network != null) {
                                 String permKey = grantData.permission + "-" + grantData.chain;
-                                us.anvildevelopment.util.tools.permissions.Entry entry =
-                                    new us.anvildevelopment.util.tools.permissions.BasicEntry(permKey, true, priority);
-                                java.util.Map<String, us.anvildevelopment.util.tools.permissions.Entry> nodePerms =
-                                    network.networkPermissions.permissionSet.computeIfAbsent(grantData.nodeID, k -> new java.util.HashMap<>());
+                                Entry entry =
+                                    new BasicEntry(permKey, true, priority);
+                                Map<String, Entry> nodePerms =
+                                    network.networkPermissions.permissionSet.computeIfAbsent(grantData.nodeID, k -> new HashMap<>());
                                 nodePerms.put(permKey, entry);
                                 System.out.println("[GRANT_PERMISSION] Permission granted successfully");
                             } else {
@@ -1832,9 +1845,9 @@ public class NodeMesh {
                     case REVOKE_PERMISSION:
                         System.out.println("[" + connectX.getOwnID() + "] REVOKE_PERMISSION event received from " + nc.iD);
                         try {
-                            ib.readyObject(dev.droppinganvil.v3.network.events.PermissionChange.class, ib.nc.se, connectX);
-                            dev.droppinganvil.v3.network.events.PermissionChange revokeData =
-                                (dev.droppinganvil.v3.network.events.PermissionChange) ib.object;
+                            ib.readyObject(PermissionChange.class, ib.nc.se, connectX);
+                            PermissionChange revokeData =
+                                (PermissionChange) ib.object;
 
                             System.out.println("[REVOKE_PERMISSION] Revoking " + revokeData.permission + " permission from node " + revokeData.nodeID +
                                              " on network " + revokeData.network + " chain " + revokeData.chain);
@@ -1842,7 +1855,7 @@ public class NodeMesh {
                             CXNetwork network = connectX.getNetwork(revokeData.network);
                             if (network != null) {
                                 String permKey = revokeData.permission + "-" + revokeData.chain;
-                                java.util.Map<String, us.anvildevelopment.util.tools.permissions.Entry> nodePerms =
+                                Map<String, Entry> nodePerms =
                                     network.networkPermissions.permissionSet.get(revokeData.nodeID);
                                 if (nodePerms != null) {
                                     nodePerms.remove(permKey);
@@ -1868,9 +1881,9 @@ public class NodeMesh {
                     case ZERO_TRUST_ACTIVATION:
                         System.out.println("[" + connectX.getOwnID() + "] ZERO_TRUST_ACTIVATION event received from " + nc.iD);
                         try {
-                            ib.readyObject(dev.droppinganvil.v3.network.events.ZeroTrustActivation.class, ib.nc.se, connectX);
-                            dev.droppinganvil.v3.network.events.ZeroTrustActivation ztData =
-                                (dev.droppinganvil.v3.network.events.ZeroTrustActivation) ib.object;
+                            ib.readyObject(ZeroTrustActivation.class, ib.nc.se, connectX);
+                            ZeroTrustActivation ztData =
+                                (ZeroTrustActivation) ib.object;
 
                             System.out.println("[ZERO_TRUST_ACTIVATION] Activating zero trust mode for network " + ztData.network);
                             System.out.println("[ZERO_TRUST_ACTIVATION] WARNING: This operation is IRREVERSIBLE");
@@ -1952,7 +1965,7 @@ public class NodeMesh {
                             recordPeerRequest(requesterIP);
 
                             // Collect all known peers from PeerDirectory
-                            java.util.List<Node> allPeers = new java.util.ArrayList<>();
+                            List<Node> allPeers = new ArrayList<>();
                             if (peerDirectory.hv != null) allPeers.addAll(peerDirectory.hv.values());
                             if (peerDirectory.seen != null) allPeers.addAll(peerDirectory.seen.values());
                             if (peerDirectory.peerCache != null) allPeers.addAll(peerDirectory.peerCache.values());
@@ -1962,10 +1975,10 @@ public class NodeMesh {
                             int maxPeers = Math.min(10, (int) Math.ceil(knownPeerCount * 0.3));
 
                             // Select random peers and extract only IP:port
-                            java.util.List<String> peerIPs = new java.util.ArrayList<>();
+                            List<String> peerIPs = new ArrayList<>();
 
                             // Shuffle and take up to maxPeers
-                            java.util.Collections.shuffle(allPeers);
+                            Collections.shuffle(allPeers);
                             for (int i = 0; i < Math.min(maxPeers, allPeers.size()); i++) {
                                 Node peer = allPeers.get(i);
                                 if (peer.addr != null) {
@@ -1974,7 +1987,7 @@ public class NodeMesh {
                             }
 
                             // Serialize response: {ips: ["192.168.1.100:49152", "10.0.0.5:49153", ...]}
-                            java.util.Map<String, Object> response = new java.util.HashMap<>();
+                            Map<String, Object> response = new HashMap<>();
                             response.put("ips", peerIPs);
                             String responseJson = ConnectX.serialize("cxJSON1", response);
 
@@ -2003,10 +2016,10 @@ public class NodeMesh {
                         try {
                             // Parse response: {ips: ["192.168.1.100:49152", ...]}
                             String responseJson = new String(eventPayload, "UTF-8");
-                            java.util.Map<String, Object> response =
-                                (java.util.Map<String, Object>) ConnectX.deserialize("cxJSON1", responseJson, java.util.Map.class);
+                            Map<String, Object> response =
+                                (Map<String, Object>) ConnectX.deserialize("cxJSON1", responseJson, Map.class);
 
-                            java.util.List<String> peerIPs = (java.util.List<String>) response.get("ips");
+                            List<String> peerIPs = (List<String>) response.get("ips");
 
                             System.out.println("[PEER_LIST_RESPONSE] Received " + peerIPs.size() + " peer IPs");
 
@@ -2144,7 +2157,7 @@ public class NodeMesh {
             CXNetwork cxn = connectX.getNetwork(ne.p.network);
             if (cxn != null && cxn.configuration != null && cxn.configuration.backendSet != null) {
                 // Send to all peers, with backend getting priority (sent first)
-                java.util.Set<String> sentTo = new java.util.HashSet<>();
+                Set<String> sentTo = new HashSet<>();
 
                 // Priority: Send to backend infrastructure first
                 for (String backendID : cxn.configuration.backendSet) {
@@ -2229,7 +2242,7 @@ public class NodeMesh {
                                 // Create temporary node with LAN address for transmission
                                 Node tempPeer = new Node();
                                 tempPeer.cxID = peerID;
-                                java.util.List<String> addresses = connectX.dataContainer.getLocalPeerAddresses(peerID);
+                                List<String> addresses = connectX.dataContainer.getLocalPeerAddresses(peerID);
                                 if (!addresses.isEmpty()) {
                                     tempPeer.addr = addresses.get(0); // Use first known LAN address
                                 }
@@ -2274,8 +2287,8 @@ public class NodeMesh {
      * Handles adding to chain, persisting to disk, and queuing state events
      */
     private void applyBlockToChain(ConnectX connectX, CXNetwork network,
-                                  dev.droppinganvil.v3.edge.NetworkRecord targetChain,
-                                  dev.droppinganvil.v3.edge.NetworkBlock block,
+                                  NetworkRecord targetChain,
+                                  NetworkBlock block,
                                   String networkID, Long chainID, String senderID) {
         try {
             // Add block to local blockchain in memory
@@ -2305,8 +2318,8 @@ public class NodeMesh {
             for (NetworkEvent event : block.deserializedEvents.values()) {
                 if (event.executeOnSync) {
                     // Queue event for processing through existing framework
-                    dev.droppinganvil.v3.network.events.NetworkContainer eventContainer =
-                        new dev.droppinganvil.v3.network.events.NetworkContainer();
+                    NetworkContainer eventContainer =
+                        new NetworkContainer();
                     eventContainer.se = "cxJSON1";
                     eventContainer.s = false;
                     eventContainer.iD = senderID; // Mark as coming from the sender
@@ -2335,7 +2348,7 @@ public class NodeMesh {
     }
 
     private void initiateSyncFromPeer(ConnectX connectX, CXNetwork network, String networkID,
-                                     dev.droppinganvil.v3.network.events.ChainStatus remoteChainStatus, String peerID) {
+                                     ChainStatus remoteChainStatus, String peerID) {
         try {
             long remoteC1 = remoteChainStatus.c1 != null ? remoteChainStatus.c1 : 0L;
             long remoteC2 = remoteChainStatus.c2 != null ? remoteChainStatus.c2 : 0L;
@@ -2392,7 +2405,7 @@ public class NodeMesh {
         try {
             for (long blockNum = startBlock; blockNum <= endBlock; blockNum++) {
                 String requestJson = ConnectX.serialize("cxJSON1",
-                    new dev.droppinganvil.v3.network.events.BlockExchange(networkID, chainID, blockNum));
+                    new BlockExchange(networkID, chainID, blockNum));
 
                 // Send request using EventBuilder pattern
                 ConnectX.EventBuilder eb = connectX.buildEvent(EventType.BLOCK_REQUEST, requestJson.getBytes("UTF-8"))
@@ -2413,7 +2426,7 @@ public class NodeMesh {
      * Apply a seed after consensus decision
      * Saves EPOCH seeds to disk, adds peers, caches certificates, registers networks
      */
-    private void applySeedConsensus(ConnectX connectX, dev.droppinganvil.v3.network.Seed seed,
+    private void applySeedConsensus(ConnectX connectX, Seed seed,
                                           boolean isEpochSeed, String consensusReason, String targetNetwork) {
         try {
             System.out.println("[SEED CONSENSUS] Applying seed: " + seed.seedID);
@@ -2424,11 +2437,11 @@ public class NodeMesh {
 
             // Save EPOCH signed seeds to disk so this peer can forward them
             if (isEpochSeed) {
-                java.io.File seedsDir = new java.io.File(connectX.cxRoot, "seeds");
+                File seedsDir = new File(connectX.cxRoot, "seeds");
                 if (!seedsDir.exists()) {
                     seedsDir.mkdirs();
                 }
-                java.io.File seedFile = new java.io.File(seedsDir, seed.seedID + ".cxn");
+                File seedFile = new File(seedsDir, seed.seedID + ".cxn");
                 seed.save(seedFile);
                 System.out.println("[SEED CONSENSUS] ✓ Saved EPOCH seed: " + seedFile.getName());
                 System.out.println("[SEED CONSENSUS] ✓ This peer can now forward EPOCH seed to others!");
@@ -2436,7 +2449,7 @@ public class NodeMesh {
 
             // Add peers to directory
             int peersAdded = 0;
-            for (dev.droppinganvil.v3.network.nodemesh.Node peer : seed.hvPeers) {
+            for (Node peer : seed.hvPeers) {
                 try {
                     peerDirectory.addNode(peer);
                     peersAdded++;
@@ -2452,7 +2465,7 @@ public class NodeMesh {
 
             // Cache certificates
             int certsAdded = 0;
-            for (java.util.Map.Entry<String, String> cert : seed.certificates.entrySet()) {
+            for (Map.Entry<String, String> cert : seed.certificates.entrySet()) {
                 try {
                     connectX.encryptionProvider.cacheCert(cert.getKey(), false, false, connectX);
                     certsAdded++;
@@ -2475,7 +2488,7 @@ public class NodeMesh {
      * If conflicts detected, requests fresh seed from EPOCH as tiebreaker
      */
     private static void performSeedConsensus(ConnectX connectX, String targetNetwork,
-                                            java.util.concurrent.ConcurrentHashMap<String, ConnectX.SeedResponseData> responses) {
+                                            ConcurrentHashMap<String, ConnectX.SeedResponseData> responses) {
         try {
             System.out.println("[SEED CONSENSUS] === MULTI-PEER VOTING ===");
             System.out.println("[SEED CONSENSUS] Responses: " + responses.size());
@@ -2491,7 +2504,7 @@ public class NodeMesh {
             }
 
             // Priority 2: Compare chain heights across peers for consensus
-            java.util.Map<String, Integer> heightVotes = new java.util.HashMap<>();
+            Map<String, Integer> heightVotes = new HashMap<>();
             for (ConnectX.SeedResponseData r : responses.values()) {
                 if (r.chainHeights != null) {
                     // Create signature from chain heights
@@ -2503,14 +2516,14 @@ public class NodeMesh {
             }
 
             System.out.println("[SEED CONSENSUS] Chain height voting:");
-            for (java.util.Map.Entry<String, Integer> vote : heightVotes.entrySet()) {
+            for (Map.Entry<String, Integer> vote : heightVotes.entrySet()) {
                 System.out.println("[SEED CONSENSUS]   " + vote.getKey() + " → " + vote.getValue() + " votes");
             }
 
             // Find majority consensus (>50% agreement)
             String majorityHeights = null;
             int maxVotes = 0;
-            for (java.util.Map.Entry<String, Integer> vote : heightVotes.entrySet()) {
+            for (Map.Entry<String, Integer> vote : heightVotes.entrySet()) {
                 if (vote.getValue() > maxVotes) {
                     maxVotes = vote.getValue();
                     majorityHeights = vote.getKey();
@@ -2548,20 +2561,20 @@ public class NodeMesh {
 
                 // TODO: Send SEED_REQUEST directly to EPOCH as tiebreaker
                 // For now, use fallback: load signed EPOCH seed from disk if available
-                java.io.File seedsDir = new java.io.File(connectX.cxRoot, "seeds");
+                File seedsDir = new File(connectX.cxRoot, "seeds");
                 if (seedsDir.exists()) {
-                    java.io.File[] seedFiles = seedsDir.listFiles((dir, name) -> name.endsWith(".cxn"));
+                    File[] seedFiles = seedsDir.listFiles((dir, name) -> name.endsWith(".cxn"));
                     if (seedFiles != null && seedFiles.length > 0) {
                         // Load most recent seed
-                        java.io.File latestSeed = seedFiles[0];
-                        for (java.io.File f : seedFiles) {
+                        File latestSeed = seedFiles[0];
+                        for (File f : seedFiles) {
                             if (f.lastModified() > latestSeed.lastModified()) {
                                 latestSeed = f;
                             }
                         }
                         System.out.println("[SEED CONSENSUS] Using fallback: Signed EPOCH seed from disk");
-                        dev.droppinganvil.v3.network.Seed epochSeed =
-                            dev.droppinganvil.v3.network.Seed.load(latestSeed);
+                        Seed epochSeed =
+                            Seed.load(latestSeed);
                         connectX.nodeMesh.applySeedConsensus(connectX, epochSeed, true,
                             "EPOCH signed seed (disk fallback - peer conflict)", targetNetwork);
                         return;

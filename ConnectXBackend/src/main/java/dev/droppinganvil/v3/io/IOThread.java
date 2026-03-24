@@ -40,24 +40,25 @@ public class IOThread implements Runnable {
     @Override
     public void run() {
         while (run) {
+            IOJob ioJob;
             synchronized (cx.jobQueue) {
-                IOJob ioJob = cx.jobQueue.poll();
-                if (ioJob != null) {
-                    try {
-                        processJob(ioJob, true);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                        ioJob.success = false;
-                        ioJob.doAfter(false);
-                    }
-                    ioJob.success = true;
-                    ioJob.doAfter(true);
-                } else {
-                    try {
-                        Thread.sleep(sleep);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
+                ioJob = cx.jobQueue.poll();
+            }
+            if (ioJob != null) {
+                try {
+                    processJob(ioJob, true);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    ioJob.success = false;
+                    ioJob.doAfter(false);
+                }
+                ioJob.success = true;
+                ioJob.doAfter(true);
+            } else {
+                try {
+                    Thread.sleep(sleep);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
                 }
             }
         }

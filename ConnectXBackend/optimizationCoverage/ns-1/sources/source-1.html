@@ -1,0 +1,210 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > Configuration</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3</a>
+</div>
+
+<h1>Coverage Summary for Class: Configuration (dev.droppinganvil.v3)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">Configuration</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (9/9)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2021 Christopher Willett
+&nbsp; * All Rights Reserved.
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3;
+&nbsp;
+&nbsp;import java.io.Serializable;
+&nbsp;import java.util.List;
+&nbsp;
+<b class="fc">&nbsp;public class Configuration implements Serializable {</b>
+<b class="fc">&nbsp;    public String SDF_FORMAT = &quot;S-m-H-a-EEE-F-M-y&quot;;</b>
+&nbsp;    public String netID;
+&nbsp;    public String nmiPub;
+&nbsp;    public List&lt;String&gt; backendSet;
+<b class="fc">&nbsp;    public Boolean active = true;</b>
+<b class="fc">&nbsp;    public Boolean unlimitedUpload = false;</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * ID of the current official seed for this network
+&nbsp;     * Seeds are stored in c2 (Resources chain) and locally in seeds/ directory
+&nbsp;     * System automatically loads all resources from c2 when joining network
+&nbsp;     * Used for versioned seed distribution and resource lookup
+&nbsp;     */
+&nbsp;    public String currentSeedID;
+&nbsp;
+&nbsp;    /**
+&nbsp;     * ID of the previous official seed (for rollback/version tracking)
+&nbsp;     */
+&nbsp;    public String lastSeedID;
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Whitelist mode: When enabled, nodes must be explicitly registered via REGISTER_NODE event
+&nbsp;     * System reads c1 (Admin) chain for REGISTER_NODE events to build approved nodes list
+&nbsp;     * If node is not registered and whitelist mode is enabled: connection rejected
+&nbsp;     *
+&nbsp;     * Default: false (open network - anyone can join)
+&nbsp;     *
+&nbsp;     * Network Types:
+&nbsp;     * - false = Open Network (public access)
+&nbsp;     * - true = Whitelist/Private Network (pre-approval required)
+&nbsp;     */
+<b class="fc">&nbsp;    public Boolean whitelistMode = false;</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Whether this network&#39;s seed should be distributed in public seed lists
+&nbsp;     * Private networks may want to distribute seeds only through secure channels
+&nbsp;     *
+&nbsp;     * Default: true (include in public seed distribution)
+&nbsp;     *
+&nbsp;     * Use Cases:
+&nbsp;     * - true = Open/Whitelist networks (discoverable)
+&nbsp;     * - false = Private networks (invitation-only, seeds distributed out-of-band)
+&nbsp;     */
+<b class="fc">&nbsp;    public Boolean publicSeed = true;</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Blockchain sync interval in seconds
+&nbsp;     * Determines how often peers request chain status updates from the network
+&nbsp;     *
+&nbsp;     * Default: 600 (10 minutes)
+&nbsp;     *
+&nbsp;     * Considerations:
+&nbsp;     * - Lower values = more frequent syncs, better consistency, higher traffic
+&nbsp;     * - Higher values = less traffic but slower to detect missing blocks
+&nbsp;     * - For testing: 30 seconds
+&nbsp;     * - For production: 600 seconds (10 minutes)
+&nbsp;     */
+<b class="fc">&nbsp;    public Integer syncIntervalSeconds = 600;</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Time To Live (TTL) - Maximum number of relay hops for network events
+&nbsp;     * Prevents infinite loops and controls broadcast scope
+&nbsp;     *
+&nbsp;     * Default: 16 hops
+&nbsp;     *
+&nbsp;     * When a peer relays an event:
+&nbsp;     * 1. TTL is decremented by 1
+&nbsp;     * 2. If TTL reaches 0, event is NOT relayed further (dropped)
+&nbsp;     * 3. Prevents network flooding and relay storms
+&nbsp;     *
+&nbsp;     * Considerations:
+&nbsp;     * - Lower values = smaller network reach, less traffic, faster propagation stop
+&nbsp;     * - Higher values = larger network reach, more traffic, deeper propagation
+&nbsp;     * - For small networks (&lt; 10 nodes): 8-10 hops
+&nbsp;     * - For medium networks (10-100 nodes): 12-16 hops
+&nbsp;     * - For large networks (100+ nodes): 20+ hops
+&nbsp;     */
+<b class="fc">&nbsp;    public Integer defaultTTL = 16;</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Enable OUT-LOOP logging - Controls OutputProcessor iteration logging
+&nbsp;     * Shows every 100 iterations of the output processor loop
+&nbsp;     *
+&nbsp;     * Default: false (disabled)
+&nbsp;     *
+&nbsp;     * When enabled:
+&nbsp;     * - Logs: [OUT-LOOP] Peer XXXX iteration N, queue: N, polled: true/false
+&nbsp;     * - Useful for diagnosing output queue processing issues
+&nbsp;     * - Can generate significant log volume in active networks
+&nbsp;     *
+&nbsp;     * Only enable for specific output queue troubleshooting
+&nbsp;     */
+<b class="fc">&nbsp;    public Boolean enableOutLoopLogging = false;</b>
+&nbsp;
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

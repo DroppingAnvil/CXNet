@@ -1,0 +1,165 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > CXMessagePlugin</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.api</a>
+</div>
+
+<h1>Coverage Summary for Class: CXMessagePlugin (dev.droppinganvil.v3.api)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">CXMessagePlugin</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/2)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/2)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/6)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2026. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.api;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.network.events.EventType;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkEvent;
+&nbsp;
+&nbsp;import java.nio.charset.StandardCharsets;
+&nbsp;
+&nbsp;/**
+&nbsp; * Convenience plugin base for receiving plain-text MESSAGE events.
+&nbsp; *
+&nbsp; * &lt;p&gt;Override {@link #onMessage(String, String)} — the framework handles
+&nbsp; * event routing, byte decoding, and sender ID extraction automatically.
+&nbsp; *
+&nbsp; * &lt;pre&gt;
+&nbsp; * peer.addPlugin(new CXMessagePlugin() {
+&nbsp; *     public void onMessage(String from, String message) {
+&nbsp; *         System.out.println(from + &quot;: &quot; + message);
+&nbsp; *     }
+&nbsp; * });
+&nbsp; * &lt;/pre&gt;
+&nbsp; */
+&nbsp;public abstract class CXMessagePlugin extends CXPlugin {
+&nbsp;
+&nbsp;    public CXMessagePlugin() {
+<b class="nc">&nbsp;        super(EventType.MESSAGE.name());</b>
+<b class="nc">&nbsp;        this.dataLevel = DataLevel.NETWORK_EVENT;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    @Override
+&nbsp;    public final boolean handleEvent(Object data) {
+<b class="nc">&nbsp;        NetworkEvent ne = (NetworkEvent) data;</b>
+<b class="nc">&nbsp;        String message = ne.d != null ? new String(ne.d, StandardCharsets.UTF_8) : &quot;&quot;;</b>
+<b class="nc">&nbsp;        onMessage(ne.iD, message);</b>
+<b class="nc">&nbsp;        return true;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Called when a MESSAGE event is received.
+&nbsp;     *
+&nbsp;     * @param senderID the CX node ID of the sender
+&nbsp;     * @param message  the decoded message text
+&nbsp;     */
+&nbsp;    public abstract void onMessage(String senderID, String message);
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

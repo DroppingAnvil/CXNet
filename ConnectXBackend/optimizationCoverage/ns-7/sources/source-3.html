@@ -1,0 +1,339 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > NetworkBlock</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.edge</a>
+</div>
+
+<h1>Coverage Summary for Class: NetworkBlock (dev.droppinganvil.v3.edge)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">NetworkBlock</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    42.9%
+  </span>
+  <span class="absValue">
+    (3/7)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    3.6%
+  </span>
+  <span class="absValue">
+    (1/28)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    16.7%
+  </span>
+  <span class="absValue">
+    (12/72)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2021. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.edge;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkEvent;
+&nbsp;import us.anvildevelopment.util.tools.database.annotations.MemoryOnly;
+&nbsp;import java.io.Serializable;
+&nbsp;import java.util.Map;
+&nbsp;import java.util.concurrent.ConcurrentHashMap;
+&nbsp;
+&nbsp;public class NetworkBlock implements Serializable {
+&nbsp;    public Long block;
+&nbsp;    public Long chain; // Chain ID (c1, c2, or c3) - needed for blockchain sync
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Network events stored as signed blobs - PERSISTED TO DISK
+&nbsp;     * This is the source of truth - original cryptographically-signed bytes
+&nbsp;     * Key: Event index, Value: Signed blob (NetworkEvent serialized + signature)
+&nbsp;     *
+&nbsp;     * CRITICAL: This map contains SIGNED BLOBS, not deserialized NetworkEvent objects
+&nbsp;     * - Always verify signature before accepting
+&nbsp;     * - Never modify blobs after storage (breaks signature)
+&nbsp;     * - Use addEvent() to add new events with verification
+&nbsp;     * - Use getEvent() to access deserialized events
+&nbsp;     */
+&nbsp;    public Map&lt;Integer, byte[]&gt; networkEvents;
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Deserialized event cache - MEMORY ONLY, NOT PERSISTED
+&nbsp;     * Events are deserialized on-demand from networkEvents (signed blobs)
+&nbsp;     * This is a performance cache to avoid repeated deserialization
+&nbsp;     *
+&nbsp;     * Populated by:
+&nbsp;     * - addEvent() when event is added
+&nbsp;     * - getEvent() on first access (lazy loading)
+&nbsp;     */
+&nbsp;    @MemoryOnly
+&nbsp;    public Map&lt;Integer, NetworkEvent&gt; deserializedEvents;
+&nbsp;
+&nbsp;    // Default constructor for Jackson deserialization
+<b class="fc">&nbsp;    public NetworkBlock() {</b>
+<b class="fc">&nbsp;        networkEvents = new ConcurrentHashMap&lt;&gt;();</b>
+<b class="fc">&nbsp;        deserializedEvents = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;    }
+&nbsp;
+<b class="nc">&nbsp;    public NetworkBlock(Long block) {</b>
+<b class="nc">&nbsp;        this.block = block;</b>
+<b class="nc">&nbsp;        networkEvents = new ConcurrentHashMap&lt;&gt;();</b>
+<b class="nc">&nbsp;        deserializedEvents = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;    }
+&nbsp;
+<b class="fc">&nbsp;    public NetworkBlock(Long block, Long chain) {</b>
+<b class="fc">&nbsp;        this.block = block;</b>
+<b class="fc">&nbsp;        this.chain = chain;</b>
+<b class="fc">&nbsp;        networkEvents = new ConcurrentHashMap&lt;&gt;();</b>
+<b class="fc">&nbsp;        deserializedEvents = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Add event to block with verification
+&nbsp;     *
+&nbsp;     * Process:
+&nbsp;     * 1. Store signed blob in local variable
+&nbsp;     * 2. Peek to get sender cxID (stripSignature without verify)
+&nbsp;     * 3. Verify signature using sender&#39;s public key
+&nbsp;     * 4. Deserialize into NetworkEvent
+&nbsp;     * 5. Add to both maps (signed blob + deserialized cache)
+&nbsp;     *
+&nbsp;     * @param index Event index in block
+&nbsp;     * @param signedBlob Original signed bytes
+&nbsp;     * @param connectX ConnectX instance for verification helpers
+&nbsp;     * @return true if event added successfully, false if verification failed
+&nbsp;     */
+&nbsp;    public boolean addEvent(int index, byte[] signedBlob, dev.droppinganvil.v3.ConnectX connectX) {
+&nbsp;        try {
+&nbsp;            // Peek sender cxID
+<b class="nc">&nbsp;            String senderID = peekSenderID(signedBlob, connectX);</b>
+<b class="nc">&nbsp;            if (senderID == null) {</b>
+<b class="nc">&nbsp;                System.err.println(&quot;[NetworkBlock] Failed to peek sender ID&quot;);</b>
+<b class="nc">&nbsp;                return false;</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Verify and strip signature
+<b class="nc">&nbsp;            java.io.ByteArrayInputStream verifyStream = new java.io.ByteArrayInputStream(signedBlob);</b>
+<b class="nc">&nbsp;            java.io.ByteArrayOutputStream verifiedOutput = new java.io.ByteArrayOutputStream();</b>
+<b class="nc">&nbsp;            boolean verified = connectX.encryptionProvider.verifyAndStrip(verifyStream, verifiedOutput, senderID);</b>
+&nbsp;            verifyStream.close();
+&nbsp;
+<b class="nc">&nbsp;            if (!verified) {</b>
+<b class="nc">&nbsp;                System.err.println(&quot;[NetworkBlock] Signature verification FAILED for &quot; +</b>
+<b class="nc">&nbsp;                    (senderID.length() &gt;= 8 ? senderID.substring(0, 8) : senderID));</b>
+<b class="nc">&nbsp;                return false;</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Deserialize
+<b class="nc">&nbsp;            String verifiedJson = new String(verifiedOutput.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);</b>
+<b class="nc">&nbsp;            NetworkEvent event = (NetworkEvent) dev.droppinganvil.v3.ConnectX.deserialize(&quot;cxJSON1&quot;, verifiedJson, NetworkEvent.class);</b>
+&nbsp;
+<b class="nc">&nbsp;            if (event == null) {</b>
+<b class="nc">&nbsp;                System.err.println(&quot;[NetworkBlock] Deserialization failed&quot;);</b>
+<b class="nc">&nbsp;                return false;</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Add to maps
+<b class="nc">&nbsp;            networkEvents.put(index, signedBlob);         // Persisted</b>
+<b class="nc">&nbsp;            deserializedEvents.put(index, event);         // Memory cache</b>
+&nbsp;
+<b class="nc">&nbsp;            return true;</b>
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[NetworkBlock] Error adding event: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Prepare ALL events in block - verify and deserialize into memory cache
+&nbsp;     * Call before accessing multiple events (e.g., blockchain replay)
+&nbsp;     *
+&nbsp;     * @param connectX ConnectX instance
+&nbsp;     * @return Number of events successfully prepared
+&nbsp;     */
+&nbsp;    public int prepare(dev.droppinganvil.v3.ConnectX connectX) {
+<b class="fc">&nbsp;        int prepared = 0;</b>
+<b class="pc">&nbsp;        for (Integer index : networkEvents.keySet()) {</b>
+<b class="nc">&nbsp;            if (prepare(index, connectX)) {</b>
+<b class="nc">&nbsp;                prepared++;</b>
+&nbsp;            }
+&nbsp;        }
+<b class="fc">&nbsp;        System.out.println(&quot;[NetworkBlock] Prepared &quot; + prepared + &quot;/&quot; + networkEvents.size() +</b>
+&nbsp;            &quot; events for block &quot; + block);
+<b class="fc">&nbsp;        return prepared;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Prepare single event - verify and deserialize into memory cache
+&nbsp;     *
+&nbsp;     * @param index Event index
+&nbsp;     * @param connectX ConnectX instance
+&nbsp;     * @return true if prepared successfully
+&nbsp;     */
+&nbsp;    public boolean prepare(int index, dev.droppinganvil.v3.ConnectX connectX) {
+&nbsp;        // Already prepared?
+<b class="nc">&nbsp;        if (deserializedEvents.containsKey(index)) {</b>
+<b class="nc">&nbsp;            return true;</b>
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        byte[] signedBlob = networkEvents.get(index);</b>
+<b class="nc">&nbsp;        if (signedBlob == null) {</b>
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        try {
+&nbsp;            // Peek sender cxID
+<b class="nc">&nbsp;            String senderID = peekSenderID(signedBlob, connectX);</b>
+<b class="nc">&nbsp;            if (senderID == null) {</b>
+<b class="nc">&nbsp;                return false;</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Verify signature
+<b class="nc">&nbsp;            java.io.ByteArrayInputStream verifyStream = new java.io.ByteArrayInputStream(signedBlob);</b>
+<b class="nc">&nbsp;            java.io.ByteArrayOutputStream verifiedOutput = new java.io.ByteArrayOutputStream();</b>
+<b class="nc">&nbsp;            boolean verified = connectX.encryptionProvider.verifyAndStrip(verifyStream, verifiedOutput, senderID);</b>
+&nbsp;            verifyStream.close();
+&nbsp;
+<b class="nc">&nbsp;            if (!verified) {</b>
+<b class="nc">&nbsp;                System.err.println(&quot;[NetworkBlock] Event &quot; + index + &quot; verification FAILED&quot;);</b>
+<b class="nc">&nbsp;                return false;</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Deserialize
+<b class="nc">&nbsp;            String verifiedJson = new String(verifiedOutput.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);</b>
+<b class="nc">&nbsp;            NetworkEvent event = (NetworkEvent) dev.droppinganvil.v3.ConnectX.deserialize(&quot;cxJSON1&quot;, verifiedJson, NetworkEvent.class);</b>
+&nbsp;
+<b class="nc">&nbsp;            if (event != null) {</b>
+<b class="nc">&nbsp;                deserializedEvents.put(index, event);</b>
+<b class="nc">&nbsp;                return true;</b>
+&nbsp;            }
+&nbsp;
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[NetworkBlock] Error preparing event &quot; + index + &quot;: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Peek sender cxID from signed blob without verification
+&nbsp;     * Uses stripSignature (not verifyAndStrip) to peek at unverified data
+&nbsp;     *
+&nbsp;     * @param signedBlob Signed event blob
+&nbsp;     * @param connectX ConnectX instance
+&nbsp;     * @return Sender cxID or null
+&nbsp;     */
+&nbsp;    private String peekSenderID(byte[] signedBlob, dev.droppinganvil.v3.ConnectX connectX) {
+&nbsp;        try {
+&nbsp;            // Strip signature without verifying
+<b class="nc">&nbsp;            java.io.ByteArrayInputStream peekStream = new java.io.ByteArrayInputStream(signedBlob);</b>
+<b class="nc">&nbsp;            java.io.ByteArrayOutputStream peekOutput = new java.io.ByteArrayOutputStream();</b>
+<b class="nc">&nbsp;            connectX.encryptionProvider.stripSignature(peekStream, peekOutput);</b>
+&nbsp;            peekStream.close();
+&nbsp;
+&nbsp;            // Deserialize unverified event to peek at path
+<b class="nc">&nbsp;            String unverifiedJson = peekOutput.toString(&quot;UTF-8&quot;);</b>
+<b class="nc">&nbsp;            NetworkEvent unverifiedEvent = (NetworkEvent) dev.droppinganvil.v3.ConnectX.deserialize(</b>
+&nbsp;                &quot;cxJSON1&quot;, unverifiedJson, NetworkEvent.class);
+&nbsp;
+&nbsp;            // Extract sender oCXID from path - REQUIRED for signature verification
+&nbsp;            // SECURITY: Must use oCXID (origin), never cxID (destination) to prevent spoofing
+<b class="nc">&nbsp;            if (unverifiedEvent != null &amp;&amp; unverifiedEvent.p != null &amp;&amp; unverifiedEvent.p.oCXID != null) {</b>
+<b class="nc">&nbsp;                return unverifiedEvent.p.oCXID;</b>
+&nbsp;            }
+&nbsp;
+<b class="nc">&nbsp;            System.err.println(&quot;[NetworkBlock] Security failure: Event missing oCXID (origin sender ID)&quot;);</b>
+<b class="nc">&nbsp;            return null;</b>
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[NetworkBlock] Error peeking sender: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;            return null;</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

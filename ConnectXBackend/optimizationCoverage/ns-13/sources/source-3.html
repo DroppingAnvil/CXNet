@@ -1,0 +1,128 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > CXPeer2Test</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.test</a>
+</div>
+
+<h1>Coverage Summary for Class: CXPeer2Test (dev.droppinganvil.v3.test)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">CXPeer2Test</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/3)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/6)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2026. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.test;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.network.events.EventType;
+&nbsp;
+&nbsp;/**
+&nbsp; * This class exist to test the ease of use of ConnectX API as well as test networking functionality
+&nbsp; * Peer2 will be created or loaded send message &quot;Hello from peer2!&quot; to 01
+&nbsp; */
+<b class="nc">&nbsp;public class CXPeer2Test {</b>
+<b class="nc">&nbsp;    public static ConnectX peer2 = null;</b>
+&nbsp;
+&nbsp;    public static void main(String... args) throws Exception {
+<b class="nc">&nbsp;        peer2 = new ConnectX(&quot;CX-PEER2&quot;, 49153, &quot;02000000-0000-0000-0000-000000000001&quot;, &quot;Peer2&quot;);</b>
+<b class="nc">&nbsp;        peer2.updateHTTPBridgePort(8087);</b>
+<b class="nc">&nbsp;        peer2.setPublicBridgeAddress(&quot;cxHTTP1&quot;, &quot;https://cx2.anvildevelopment.us/cx&quot;);</b>
+<b class="nc">&nbsp;        peer2.buildEvent(EventType.MESSAGE, &quot;Hello from peer2!&quot;.getBytes(&quot;UTF-8&quot;)).signData().toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;).queue();</b>
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

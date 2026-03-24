@@ -1,0 +1,333 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > Seed</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network</a>
+</div>
+
+<h1>Coverage Summary for Class: Seed (dev.droppinganvil.v3.network)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">Seed</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    80%
+  </span>
+  <span class="absValue">
+    (8/10)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    50%
+  </span>
+  <span class="absValue">
+    (13/26)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    89.7%
+  </span>
+  <span class="absValue">
+    (35/39)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2022. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.Node;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.PeerDirectory;
+&nbsp;
+&nbsp;import java.io.*;
+&nbsp;import java.util.ArrayList;
+&nbsp;import java.util.HashMap;
+&nbsp;import java.util.List;
+&nbsp;import java.util.Map;
+&nbsp;
+&nbsp;/**
+&nbsp; * Seed contains initial bootstrap data for starting a ConnectX instance.
+&nbsp; *
+&nbsp; * Seed files allow new nodes to bootstrap into the network with:
+&nbsp; * - High-value (hv) peers for initial connections (LAN peers are NEVER shared)
+&nbsp; * - Network configurations to import
+&nbsp; * - Public key certificates for peer verification
+&nbsp; * - Ability to fetch official seeds from CXNET
+&nbsp; *
+&nbsp; * Seeds are versioned and stored both locally (seeds/ directory) and on-chain (c2 Resources chain)
+&nbsp; */
+&nbsp;public class Seed {
+&nbsp;    /**
+&nbsp;     * Unique identifier for this seed version
+&nbsp;     * Used for tracking, versioning, and on-chain storage
+&nbsp;     * Format: UUID
+&nbsp;     */
+&nbsp;    public String seedID;
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Timestamp when this seed was created (epoch milliseconds)
+&nbsp;     */
+&nbsp;    public long timestamp;
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Network ID this seed is for (e.g., &quot;CXNET&quot;)
+&nbsp;     */
+&nbsp;    public String networkID;
+&nbsp;
+&nbsp;    /**
+&nbsp;     * High-value peers for initial connection
+&nbsp;     * Contains Node objects with cxID, addr, and publicKey
+&nbsp;     * NOTE: LAN peers are NEVER included in seeds for privacy/security
+&nbsp;     */
+&nbsp;    public List&lt;Node&gt; hvPeers;
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Additional peers for peer finding requests
+&nbsp;     * Subset of hvPeers that are good for discovering more peers
+&nbsp;     */
+&nbsp;    public List&lt;Node&gt; peerFindingNodes;
+&nbsp;
+&nbsp;    /**
+&nbsp;     * List of network configurations to import
+&nbsp;     * Contains CXNetwork objects with full network state
+&nbsp;     */
+&nbsp;    public List&lt;CXNetwork&gt; networks;
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Map of cxID -&gt; PGP public key certificate
+&nbsp;     * Used for verifying peer identities before first contact
+&nbsp;     */
+&nbsp;    public Map&lt;String, String&gt; certificates;
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Create a new empty Seed
+&nbsp;     */
+<b class="fc">&nbsp;    public Seed() {</b>
+<b class="fc">&nbsp;        this.hvPeers = new ArrayList&lt;&gt;();</b>
+<b class="fc">&nbsp;        this.peerFindingNodes = new ArrayList&lt;&gt;();</b>
+<b class="fc">&nbsp;        this.networks = new ArrayList&lt;&gt;();</b>
+<b class="fc">&nbsp;        this.certificates = new HashMap&lt;&gt;();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Add a high-value peer to the seed
+&nbsp;     * @param node Node to add (must not be a LAN peer)
+&nbsp;     */
+&nbsp;    public void addHvPeer(Node node) {
+<b class="pc">&nbsp;        if (node != null &amp;&amp; node.cxID != null) {</b>
+<b class="fc">&nbsp;            hvPeers.add(node);</b>
+&nbsp;            // Also add certificate if available
+<b class="pc">&nbsp;            if (node.publicKey != null) {</b>
+<b class="fc">&nbsp;                certificates.put(node.cxID, node.publicKey);</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Add a peer finding node to the seed
+&nbsp;     * @param node Node good for peer discovery
+&nbsp;     */
+&nbsp;    public void addPeerFindingNode(Node node) {
+<b class="pc">&nbsp;        if (node != null &amp;&amp; node.cxID != null) {</b>
+<b class="fc">&nbsp;            peerFindingNodes.add(node);</b>
+&nbsp;            // Also ensure it&#39;s in hvPeers
+<b class="pc">&nbsp;            if (!hvPeers.contains(node)) {</b>
+<b class="nc">&nbsp;                addHvPeer(node);</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Add a network to the seed
+&nbsp;     * @param network CXNetwork to add
+&nbsp;     */
+&nbsp;    public void addNetwork(CXNetwork network) {
+<b class="pc">&nbsp;        if (network != null) {</b>
+<b class="fc">&nbsp;            networks.add(network);</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Add a certificate to the seed
+&nbsp;     * @param cxID Node identifier
+&nbsp;     * @param publicKey PGP public key
+&nbsp;     */
+&nbsp;    public void addCertificate(String cxID, String publicKey) {
+<b class="nc">&nbsp;        if (cxID != null &amp;&amp; publicKey != null) {</b>
+<b class="nc">&nbsp;            certificates.put(cxID, publicKey);</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Create a seed from current PeerDirectory high-value peers
+&nbsp;     * NOTE: LAN peers are automatically excluded
+&nbsp;     * @param peerDirectory PeerDirectory instance to get peers from
+&nbsp;     * @return Seed containing current hv peers
+&nbsp;     */
+&nbsp;    public static Seed fromCurrentPeers(PeerDirectory peerDirectory) {
+<b class="fc">&nbsp;        Seed seed = new Seed();</b>
+&nbsp;        // Only include hv peers, NEVER LAN peers
+<b class="pc">&nbsp;        if (peerDirectory != null &amp;&amp; peerDirectory.hv != null) {</b>
+<b class="fc">&nbsp;            for (Node node : peerDirectory.hv.values()) {</b>
+<b class="fc">&nbsp;                seed.addHvPeer(node);</b>
+&nbsp;            }
+&nbsp;        }
+<b class="fc">&nbsp;        return seed;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Save this Seed to a file using ConnectX serialization
+&nbsp;     * @param file File to save to
+&nbsp;     * @throws Exception if save fails
+&nbsp;     */
+&nbsp;    public void save(File file) throws Exception {
+<b class="fc">&nbsp;        String json = ConnectX.serialize(&quot;cxJSON1&quot;, this);</b>
+<b class="fc">&nbsp;        try (FileWriter writer = new FileWriter(file)) {</b>
+<b class="fc">&nbsp;            writer.write(json);</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Load a Seed from a file using ConnectX deserialization
+&nbsp;     * @param file File to load from
+&nbsp;     * @return Loaded Seed
+&nbsp;     * @throws Exception if load fails
+&nbsp;     */
+&nbsp;    public static Seed load(File file) throws Exception {
+<b class="fc">&nbsp;        StringBuilder json = new StringBuilder();</b>
+<b class="fc">&nbsp;        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {</b>
+&nbsp;            String line;
+<b class="fc">&nbsp;            while ((line = reader.readLine()) != null) {</b>
+<b class="fc">&nbsp;                json.append(line);</b>
+&nbsp;            }
+&nbsp;        }
+<b class="fc">&nbsp;        return (Seed) ConnectX.deserialize(&quot;cxJSON1&quot;, json.toString(), Seed.class);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Fetch the official seed from CXNET
+&nbsp;     * This queries the CXNET backend nodes for the current official seed
+&nbsp;     * @param connectX ConnectX instance to use for fetching
+&nbsp;     * @return Official CXNET seed
+&nbsp;     * @throws Exception if fetch fails
+&nbsp;     */
+&nbsp;    public static Seed fetchOfficial(ConnectX connectX) throws Exception {
+&nbsp;        // TODO: Implement fetching official seed from CXNET
+&nbsp;        // This would:
+&nbsp;        // 1. Send a request to CXNET backendSet nodes
+&nbsp;        // 2. Receive the official seed response
+&nbsp;        // 3. Verify it&#39;s signed by CXNET NMI
+&nbsp;        // 4. Return the seed
+<b class="nc">&nbsp;        throw new UnsupportedOperationException(&quot;Official seed fetching not yet implemented&quot;);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Apply this seed to a ConnectX instance
+&nbsp;     * This will:
+&nbsp;     * - Cache all certificates
+&nbsp;     * - Add all hv peers to PeerDirectory (LAN peers never included)
+&nbsp;     * - Import all networks
+&nbsp;     *
+&nbsp;     * @param connectX ConnectX instance to apply to
+&nbsp;     * @throws Exception if application fails
+&nbsp;     */
+&nbsp;    public void apply(ConnectX connectX) throws Exception {
+<b class="fc">&nbsp;        System.out.println(&quot;[Seed] Applying seed &quot; + seedID);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;[Seed]   Networks: &quot; + networks.size());</b>
+<b class="fc">&nbsp;        System.out.println(&quot;[Seed]   HV Peers: &quot; + hvPeers.size());</b>
+<b class="fc">&nbsp;        System.out.println(&quot;[Seed]   Certificates: &quot; + certificates.size());</b>
+&nbsp;
+&nbsp;        // Use reflection to call private applySeed method in ConnectX
+<b class="fc">&nbsp;        java.lang.reflect.Method applySeedMethod = ConnectX.class.getDeclaredMethod(&quot;applySeed&quot;, Seed.class);</b>
+<b class="fc">&nbsp;        applySeedMethod.setAccessible(true);</b>
+<b class="fc">&nbsp;        applySeedMethod.invoke(connectX, this);</b>
+&nbsp;
+<b class="fc">&nbsp;        System.out.println(&quot;[Seed] Seed application complete&quot;);</b>
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,224 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > OutputProcessor</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network.threads</a>
+</div>
+
+<h1>Coverage Summary for Class: OutputProcessor (dev.droppinganvil.v3.network.threads)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">OutputProcessor</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (3/3)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    59.1%
+  </span>
+  <span class="absValue">
+    (26/44)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    90.9%
+  </span>
+  <span class="absValue">
+    (40/44)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2021. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network.threads;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.NodeConfig;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.OutConnectionController;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.OutputBundle;
+&nbsp;
+&nbsp;/**
+&nbsp; * Processes outbound network events from outputQueue
+&nbsp; */
+&nbsp;public class OutputProcessor implements Runnable {
+<b class="fc">&nbsp;    public static boolean active = true;</b>
+&nbsp;    private OutConnectionController outController;
+&nbsp;
+<b class="fc">&nbsp;    public OutputProcessor(OutConnectionController outController) {</b>
+<b class="fc">&nbsp;        this.outController = outController;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    @Override
+&nbsp;    public void run() {
+<b class="fc">&nbsp;        String peerID = outController.connectXAPI.getOwnID();</b>
+<b class="pc">&nbsp;        String peerShort = (peerID != null &amp;&amp; peerID.length() &gt;= 8) ? peerID.substring(0, 8) : &quot;UNKNOWN&quot;;</b>
+<b class="fc">&nbsp;        System.out.println(&quot;[OutputProcessor] Thread started for peer &quot; + peerShort);</b>
+<b class="fc">&nbsp;        int loopCount = 0;</b>
+&nbsp;
+<b class="pc">&nbsp;        while (active) {</b>
+&nbsp;            try {
+<b class="fc">&nbsp;                loopCount++;</b>
+&nbsp;                OutputBundle bundle;
+&nbsp;                int queueSizeBefore;
+<b class="fc">&nbsp;                synchronized (outController.connectXAPI.outputQueue) {</b>
+<b class="fc">&nbsp;                    queueSizeBefore = outController.connectXAPI.outputQueue.size();</b>
+<b class="fc">&nbsp;                    bundle = outController.connectXAPI.outputQueue.poll();</b>
+<b class="fc">&nbsp;                }</b>
+&nbsp;
+&nbsp;                // Log every 100 iterations OR when queue is large (only if enabled)
+<b class="pc">&nbsp;                if (NodeConfig.enableOutLoopLogging &amp;&amp; (loopCount % 100 == 0 || queueSizeBefore &gt; 5)) {</b>
+<b class="nc">&nbsp;                    System.out.println(&quot;[OUT-LOOP] Peer &quot; + peerShort + &quot; iteration &quot; + loopCount +</b>
+&nbsp;                        &quot;, queue: &quot; + queueSizeBefore + &quot;, polled: &quot; + (bundle != null));
+&nbsp;                }
+&nbsp;
+&nbsp;                // Debug: Log if we polled from a non-empty queue
+<b class="fc">&nbsp;                if (queueSizeBefore &gt; 10) {</b>
+&nbsp;                    // Log when queue is large (stuck?)
+<b class="fc">&nbsp;                    System.out.println(&quot;[poll-DEBUG] Peer &quot; + peerShort + &quot; queue size: &quot; + queueSizeBefore +</b>
+<b class="pc">&nbsp;                        &quot;, polled: &quot; + (bundle != null ? &quot;YES&quot; : &quot;NULL&quot;));</b>
+<b class="pc">&nbsp;                    if (bundle != null &amp;&amp; bundle.ne != null &amp;&amp; bundle.ne.eT != null) {</b>
+<b class="fc">&nbsp;                        System.out.println(&quot;[poll-DEBUG]   -&gt; Event type: &quot; + bundle.ne.eT);</b>
+&nbsp;                    }
+<b class="fc">&nbsp;                } else if (bundle != null) {</b>
+<b class="pc">&nbsp;                    String et = (bundle.ne != null &amp;&amp; bundle.ne.eT != null) ? bundle.ne.eT : &quot;NULL&quot;;</b>
+<b class="fc">&nbsp;                    if (et.contains(&quot;HELLO&quot;)) {</b>
+<b class="fc">&nbsp;                        System.out.println(&quot;[poll-DEBUG] Peer &quot; + peerShort + &quot; polled &quot; + et);</b>
+&nbsp;                    }
+&nbsp;                }
+&nbsp;
+<b class="fc">&nbsp;                if (bundle != null) {</b>
+<b class="fc">&nbsp;                    String eventType = &quot;NULL&quot;;</b>
+<b class="fc">&nbsp;                    String nodeAddr = &quot;NULL&quot;;</b>
+<b class="fc">&nbsp;                    boolean hasPerm = false;</b>
+&nbsp;
+&nbsp;                    try {
+<b class="pc">&nbsp;                        if (bundle.ne != null) {</b>
+<b class="pc">&nbsp;                            eventType = bundle.ne.eT != null ? bundle.ne.eT : &quot;NULL-eT&quot;;</b>
+<b class="fc">&nbsp;                            hasPerm = (bundle.ne.p != null);</b>
+&nbsp;                        } else {
+<b class="nc">&nbsp;                            eventType = &quot;NULL-ne&quot;;</b>
+&nbsp;                        }
+<b class="fc">&nbsp;                        if (bundle.n != null) {</b>
+<b class="fc">&nbsp;                            nodeAddr = bundle.n.addr != null ? bundle.n.addr : &quot;NULL-addr&quot;;</b>
+&nbsp;                        }
+&nbsp;                    } catch (Exception ex) {
+<b class="nc">&nbsp;                        eventType = &quot;EXCEPTION:&quot; + ex.getMessage();</b>
+&nbsp;                    }
+&nbsp;
+&nbsp;                    // Log EVERY bundle for debugging
+<b class="fc">&nbsp;                    System.out.println(&quot;[OUT-DEBUG] Type=&quot; + eventType + &quot;, Node=&quot; + nodeAddr + &quot;, Perm=&quot; + hasPerm);</b>
+&nbsp;
+&nbsp;                    try {
+<b class="fc">&nbsp;                        outController.transmitEvent(bundle);</b>
+&nbsp;                    } catch (Exception e) {
+&nbsp;                        // Move failed event to retry queue instead of dropping it
+&nbsp;                        // This prevents failed events (e.g., to offline EPOCH) from blocking the output queue
+<b class="fc">&nbsp;                        dev.droppinganvil.v3.network.nodemesh.RetryBundle retryBundle =</b>
+&nbsp;                            new dev.droppinganvil.v3.network.nodemesh.RetryBundle(bundle);
+<b class="fc">&nbsp;                        retryBundle.scheduleNextRetry(e.getMessage());</b>
+&nbsp;
+<b class="fc">&nbsp;                        outController.connectXAPI.retryQueue.add(retryBundle);</b>
+&nbsp;
+<b class="fc">&nbsp;                        System.err.println(&quot;[OUT-ERROR] &quot; + eventType + &quot; to &quot; + nodeAddr + &quot; failed: &quot; + e.getMessage());</b>
+<b class="fc">&nbsp;                        System.err.println(&quot;[RETRY-QUEUE] Added to retry queue (retry 1/&quot; +</b>
+&nbsp;                            dev.droppinganvil.v3.network.nodemesh.RetryBundle.MAX_RETRIES +
+&nbsp;                            &quot; in &quot; + (dev.droppinganvil.v3.network.nodemesh.RetryBundle.INITIAL_RETRY_DELAY_MS / 1000) + &quot;s)&quot;);
+&nbsp;                    }
+&nbsp;                }
+&nbsp;
+<b class="fc">&nbsp;                Thread.sleep(NodeConfig.IO_THREAD_SLEEP);</b>
+&nbsp;            } catch (InterruptedException e) {
+<b class="nc">&nbsp;                e.printStackTrace();</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

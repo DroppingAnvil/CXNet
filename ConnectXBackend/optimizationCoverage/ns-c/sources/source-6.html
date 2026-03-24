@@ -1,0 +1,160 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > NetworkEvent</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network.events</a>
+</div>
+
+<h1>Coverage Summary for Class: NetworkEvent (dev.droppinganvil.v3.network.events)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">NetworkEvent</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (2/2)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (7/7)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;package dev.droppinganvil.v3.network.events;
+&nbsp;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.network.CXPath;
+&nbsp;
+&nbsp;import java.io.Serializable;
+&nbsp;
+&nbsp;public class NetworkEvent implements Serializable {
+&nbsp;
+&nbsp;    // Default constructor for Jackson deserialization
+<b class="fc">&nbsp;    public NetworkEvent() {</b>
+&nbsp;    }
+&nbsp;
+<b class="fc">&nbsp;    public NetworkEvent(EventType type, byte[] d) {</b>
+<b class="fc">&nbsp;        this.eT = type.name();</b>
+<b class="fc">&nbsp;        this.d = d;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public String eT;
+&nbsp;    public CXPath p;
+&nbsp;    public String iD;
+&nbsp;    /**
+&nbsp;     * Method for processing
+&nbsp;     */
+&nbsp;    public String m;
+&nbsp;    /**
+&nbsp;     * Event specific data
+&nbsp;     */
+&nbsp;    public byte[] d;
+&nbsp;    /**
+&nbsp;     * Determines if event should be executed during blockchain sync
+&nbsp;     * TRUE = State-modifying events (permission changes, NMI updates) - MUST execute during sync
+&nbsp;     * FALSE = Ephemeral/realtime events (messages, pings) - only execute when received live
+&nbsp;     *
+&nbsp;     * Example: A 2-year-old permission change MUST be applied during sync to rebuild state
+&nbsp;     *          A 2-year-old message should NOT be displayed during sync
+&nbsp;     *
+&nbsp;     * Default: false (most events are realtime)
+&nbsp;     */
+<b class="fc">&nbsp;    public boolean executeOnSync = false;</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Record flag - determines if event should be recorded to blockchain when received
+&nbsp;     * TRUE = Event will be recorded to blockchain if sender has Record permission
+&nbsp;     * FALSE = Event is ephemeral and will not be recorded
+&nbsp;     *
+&nbsp;     * Default: false (most events are not recorded)
+&nbsp;     */
+<b class="fc">&nbsp;    public boolean r = false;</b>
+&nbsp;    /**
+&nbsp;     * This flag identifies if the inner data NetworkEvent.d will be signed or encrypted
+&nbsp;     * False: NodeMesh will treat the inner data as signed event data and will check signatures then attempt deserialization into desired object type
+&nbsp;     * True: NodeMesh will treat the inner data as E2E encrypted, and will attempt to decrypt it into desired object, but if it cannot due to cryptographic access control, or due to it being out of scope NodeMesh will use TransmitPref from NetworkContainer to determine routing/proxy
+&nbsp;     */
+<b class="fc">&nbsp;    public boolean e2e = false;</b>
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

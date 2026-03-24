@@ -1,0 +1,569 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > BootstrapServerTest</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.test</a>
+</div>
+
+<h1>Coverage Summary for Class: BootstrapServerTest (dev.droppinganvil.v3.test)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">BootstrapServerTest</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    71.4%
+  </span>
+  <span class="absValue">
+    (5/7)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    53.6%
+  </span>
+  <span class="absValue">
+    (30/56)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    72.2%
+  </span>
+  <span class="absValue">
+    (169/234)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;package dev.droppinganvil.v3.test;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.network.events.EventType;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.Node;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider;
+&nbsp;
+&nbsp;/**
+&nbsp; * HTTP Bridge Test
+&nbsp; *
+&nbsp; * Tests cxHTTP1 bridge provider with RProx reverse proxy
+&nbsp; * This test is also what is being used to serve as a bootstrap server
+&nbsp; *
+&nbsp; * CONFIGURATION REQUIRED:
+&nbsp; * 1. Enable RProx at AnvilDevelopment.US/rprox.html
+&nbsp; * 2. Configure target: http://[YOUR_IP]:8080
+&nbsp; *
+&nbsp; * This test will:
+&nbsp; * - Start HTTP server on localhost:8080
+&nbsp; * - Accept test messages from another client
+&nbsp; */
+<b class="nc">&nbsp;public class BootstrapServerTest {</b>
+&nbsp;
+&nbsp;    public static final int HTTP_PORT = 8080;   // HTTP bridge (for RProx/HTTP clients)
+&nbsp;    public static final int P2P_PORT = 49152;   // P2P mesh (for direct CX connections)
+&nbsp;    // EPOCH NMI UUID - persistent identifier for the network master node
+&nbsp;    public static final String SERVER_ID = &quot;00000000-0000-0000-0000-000000000001&quot;;
+&nbsp;    public static final String NETWORK_NAME = &quot;CXNET&quot;;
+&nbsp;    public static final String CXNET_DIR = &quot;ConnectX-EPOCH&quot;;
+<b class="fc">&nbsp;    public static final Boolean addEpoch = false;</b>
+<b class="fc">&nbsp;    public static final Boolean messages = false;</b>
+&nbsp;
+&nbsp;    public static void main(String[] args) throws Exception {
+<b class="fc">&nbsp;        System.out.println(&quot;=== EPOCH NMI Terminal - CXNET Network ===\n&quot;);</b>
+&nbsp;
+&nbsp;        // Create EPOCH NMI instance with dedicated directory
+<b class="fc">&nbsp;        java.io.File cxnetDir = new java.io.File(CXNET_DIR);</b>
+<b class="pc">&nbsp;        if (!cxnetDir.exists()) {</b>
+<b class="nc">&nbsp;            cxnetDir.mkdirs();</b>
+<b class="nc">&nbsp;            System.out.println(&quot;Created CXNET directory: &quot; + CXNET_DIR);</b>
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        ConnectX server = new ConnectX(CXNET_DIR);</b>
+&nbsp;
+&nbsp;        // Generate EPOCH keys (NMI for CXNET)
+<b class="fc">&nbsp;        System.out.println(&quot;Step 1: Initializing EPOCH (NMI) identity...&quot;);</b>
+<b class="fc">&nbsp;        String serverPubKey = null;</b>
+&nbsp;        try {
+&nbsp;            // Enable EPOCH mode - this node IS the NMI (Network Master Identity)
+&nbsp;            // TODO: Remove after HTTP bridge seed download is implemented
+<b class="fc">&nbsp;            server.encryptionProvider.setEpochMode(true);</b>
+&nbsp;
+&nbsp;            // Generate new key pair with password &quot;cxnet&quot; for EPOCH
+<b class="fc">&nbsp;            server.encryptionProvider.setup(SERVER_ID, &quot;cxnet&quot;, server.cxRoot);</b>
+<b class="fc">&nbsp;            serverPubKey = server.encryptionProvider.getPublicKey();</b>
+<b class="fc">&nbsp;            System.out.println(&quot;  ✓ EPOCH crypto initialized&quot;);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;  Public key: &quot; + serverPubKey.substring(0, 50) + &quot;...&quot;);</b>
+&nbsp;
+&nbsp;            // Copy the generated public key to cx.asc (network master key)
+<b class="fc">&nbsp;            java.io.File keyFile = new java.io.File(server.cxRoot, &quot;key.cx&quot;);</b>
+<b class="fc">&nbsp;            java.io.File publicKeyDest = new java.io.File(server.cxRoot, &quot;cx.asc&quot;);</b>
+<b class="pc">&nbsp;            if (keyFile.exists() &amp;&amp; !publicKeyDest.exists()) {</b>
+&nbsp;                // Extract public key from secret key and save as cx.asc
+&nbsp;                // For now, the NMI public key is set during crypto init
+<b class="nc">&nbsp;                System.out.println(&quot;  ✓ Network master key: &quot; + SERVER_ID);</b>
+&nbsp;            }
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;  ✗ Crypto initialization failed: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;            e.printStackTrace();</b>
+&nbsp;            return;
+&nbsp;        }
+&nbsp;
+&nbsp;        // Create EPOCH node identity with cxHTTP1 bridge address
+<b class="fc">&nbsp;        Node serverNode = new Node();</b>
+<b class="fc">&nbsp;        serverNode.cxID = SERVER_ID;</b>
+<b class="fc">&nbsp;        serverNode.publicKey = serverPubKey;</b>
+<b class="fc">&nbsp;        serverNode.addr = &quot;cxHTTP1:https://CXNET.AnvilDevelopment.US/cx&quot;;</b>
+<b class="fc">&nbsp;        server.setSelf(serverNode);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;  ✓ EPOCH identity: &quot; + SERVER_ID);</b>
+&nbsp;
+&nbsp;       // Initialize and add EPOCH to peer directory for signature verification
+<b class="pc">&nbsp;        if (addEpoch) {</b>
+<b class="nc">&nbsp;            if (server.nodeMesh.peerDirectory.hv == null) {</b>
+<b class="nc">&nbsp;                server.nodeMesh.peerDirectory.hv = new java.util.concurrent.ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;            }
+<b class="nc">&nbsp;            server.nodeMesh.peerDirectory.hv.put(SERVER_ID, serverNode);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;  ✓ EPOCH added to peer directory&quot;);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Get auto-registered cxHTTP1 bridge provider (per-instance)
+<b class="fc">&nbsp;        System.out.println(&quot;\nStep 2: Getting cxHTTP1 bridge provider...&quot;);</b>
+<b class="fc">&nbsp;        BridgeProvider httpBridge = server.getBridgeProvider(&quot;cxHTTP1&quot;);</b>
+<b class="pc">&nbsp;        if (httpBridge == null) {</b>
+<b class="nc">&nbsp;            System.err.println(&quot;  ✗ cxHTTP1 bridge not registered (should be auto-registered)&quot;);</b>
+&nbsp;            return;
+&nbsp;        }
+<b class="fc">&nbsp;        System.out.println(&quot;  ✓ cxHTTP1 bridge found (auto-registered by ConnectX)&quot;);</b>
+&nbsp;
+&nbsp;        // Create or load CXNET network
+<b class="fc">&nbsp;        System.out.println(&quot;\nStep 3: Setting up CXNET network...&quot;);</b>
+&nbsp;        dev.droppinganvil.v3.network.CXNetwork cxnet;
+&nbsp;
+&nbsp;        // Check if CXNET already exists in memory
+<b class="fc">&nbsp;        cxnet = server.getNetwork(NETWORK_NAME);</b>
+<b class="pc">&nbsp;        if (cxnet == null) {</b>
+&nbsp;            // Check if blockchain data exists on disk (persistence test)
+<b class="fc">&nbsp;            boolean blockchainExists = server.blockchainPersistence.exists(NETWORK_NAME);</b>
+&nbsp;
+<b class="pc">&nbsp;            if (blockchainExists) {</b>
+<b class="fc">&nbsp;                System.out.println(&quot;  ✓ CXNET blockchain found on disk - testing persistence&quot;);</b>
+&nbsp;
+&nbsp;                // Try to load persisted blockchain by recreating network structure
+&nbsp;                // In production, this would happen via importNetwork() from a seed
+&nbsp;                // For EPOCH/NMI, we recreate the network structure and let persistence layer restore it
+<b class="fc">&nbsp;                cxnet = server.createNetwork(NETWORK_NAME);</b>
+&nbsp;
+&nbsp;                // Verify blockchain was restored from disk
+<b class="fc">&nbsp;                ConnectX.BlockchainStats stats = server.getBlockchainStats(cxnet);</b>
+<b class="fc">&nbsp;                System.out.println(&quot;  ✓ Blockchain loaded from disk&quot;);</b>
+<b class="fc">&nbsp;                System.out.println(&quot;    c1: &quot; + stats.c1BlockCount + &quot; blocks (current: &quot; + stats.c1CurrentBlock + &quot;)&quot;);</b>
+<b class="fc">&nbsp;                System.out.println(&quot;    c2: &quot; + stats.c2BlockCount + &quot; blocks (current: &quot; + stats.c2CurrentBlock + &quot;)&quot;);</b>
+<b class="fc">&nbsp;                System.out.println(&quot;    c3: &quot; + stats.c3BlockCount + &quot; blocks (current: &quot; + stats.c3CurrentBlock + &quot;)&quot;);</b>
+&nbsp;
+&nbsp;            } else {
+&nbsp;                // Create new CXNET network (first run)
+<b class="nc">&nbsp;                System.out.println(&quot;  No existing blockchain found - creating new CXNET&quot;);</b>
+<b class="nc">&nbsp;                cxnet = server.createNetwork(NETWORK_NAME);</b>
+&nbsp;
+&nbsp;                // Set sync interval to 30 seconds for testing (BEFORE creating seed)
+<b class="nc">&nbsp;                cxnet.configuration.syncIntervalSeconds = 30;</b>
+&nbsp;
+<b class="nc">&nbsp;                System.out.println(&quot;  ✓ CXNET created&quot;);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;    Chain c1 (Admin): &quot; + cxnet.networkDictionary.c1);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;    Chain c2 (Resources): &quot; + cxnet.networkDictionary.c2);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;    Chain c3 (Events): &quot; + cxnet.networkDictionary.c3);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;    NMI: EPOCH&quot;);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;    Sync interval: 30 seconds (testing mode)&quot;);</b>
+&nbsp;
+&nbsp;                // Verify blockchain was persisted
+<b class="nc">&nbsp;                ConnectX.BlockchainStats stats = server.getBlockchainStats(cxnet);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;  ✓ Blockchain persisted to disk&quot;);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;    c1: &quot; + stats.c1BlockCount + &quot; blocks&quot;);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;    c2: &quot; + stats.c2BlockCount + &quot; blocks&quot;);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;    c3: &quot; + stats.c3BlockCount + &quot; blocks&quot;);</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Create versioned seed for CXNET distribution
+<b class="fc">&nbsp;            System.out.println(&quot;  Creating official CXNET seed...&quot;);</b>
+<b class="fc">&nbsp;            dev.droppinganvil.v3.network.Seed seed = new dev.droppinganvil.v3.network.Seed();</b>
+&nbsp;
+&nbsp;            // Set seed metadata
+<b class="fc">&nbsp;            seed.seedID = java.util.UUID.randomUUID().toString();</b>
+<b class="fc">&nbsp;            seed.timestamp = System.currentTimeMillis();</b>
+<b class="fc">&nbsp;            seed.networkID = NETWORK_NAME;</b>
+&nbsp;
+&nbsp;            // Add CXNET network to seed
+<b class="fc">&nbsp;            seed.addNetwork(cxnet);</b>
+&nbsp;
+&nbsp;            // Add EPOCH as bootstrap peer (hv peer and peer finding node)
+<b class="fc">&nbsp;            dev.droppinganvil.v3.network.nodemesh.Node epochNode = new dev.droppinganvil.v3.network.nodemesh.Node();</b>
+<b class="fc">&nbsp;            epochNode.cxID = SERVER_ID;</b>
+<b class="fc">&nbsp;            epochNode.publicKey = serverPubKey;</b>
+<b class="fc">&nbsp;            epochNode.addr = &quot;cxHTTP1:https://CXNET.AnvilDevelopment.US/cx&quot;;</b>
+<b class="fc">&nbsp;            seed.addHvPeer(epochNode);</b>
+<b class="fc">&nbsp;            seed.addPeerFindingNode(epochNode);</b>
+&nbsp;
+&nbsp;            // Create seeds/ directory
+<b class="fc">&nbsp;            java.io.File seedsDir = new java.io.File(server.cxRoot, &quot;seeds&quot;);</b>
+<b class="pc">&nbsp;            if (!seedsDir.exists()) {</b>
+<b class="nc">&nbsp;                seedsDir.mkdirs();</b>
+<b class="nc">&nbsp;                System.out.println(&quot;  Created seeds/ directory&quot;);</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Save versioned seed to seeds/{seedID}.cxn
+<b class="fc">&nbsp;            java.io.File seedFile = new java.io.File(seedsDir, seed.seedID + &quot;.cxn&quot;);</b>
+<b class="fc">&nbsp;            seed.save(seedFile);</b>
+&nbsp;
+&nbsp;            // Update CXNET configuration with current seed ID
+<b class="pc">&nbsp;            if (cxnet.configuration.currentSeedID != null) {</b>
+<b class="nc">&nbsp;                cxnet.configuration.lastSeedID = cxnet.configuration.currentSeedID;</b>
+&nbsp;            }
+<b class="fc">&nbsp;            cxnet.configuration.currentSeedID = seed.seedID;</b>
+&nbsp;
+&nbsp;            // Display seed info
+<b class="fc">&nbsp;            System.out.println(&quot;  ✓ Seed created and saved:&quot;);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;    Seed ID: &quot; + seed.seedID);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;    Timestamp: &quot; + seed.timestamp);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;    Networks: &quot; + seed.networks.size() + &quot; (CXNET)&quot;);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;    HV Peers: &quot; + seed.hvPeers.size() + &quot; (EPOCH)&quot;);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;    Peer Finding: &quot; + seed.peerFindingNodes.size() + &quot; (EPOCH)&quot;);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;    Certificates: &quot; + seed.certificates.size() + &quot; (EPOCH)&quot;);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;    File: seeds/&quot; + seed.seedID + &quot;.cxn&quot;);</b>
+&nbsp;
+&nbsp;            // TODO: Record seed to c2 (Resources chain) blockchain for distribution
+&nbsp;            // This will allow automatic loading when new nodes join the network
+&nbsp;            // server.recordResource(NETWORK_NAME, seed);
+&nbsp;
+&nbsp;        } else {
+<b class="nc">&nbsp;            System.out.println(&quot;  ✓ CXNET already loaded in memory&quot;);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Create TESTNET for blockchain replication testing
+<b class="fc">&nbsp;        System.out.println(&quot;\nStep 3b: Setting up TESTNET (blockchain replication test network)...&quot;);</b>
+<b class="fc">&nbsp;        dev.droppinganvil.v3.network.CXNetwork testnet = server.getNetwork(&quot;TESTNET&quot;);</b>
+&nbsp;
+<b class="pc">&nbsp;        if (testnet == null) {</b>
+<b class="fc">&nbsp;            testnet = server.createNetwork(&quot;TESTNET&quot;);</b>
+&nbsp;
+&nbsp;            // Disable whitelist mode for blockchain replication testing
+<b class="fc">&nbsp;            testnet.configuration.whitelistMode = false;</b>
+<b class="fc">&nbsp;            testnet.configuration.publicSeed = false;</b>
+<b class="fc">&nbsp;            testnet.configuration.syncIntervalSeconds = 30; // Testing mode</b>
+&nbsp;
+<b class="fc">&nbsp;            System.out.println(&quot;  ✓ TESTNET created for blockchain replication testing&quot;);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;    Whitelist mode: DISABLED (allows all peers for testing)&quot;);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;    Backend/NMI: EPOCH&quot;);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;    Sync interval: 30 seconds (testing mode)&quot;);</b>
+&nbsp;
+&nbsp;            // Create TESTNET seed
+<b class="fc">&nbsp;            dev.droppinganvil.v3.network.Seed testnetSeed = new dev.droppinganvil.v3.network.Seed();</b>
+<b class="fc">&nbsp;            testnetSeed.seedID = java.util.UUID.randomUUID().toString();</b>
+<b class="fc">&nbsp;            testnetSeed.timestamp = System.currentTimeMillis();</b>
+<b class="fc">&nbsp;            testnetSeed.networkID = &quot;TESTNET&quot;;</b>
+<b class="fc">&nbsp;            testnetSeed.addNetwork(testnet);</b>
+&nbsp;
+&nbsp;            // Add EPOCH as bootstrap peer for TESTNET too
+<b class="fc">&nbsp;            dev.droppinganvil.v3.network.nodemesh.Node epochNode = new dev.droppinganvil.v3.network.nodemesh.Node();</b>
+<b class="fc">&nbsp;            epochNode.cxID = SERVER_ID;</b>
+<b class="fc">&nbsp;            epochNode.publicKey = serverPubKey;</b>
+<b class="fc">&nbsp;            epochNode.addr = &quot;cxHTTP1:https://CXNET.AnvilDevelopment.US/cx&quot;;</b>
+<b class="fc">&nbsp;            testnetSeed.addHvPeer(epochNode);</b>
+<b class="fc">&nbsp;            testnetSeed.addPeerFindingNode(epochNode);</b>
+&nbsp;
+&nbsp;            // Save TESTNET seed
+<b class="fc">&nbsp;            java.io.File seedsDir = new java.io.File(server.cxRoot, &quot;seeds&quot;);</b>
+<b class="fc">&nbsp;            java.io.File testnetSeedFile = new java.io.File(seedsDir, &quot;testnet_&quot; + testnetSeed.seedID + &quot;.cxn&quot;);</b>
+<b class="fc">&nbsp;            testnetSeed.save(testnetSeedFile);</b>
+&nbsp;
+<b class="fc">&nbsp;            System.out.println(&quot;  ✓ TESTNET seed created: testnet_&quot; + testnetSeed.seedID + &quot;.cxn&quot;);</b>
+&nbsp;        } else {
+<b class="nc">&nbsp;            System.out.println(&quot;  ✓ TESTNET already loaded in memory&quot;);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Initialize P2P mesh (for direct CX protocol connections)
+<b class="fc">&nbsp;        System.out.println(&quot;\nStep 4: Initializing P2P mesh...&quot;);</b>
+<b class="fc">&nbsp;        server.connect(P2P_PORT);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;  ✓ P2P mesh started on port &quot; + P2P_PORT);</b>
+&nbsp;
+&nbsp;        // Start HTTP bridge server (for RProx/HTTP clients)
+<b class="fc">&nbsp;        System.out.println(&quot;\nStep 5: Starting cxHTTP1 bridge server...&quot;);</b>
+<b class="fc">&nbsp;        httpBridge.startServer(HTTP_PORT);</b>
+&nbsp;
+&nbsp;        // Print RProx configuration instructions
+<b class="fc">&nbsp;        System.out.println(&quot;\n&quot; + &quot;=&quot;.repeat(70));</b>
+<b class="fc">&nbsp;        System.out.println(&quot;RPROX CONFIGURATION INSTRUCTIONS&quot;);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;=&quot;.repeat(70));</b>
+<b class="fc">&nbsp;        System.out.println();</b>
+<b class="fc">&nbsp;        System.out.println(&quot;1. Go to: https://AnvilDevelopment.US/rprox.html&quot;);</b>
+<b class="fc">&nbsp;        System.out.println();</b>
+<b class="fc">&nbsp;        System.out.println(&quot;2. Configure the following:&quot;);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;   Service Name: CXNET&quot;);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;   Target Host:  &quot; + getLocalIP());</b>
+<b class="fc">&nbsp;        System.out.println(&quot;   Target Port:  &quot; + HTTP_PORT);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;   Public Path:  /cx&quot;);</b>
+<b class="fc">&nbsp;        System.out.println();</b>
+<b class="fc">&nbsp;        System.out.println(&quot;3. After configuration, clients can connect to:&quot;);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;   https://CXNET.AnvilDevelopment.US/cx&quot;);</b>
+<b class="fc">&nbsp;        System.out.println();</b>
+<b class="fc">&nbsp;        System.out.println(&quot;4. For local testing without RProx:&quot;);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;   http://localhost:&quot; + HTTP_PORT + &quot;/cx&quot;);</b>
+<b class="fc">&nbsp;        System.out.println();</b>
+<b class="fc">&nbsp;        System.out.println(&quot;=&quot;.repeat(70));</b>
+&nbsp;
+&nbsp;        // Print EPOCH NMI status
+<b class="fc">&nbsp;        System.out.println(&quot;\n&quot; + &quot;=&quot;.repeat(70));</b>
+<b class="fc">&nbsp;        System.out.println(&quot;EPOCH NMI - CXNET NETWORK STATUS&quot;);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;=&quot;.repeat(70));</b>
+<b class="fc">&nbsp;        System.out.println(&quot;Network:     &quot; + NETWORK_NAME);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;NMI Node:    &quot; + SERVER_ID);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;Directory:   &quot; + CXNET_DIR);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;HTTP Port:   &quot; + HTTP_PORT);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;P2P Port:    &quot; + P2P_PORT);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;Internal:    http://localhost:&quot; + HTTP_PORT + &quot;/cx&quot;);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;Public:      https://CXNET.AnvilDevelopment.US/cx (via RProx)&quot;);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;Health:      http://localhost:&quot; + HTTP_PORT + &quot;/health&quot;);</b>
+<b class="fc">&nbsp;        System.out.println();</b>
+<b class="fc">&nbsp;        System.out.println(&quot;Status:      READY - LISTENING FOR CONNECTIONS&quot;);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;=&quot;.repeat(70));</b>
+&nbsp;
+&nbsp;        // Register event handler for testing
+<b class="fc">&nbsp;        registerTestEventHandler(server);</b>
+&nbsp;
+&nbsp;        // Create test events for blockchain sync testing on both networks
+<b class="pc">&nbsp;        if (messages) {</b>
+<b class="nc">&nbsp;            System.out.println(&quot;\nCreating test blockchain events for sync testing...&quot;);</b>
+<b class="nc">&nbsp;            createTestBlockchainEvents(server, cxnet);</b>
+<b class="nc">&nbsp;            createTestBlockchainEvents(server, testnet);</b>
+&nbsp;        } else {
+<b class="fc">&nbsp;            System.out.println(&quot;Skipping messages/blockchain test, this reduces network noise during initialization test&quot;);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Keep server running
+<b class="fc">&nbsp;        System.out.println(&quot;\nServer is running. Press Ctrl+C to stop.&quot;);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;\nWaiting for incoming connections...\n&quot;);</b>
+&nbsp;
+&nbsp;        // Monitor loop
+&nbsp;        while (true) {
+<b class="fc">&nbsp;            Thread.sleep(5000);</b>
+&nbsp;
+&nbsp;            // Display stats
+<b class="fc">&nbsp;            int outputQueue = server.outputQueue.size();</b>
+<b class="fc">&nbsp;            int eventQueue = server.eventQueue.size();</b>
+&nbsp;
+<b class="pc">&nbsp;            if (outputQueue &gt; 0 || eventQueue &gt; 0) {</b>
+<b class="nc">&nbsp;                System.out.println(&quot;[&quot; + new java.util.Date() + &quot;] &quot; +</b>
+&nbsp;                    &quot;Output: &quot; + outputQueue + &quot;, Events: &quot; + eventQueue);
+&nbsp;            }
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Get local IP address for RProx configuration
+&nbsp;     */
+&nbsp;    private static String getLocalIP() {
+&nbsp;        try {
+&nbsp;            // Try to get actual IP
+<b class="fc">&nbsp;            java.net.InetAddress localhost = java.net.InetAddress.getLocalHost();</b>
+<b class="fc">&nbsp;            String ip = localhost.getHostAddress();</b>
+&nbsp;
+&nbsp;            // Also show all network interfaces
+<b class="fc">&nbsp;            System.out.println(&quot;\nDetected Network Interfaces:&quot;);</b>
+&nbsp;            java.util.Enumeration&lt;java.net.NetworkInterface&gt; interfaces =
+<b class="fc">&nbsp;                java.net.NetworkInterface.getNetworkInterfaces();</b>
+&nbsp;
+<b class="fc">&nbsp;            while (interfaces.hasMoreElements()) {</b>
+<b class="fc">&nbsp;                java.net.NetworkInterface iface = interfaces.nextElement();</b>
+<b class="fc">&nbsp;                if (iface.isUp() &amp;&amp; !iface.isLoopback()) {</b>
+<b class="fc">&nbsp;                    java.util.Enumeration&lt;java.net.InetAddress&gt; addresses = iface.getInetAddresses();</b>
+<b class="fc">&nbsp;                    while (addresses.hasMoreElements()) {</b>
+<b class="fc">&nbsp;                        java.net.InetAddress addr = addresses.nextElement();</b>
+<b class="pc">&nbsp;                        if (addr instanceof java.net.Inet4Address) {</b>
+<b class="fc">&nbsp;                            System.out.println(&quot;  &quot; + iface.getName() + &quot;: &quot; + addr.getHostAddress());</b>
+&nbsp;                        }
+&nbsp;                    }
+&nbsp;                }
+&nbsp;            }
+<b class="fc">&nbsp;            System.out.println();</b>
+&nbsp;
+<b class="fc">&nbsp;            return ip;</b>
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            return &quot;[YOUR_LOCAL_IP]&quot;;</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Create test blockchain events for sync testing
+&nbsp;     * Creates 100+ events to test block rotation
+&nbsp;     * EPOCH (NMI) has permissions to record events to all chains
+&nbsp;     */
+&nbsp;    private static void createTestBlockchainEvents(ConnectX server, dev.droppinganvil.v3.network.CXNetwork network) {
+&nbsp;        try {
+<b class="nc">&nbsp;            String networkID = network.configuration.netID;</b>
+<b class="nc">&nbsp;            System.out.println(&quot;  Creating 105 test events on &quot; + networkID + &quot; c3 (Events chain) to test block rotation...&quot;);</b>
+&nbsp;
+&nbsp;            // Create 105 test events on c3 to force block rotation
+<b class="nc">&nbsp;            for (int i = 1; i &lt;= 105; i++) {</b>
+<b class="nc">&nbsp;                java.util.Map&lt;String, Object&gt; testData = new java.util.HashMap&lt;&gt;();</b>
+<b class="nc">&nbsp;                testData.put(&quot;testEvent&quot;, networkID + &quot;-c3-event-&quot; + i);</b>
+<b class="nc">&nbsp;                testData.put(&quot;eventNumber&quot;, i);</b>
+<b class="nc">&nbsp;                testData.put(&quot;timestamp&quot;, System.currentTimeMillis());</b>
+<b class="nc">&nbsp;                testData.put(&quot;message&quot;, &quot;Test event #&quot; + i + &quot; for block rotation testing on &quot; + networkID);</b>
+<b class="nc">&nbsp;                String testJson = ConnectX.serialize(&quot;cxJSON1&quot;, testData);</b>
+&nbsp;
+<b class="nc">&nbsp;                server.buildEvent(EventType.MESSAGE, testJson.getBytes(&quot;UTF-8&quot;))</b>
+<b class="nc">&nbsp;                    .withRecordFlag(true)</b>
+<b class="nc">&nbsp;                    .toNetwork(networkID, network.networkDictionary.c3)</b>
+<b class="nc">&nbsp;                        .signData()</b>
+<b class="nc">&nbsp;                    .queue();</b>
+&nbsp;
+&nbsp;                // Progress indicator
+<b class="nc">&nbsp;                if (i % 10 == 0) {</b>
+<b class="nc">&nbsp;                    System.out.println(&quot;    Progress: &quot; + i + &quot;/105 events queued&quot;);</b>
+&nbsp;                }
+&nbsp;
+<b class="nc">&nbsp;                Thread.sleep(50);  // Small delay to avoid overwhelming the queue</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Wait for all events to be processed and recorded
+<b class="nc">&nbsp;            System.out.println(&quot;  Waiting 5 seconds for all events to be processed and recorded...&quot;);</b>
+<b class="nc">&nbsp;            Thread.sleep(5000);</b>
+&nbsp;
+&nbsp;            // Display final blockchain stats
+<b class="nc">&nbsp;            ConnectX.BlockchainStats stats = server.getBlockchainStats(network);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;  ✓ Test events recorded successfully on &quot; + networkID + &quot;!&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;    c1: &quot; + stats.c1BlockCount + &quot; blocks (current: block &quot; + stats.c1CurrentBlock + &quot;)&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;    c2: &quot; + stats.c2BlockCount + &quot; blocks (current: block &quot; + stats.c2CurrentBlock + &quot;)&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;    c3: &quot; + stats.c3BlockCount + &quot; blocks (current: block &quot; + stats.c3CurrentBlock + &quot;)&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            if (stats.c3BlockCount &gt; 1) {</b>
+<b class="nc">&nbsp;                System.out.println(&quot;    ✓ Block rotation occurred on c3! Multiple blocks created.&quot;);</b>
+&nbsp;            }
+&nbsp;
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;  ✗ Error creating test events: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;            e.printStackTrace();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Register handler to respond to test messages
+&nbsp;     */
+&nbsp;    private static void registerTestEventHandler(ConnectX server) {
+&nbsp;        // Create a simple event handler thread
+<b class="fc">&nbsp;        Thread eventHandler = new Thread(() -&gt; {</b>
+&nbsp;            while (true) {
+&nbsp;                try {
+<b class="fc">&nbsp;                    Thread.sleep(100);</b>
+&nbsp;
+&nbsp;                    // Check event queue
+<b class="fc">&nbsp;                    if (!server.eventQueue.isEmpty()) {</b>
+&nbsp;                        dev.droppinganvil.v3.network.InputBundle bundle;
+<b class="fc">&nbsp;                        synchronized (server.eventQueue) {</b>
+<b class="fc">&nbsp;                            bundle = server.eventQueue.poll();</b>
+<b class="fc">&nbsp;                        }</b>
+&nbsp;
+<b class="pc">&nbsp;                        if (bundle != null &amp;&amp; bundle.ne != null) {</b>
+<b class="fc">&nbsp;                            System.out.println(&quot;\n[RECEIVED EVENT]&quot;);</b>
+<b class="fc">&nbsp;                            System.out.println(&quot;  Type: &quot; + bundle.ne.eT);</b>
+<b class="pc">&nbsp;                            System.out.println(&quot;  From: &quot; + (bundle.nc != null ? bundle.nc.iD : &quot;unknown&quot;));</b>
+<b class="fc">&nbsp;                            System.out.println(&quot;  Event ID: &quot; + bundle.ne.iD);</b>
+&nbsp;
+&nbsp;                            // Deserialize data if it&#39;s a message
+<b class="pc">&nbsp;                            if (bundle.ne.eT != null &amp;&amp; bundle.ne.eT.equals(&quot;MESSAGE&quot;)) {</b>
+&nbsp;                                try {
+<b class="fc">&nbsp;                                    String message = new String(bundle.ne.d, &quot;UTF-8&quot;);</b>
+<b class="fc">&nbsp;                                    System.out.println(&quot;  Message: &quot; + message);</b>
+&nbsp;                                } catch (Exception e) {
+<b class="nc">&nbsp;                                    System.out.println(&quot;  (Could not decode message)&quot;);</b>
+&nbsp;                                }
+&nbsp;                            }
+&nbsp;
+<b class="fc">&nbsp;                            System.out.println();</b>
+&nbsp;                        }
+&nbsp;                    }
+&nbsp;                } catch (Exception e) {
+<b class="nc">&nbsp;                    e.printStackTrace();</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;        });
+<b class="fc">&nbsp;        eventHandler.setDaemon(true);</b>
+<b class="fc">&nbsp;        eventHandler.start();</b>
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

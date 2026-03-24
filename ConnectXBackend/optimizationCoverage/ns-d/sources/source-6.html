@@ -1,0 +1,150 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > NodeConfig</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network.nodemesh</a>
+</div>
+
+<h1>Coverage Summary for Class: NodeConfig (dev.droppinganvil.v3.network.nodemesh)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">NodeConfig</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    50%
+  </span>
+  <span class="absValue">
+    (1/2)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    95.7%
+  </span>
+  <span class="absValue">
+    (22/23)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2021. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network.nodemesh;
+&nbsp;
+<b class="nc">&nbsp;public class NodeConfig {</b>
+&nbsp;    /**
+&nbsp;     * Handles network input
+&nbsp;     */
+<b class="fc">&nbsp;    public static Integer iThreads = 2;</b>
+<b class="fc">&nbsp;    public static Integer pThreads = 10;</b>
+&nbsp;    /**
+&nbsp;     * Handles IO (Crypt)
+&nbsp;     */
+<b class="fc">&nbsp;    public static Integer ioThreads = 4;</b>
+<b class="fc">&nbsp;    public static final Integer rateLimit = 15;</b>
+<b class="fc">&nbsp;    public static final Integer rateLimitSleep = 1000;</b>
+<b class="fc">&nbsp;    public static boolean encryptAllResources = false;</b>
+<b class="fc">&nbsp;    public static boolean signAllResources = true;</b>
+&nbsp;    //
+<b class="fc">&nbsp;    public static Integer outputProcessorThreads = 4;  // Parallel OutputProcessor threads for CXHELLO/event processing</b>
+<b class="fc">&nbsp;    public static Long IO_THREAD_SLEEP = 5L;</b>
+<b class="fc">&nbsp;    public static Long ioSocketSleep = 5L;</b>
+<b class="fc">&nbsp;    public static Integer ioWriteByteBuffer = 20048;</b>
+<b class="fc">&nbsp;    public static Integer ioReadByteBuffer = 2048;</b>
+<b class="fc">&nbsp;    public static Integer ioReverseByteBuffer = 20048;</b>
+&nbsp;    //TODO
+<b class="fc">&nbsp;    public static Integer IO_INPUT_SKIP = 2048;</b>
+<b class="fc">&nbsp;    public static Integer IO_MAX_INPUT = 10000000;</b>
+<b class="fc">&nbsp;    public static boolean autoUpdate = true;</b>
+<b class="fc">&nbsp;    public static boolean revealVersion = true;</b>
+<b class="fc">&nbsp;    public static boolean supportUnavailableServices = false;</b>
+&nbsp;    //WHEN GETTING LOW LEVEL PROTOCOL ERRORS TRY THIS
+<b class="fc">&nbsp;    public static boolean devMode = true;</b>
+<b class="fc">&nbsp;    public static Double cxV = 0.1;</b>
+<b class="fc">&nbsp;    public static boolean DEBUG = false;</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Enable OUT-LOOP logging - Controls OutputProcessor iteration logging
+&nbsp;     * Shows every 100 iterations of the output processor loop
+&nbsp;     * Default: false (disabled to reduce log noise)
+&nbsp;     */
+<b class="fc">&nbsp;    public static boolean enableOutLoopLogging = false;</b>
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,237 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > RetryBundle</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network.nodemesh</a>
+</div>
+
+<h1>Coverage Summary for Class: RetryBundle (dev.droppinganvil.v3.network.nodemesh)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">RetryBundle</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (9/9)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    55%
+  </span>
+  <span class="absValue">
+    (22/40)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    80.6%
+  </span>
+  <span class="absValue">
+    (25/31)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2025. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network.nodemesh;
+&nbsp;
+&nbsp;/**
+&nbsp; * Wrapper for OutputBundle that tracks retry attempts and timing
+&nbsp; * Failed events are moved to retry queue instead of blocking main output queue
+&nbsp; */
+&nbsp;public class RetryBundle {
+&nbsp;    public final OutputBundle bundle;
+&nbsp;    public int retryCount;
+&nbsp;    public long nextRetryTime;
+&nbsp;    public final long firstAttemptTime;
+&nbsp;    public String lastError;
+&nbsp;    public boolean convertedToCXN;  // Track if we&#39;ve converted CXS → CXN fallback
+&nbsp;
+&nbsp;    // Retry configuration
+&nbsp;    public static final int MAX_RETRIES = 50;  // Never discard events, keep retrying
+&nbsp;    public static final long INITIAL_RETRY_DELAY_MS = 5000;  // 5 seconds
+&nbsp;    public static final double BACKOFF_MULTIPLIER = 4.0;     // Exponential backoff
+&nbsp;    public static final long MAX_RETRY_DELAY_MS = 300000;    // 5 minutes max
+&nbsp;
+&nbsp;    // CXS → CXN fallback configuration
+&nbsp;    public static final int CXS_TO_CXN_THRESHOLD = 3;  // After N CXS failures, fall back to CXN broadcast with E2E
+&nbsp;
+<b class="fc">&nbsp;    public RetryBundle(OutputBundle bundle) {</b>
+<b class="fc">&nbsp;        this.bundle = bundle;</b>
+<b class="fc">&nbsp;        this.retryCount = 0;</b>
+<b class="fc">&nbsp;        this.firstAttemptTime = System.currentTimeMillis();</b>
+<b class="fc">&nbsp;        this.nextRetryTime = System.currentTimeMillis() + INITIAL_RETRY_DELAY_MS;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Calculate next retry time using exponential backoff
+&nbsp;     */
+&nbsp;    public void scheduleNextRetry(String error) {
+<b class="fc">&nbsp;        this.retryCount++;</b>
+<b class="fc">&nbsp;        this.lastError = error;</b>
+&nbsp;
+&nbsp;        // Exponential backoff: 5s, 10s, 20s, 40s, 80s, max 5min
+<b class="fc">&nbsp;        long delay = (long) (INITIAL_RETRY_DELAY_MS * Math.pow(BACKOFF_MULTIPLIER, retryCount - 1));</b>
+<b class="fc">&nbsp;        delay = Math.min(delay, MAX_RETRY_DELAY_MS);</b>
+&nbsp;
+<b class="fc">&nbsp;        this.nextRetryTime = System.currentTimeMillis() + delay;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Check if this bundle should be retried
+&nbsp;     */
+&nbsp;    public boolean shouldRetry() {
+<b class="pc">&nbsp;        return retryCount &lt; MAX_RETRIES &amp;&amp; System.currentTimeMillis() &gt;= nextRetryTime;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Check if this bundle has exceeded max retries
+&nbsp;     */
+&nbsp;    public boolean hasExceededMaxRetries() {
+<b class="pc">&nbsp;        return retryCount &gt;= MAX_RETRIES;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Get event type for logging
+&nbsp;     */
+&nbsp;    public String getEventType() {
+<b class="pc">&nbsp;        if (bundle != null &amp;&amp; bundle.ne != null &amp;&amp; bundle.ne.eT != null) {</b>
+<b class="fc">&nbsp;            return bundle.ne.eT;</b>
+&nbsp;        }
+<b class="nc">&nbsp;        return &quot;UNKNOWN&quot;;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Get target address for logging
+&nbsp;     */
+&nbsp;    public String getTargetAddress() {
+<b class="pc">&nbsp;        if (bundle != null &amp;&amp; bundle.n != null &amp;&amp; bundle.n.addr != null) {</b>
+<b class="nc">&nbsp;            return bundle.n.addr;</b>
+&nbsp;        }
+<b class="fc">&nbsp;        return &quot;UNKNOWN&quot;;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Check if this bundle should be converted from CXS to CXN fallback
+&nbsp;     * After N failures on direct peer-to-peer (CXS), try network broadcast (CXN) with E2E
+&nbsp;     */
+&nbsp;    public boolean shouldConvertToCXN() {
+<b class="pc">&nbsp;        if (convertedToCXN) {</b>
+<b class="nc">&nbsp;            return false; // Already converted</b>
+&nbsp;        }
+<b class="fc">&nbsp;        if (retryCount &lt; CXS_TO_CXN_THRESHOLD) {</b>
+<b class="fc">&nbsp;            return false; // Not enough retries yet</b>
+&nbsp;        }
+<b class="pc">&nbsp;        if (bundle == null || bundle.ne == null || bundle.ne.p == null) {</b>
+<b class="nc">&nbsp;            return false; // Invalid bundle</b>
+&nbsp;        }
+&nbsp;        // Only convert CXS (peer-to-peer) events to CXN
+<b class="fc">&nbsp;        return &quot;CXS&quot;.equals(bundle.ne.p.scope);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Get target peer ID for E2E encryption when converting to CXN
+&nbsp;     */
+&nbsp;    public String getTargetPeerID() {
+<b class="pc">&nbsp;        if (bundle != null &amp;&amp; bundle.ne != null &amp;&amp; bundle.ne.p != null) {</b>
+<b class="fc">&nbsp;            return bundle.ne.p.cxID;</b>
+&nbsp;        }
+<b class="nc">&nbsp;        return null;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Get network ID for CXN fallback
+&nbsp;     */
+&nbsp;    public String getNetworkID() {
+<b class="pc">&nbsp;        if (bundle != null &amp;&amp; bundle.ne != null &amp;&amp; bundle.ne.p != null) {</b>
+<b class="fc">&nbsp;            return bundle.ne.p.network;</b>
+&nbsp;        }
+<b class="nc">&nbsp;        return &quot;CXNET&quot;; // Default to CXNET if not specified</b>
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,177 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > BaseStatus</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.utils.obj</a>
+</div>
+
+<h1>Coverage Summary for Class: BaseStatus (dev.droppinganvil.v3.utils.obj)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">BaseStatus</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    37.5%
+  </span>
+  <span class="absValue">
+    (3/8)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    68.8%
+  </span>
+  <span class="absValue">
+    (11/16)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;package dev.droppinganvil.v3.utils.obj;
+&nbsp;
+&nbsp;import java.util.HashSet;
+&nbsp;
+&nbsp;public class BaseStatus {
+&nbsp;    /**
+&nbsp;     * Provides framework for multithreading
+&nbsp;     */
+<b class="fc">&nbsp;    public IPXLock lockout = new IPXLock();</b>
+&nbsp;    /**
+&nbsp;     * Services being handled by the same api instance
+&nbsp;     */
+<b class="fc">&nbsp;    public static HashSet&lt;BaseStatus&gt; services = new HashSet&lt;&gt;();</b>
+&nbsp;    /**
+&nbsp;     * a1 should represent if the service has been started
+&nbsp;     * a2 should represent current status
+&nbsp;     */
+<b class="fc">&nbsp;    private Dualean active = new Dualean(false, false);</b>
+&nbsp;    /**
+&nbsp;     * Represents if a VM restart would be required to restart service.
+&nbsp;     * Cannot be changed from true.
+&nbsp;     */
+<b class="fc">&nbsp;    private boolean vmRestart = false;</b>
+&nbsp;    /**
+&nbsp;     * The service name to be displayed
+&nbsp;     */
+&nbsp;    public String serviceName;
+&nbsp;    /**
+&nbsp;     * Service category to be included in
+&nbsp;     */
+&nbsp;    public String serviceCategory;
+&nbsp;    /**
+&nbsp;     * Uses of the service per minute, the definition of &#39;use&#39; is very loose and should be considered when writing a service
+&nbsp;     */
+<b class="fc">&nbsp;    public Long usePerMinute = 0L;</b>
+&nbsp;    /**
+&nbsp;     * Total errors for instance
+&nbsp;     */
+<b class="fc">&nbsp;    public Integer failures = 0;</b>
+&nbsp;    /**
+&nbsp;     * When a self test is ran the result is left here
+&nbsp;     */
+<b class="fc">&nbsp;    public Boolean passTest = false;</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Base constructor
+&nbsp;     */
+<b class="fc">&nbsp;    public BaseStatus(String serviceName, String serviceCategory) {</b>
+<b class="fc">&nbsp;        this.serviceCategory = serviceCategory;</b>
+<b class="fc">&nbsp;        this.serviceName = serviceName;</b>
+&nbsp;
+&nbsp;    }
+&nbsp;
+&nbsp;    public boolean getStarted() {
+<b class="nc">&nbsp;        return active.a1;</b>
+&nbsp;    }
+&nbsp;    public boolean getRunning() {
+<b class="nc">&nbsp;        return active.a2;</b>
+&nbsp;    }
+&nbsp;    public boolean isVMPair() {
+<b class="nc">&nbsp;        return vmRestart;</b>
+&nbsp;    }
+&nbsp;    public void setVMPair() {
+<b class="fc">&nbsp;        vmRestart = true;</b>
+&nbsp;    }
+&nbsp;    public void setRunning(boolean b) {
+<b class="nc">&nbsp;        active.a2 = b;</b>
+&nbsp;    }
+&nbsp;    public void setStarted() {
+<b class="nc">&nbsp;        active.a1 = true;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

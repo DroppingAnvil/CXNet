@@ -1,0 +1,167 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > NetworkContainer</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network.events</a>
+</div>
+
+<h1>Coverage Summary for Class: NetworkContainer (dev.droppinganvil.v3.network.events)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">NetworkContainer</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (3/3)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2022. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network.events;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.network.CXPath;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.TransmitPref;
+&nbsp;
+&nbsp;import java.io.Serializable;
+&nbsp;
+&nbsp;/**
+&nbsp; * This data should not be E2E it must be P2P to work effectively
+&nbsp; *
+&nbsp; * CRYPTOGRAPHIC ARCHITECTURE NOTES:
+&nbsp; * - iD: Transmitter ID (changes with each relay hop)
+&nbsp; * - oD: Original creator ID (preserved through relays for permission checks)
+&nbsp; * - e: Signed NetworkEvent bytes (signature by original sender, preserved through relays)
+&nbsp; *
+&nbsp; * When relaying:
+&nbsp; * 1. New NetworkContainer created with iD = relay node&#39;s ID
+&nbsp; * 2. oD preserved from incoming container
+&nbsp; * 3. e (signed event bytes) preserved to maintain original signature
+&nbsp; * 4. NetworkContainer itself is re-signed by relay node
+&nbsp; */
+<b class="fc">&nbsp;public class NetworkContainer implements Serializable {</b>
+&nbsp;    public byte[] e;
+&nbsp;
+&nbsp;    public CXPath p;
+&nbsp;    /**
+&nbsp;     * This allows different serialization providers, for now all serialization has to match network containers provided method, per transmission
+&nbsp;     * Begin transition to NetworkEvent.m
+&nbsp;     */
+<b class="fc">&nbsp;    public String se = &quot;cxJSON1&quot;;</b>
+&nbsp;    /**
+&nbsp;     * Higher security mode - Not implemented, do not use
+&nbsp;     */
+<b class="fc">&nbsp;    public boolean s = false;</b>
+&nbsp;    /**
+&nbsp;     * Transmitter ID - the node who sent this container to us (changes on each relay hop)
+&nbsp;     * Will be null if s = true
+&nbsp;     */
+&nbsp;    public String iD;
+&nbsp;    /**
+&nbsp;     * Original sender ID - the node who created the event (preserved through relays)
+&nbsp;     * Used for permission checks and authentication
+&nbsp;     */
+&nbsp;    public String oD;
+&nbsp;    public TransmitPref tP;
+&nbsp;    public Double v;
+&nbsp;    public String tID;
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Time To Live (TTL) - Remaining relay hops for this event
+&nbsp;     * Decremented by 1 on each relay. When reaches 0, event is dropped (not relayed).
+&nbsp;     * Prevents infinite loops and controls broadcast propagation scope.
+&nbsp;     *
+&nbsp;     * Value comes from network&#39;s Configuration.defaultTTL when event is created.
+&nbsp;     */
+&nbsp;    public Integer ttl;
+&nbsp;
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

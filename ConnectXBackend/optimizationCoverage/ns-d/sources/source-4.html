@@ -1,0 +1,579 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > LANScanner</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network.nodemesh</a>
+</div>
+
+<h1>Coverage Summary for Class: LANScanner (dev.droppinganvil.v3.network.nodemesh)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">LANScanner</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    76.5%
+  </span>
+  <span class="absValue">
+    (13/17)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    61.3%
+  </span>
+  <span class="absValue">
+    (65/106)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    75%
+  </span>
+  <span class="absValue">
+    (141/188)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;package dev.droppinganvil.v3.network.nodemesh;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.Configuration;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.edge.DataContainer;
+&nbsp;import dev.droppinganvil.v3.network.events.EventType;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkEvent;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkContainer;
+&nbsp;
+&nbsp;import java.io.IOException;
+&nbsp;import java.net.*;
+&nbsp;import java.util.*;
+&nbsp;import java.util.concurrent.atomic.AtomicInteger;
+&nbsp;import java.util.Iterator;
+&nbsp;
+&nbsp;/**
+&nbsp; * LAN Scanner for active local peer discovery
+&nbsp; * Scans the local network to find peers on the same subnet
+&nbsp; * Enables direct P2P communication and firewall traversal
+&nbsp; */
+&nbsp;public class LANScanner {
+&nbsp;    private final ConnectX connectX;
+&nbsp;    private final int primaryPort;
+<b class="fc">&nbsp;    private final AtomicInteger discovered = new AtomicInteger(0);</b>
+<b class="fc">&nbsp;    private volatile boolean scanning = false;</b>
+&nbsp;
+&nbsp;    // Track CXHELLO sockets for cleanup
+<b class="fc">&nbsp;    private final java.util.Map&lt;Socket, Long&gt; activeCXHELLOSockets = new java.util.concurrent.ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;    private static final long SOCKET_TIMEOUT_MS = 5000; // Close sockets after 5 seconds
+&nbsp;
+&nbsp;    // Port range to scan (default: 49152-49162 = 10 ports)
+&nbsp;    private static final int PORT_RANGE_START = 49152;
+&nbsp;    private static final int PORT_RANGE_END = 49162;
+&nbsp;
+&nbsp;    // Common ConnectX ports to check
+<b class="fc">&nbsp;    private static final int[] COMMON_PORTS = {</b>
+&nbsp;        49152, 49153, 49154, 49155, 49156,  // Default range
+&nbsp;        8080, 8081, 8082, 8083, 8084,        // HTTP test ports
+&nbsp;        50000, 50001, 50002                  // Alternative range
+&nbsp;    };
+&nbsp;
+<b class="fc">&nbsp;    public LANScanner(ConnectX connectX, int primaryPort) {</b>
+<b class="fc">&nbsp;        this.connectX = connectX;</b>
+<b class="fc">&nbsp;        this.primaryPort = primaryPort;</b>
+&nbsp;
+&nbsp;        // Start automatic socket cleanup thread
+<b class="fc">&nbsp;        Thread cleanupThread = new Thread(() -&gt; {</b>
+&nbsp;            while (true) {
+&nbsp;                try {
+<b class="fc">&nbsp;                    Thread.sleep(1000); // Check every second</b>
+<b class="fc">&nbsp;                    cleanupCXHELLOSockets();</b>
+&nbsp;                } catch (InterruptedException e) {
+&nbsp;                    break;
+&nbsp;                }
+&nbsp;            }
+&nbsp;        });
+<b class="fc">&nbsp;        cleanupThread.setName(&quot;LAN-Scanner-Cleanup&quot;);</b>
+<b class="fc">&nbsp;        cleanupThread.setDaemon(true);</b>
+<b class="fc">&nbsp;        cleanupThread.start();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Get local IP address (non-loopback, IPv4)
+&nbsp;     */
+&nbsp;    public static String getLocalIP() {
+&nbsp;        try {
+<b class="fc">&nbsp;            Enumeration&lt;NetworkInterface&gt; interfaces = NetworkInterface.getNetworkInterfaces();</b>
+<b class="pc">&nbsp;            while (interfaces.hasMoreElements()) {</b>
+<b class="fc">&nbsp;                NetworkInterface iface = interfaces.nextElement();</b>
+&nbsp;
+&nbsp;                // Skip loopback and inactive interfaces
+<b class="fc">&nbsp;                if (iface.isLoopback() || !iface.isUp()) {</b>
+&nbsp;                    continue;
+&nbsp;                }
+&nbsp;
+<b class="fc">&nbsp;                Enumeration&lt;InetAddress&gt; addresses = iface.getInetAddresses();</b>
+<b class="pc">&nbsp;                while (addresses.hasMoreElements()) {</b>
+<b class="fc">&nbsp;                    InetAddress addr = addresses.nextElement();</b>
+&nbsp;
+&nbsp;                    // Only IPv4 addresses, skip loopback
+<b class="pc">&nbsp;                    if (addr instanceof Inet4Address &amp;&amp; !addr.isLoopbackAddress()) {</b>
+<b class="fc">&nbsp;                        return addr.getHostAddress();</b>
+&nbsp;                    }
+&nbsp;                }
+&nbsp;            }
+&nbsp;        } catch (SocketException e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[LAN Scanner] Error getting local IP: &quot; + e.getMessage());</b>
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        return null;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Get subnet mask for an IP address (CIDR notation)
+&nbsp;     */
+&nbsp;    public static int getSubnetMask(String ipAddress) {
+&nbsp;        try {
+<b class="fc">&nbsp;            InetAddress localHost = InetAddress.getByName(ipAddress);</b>
+<b class="fc">&nbsp;            NetworkInterface networkInterface = NetworkInterface.getByInetAddress(localHost);</b>
+&nbsp;
+<b class="pc">&nbsp;            if (networkInterface != null) {</b>
+<b class="pc">&nbsp;                for (InterfaceAddress address : networkInterface.getInterfaceAddresses()) {</b>
+<b class="pc">&nbsp;                    if (address.getAddress().equals(localHost)) {</b>
+<b class="fc">&nbsp;                        return address.getNetworkPrefixLength();</b>
+&nbsp;                    }
+&nbsp;                }
+&nbsp;            }
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[LAN Scanner] Error getting subnet mask: &quot; + e.getMessage());</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Default to /24 (255.255.255.0)
+<b class="nc">&nbsp;        return 24;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Calculate IP range from base IP and subnet mask
+&nbsp;     */
+&nbsp;    public static List&lt;String&gt; getIPRange(String baseIP, int subnetMask) {
+<b class="fc">&nbsp;        List&lt;String&gt; ipList = new ArrayList&lt;&gt;();</b>
+&nbsp;
+&nbsp;        try {
+<b class="fc">&nbsp;            String[] parts = baseIP.split(&quot;\\.&quot;);</b>
+<b class="pc">&nbsp;            if (parts.length != 4) return ipList;</b>
+&nbsp;
+<b class="fc">&nbsp;            int ipInt = 0;</b>
+<b class="fc">&nbsp;            for (int i = 0; i &lt; 4; i++) {</b>
+<b class="fc">&nbsp;                ipInt |= (Integer.parseInt(parts[i]) &lt;&lt; (24 - (8 * i)));</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Calculate network address
+<b class="fc">&nbsp;            int mask = 0xFFFFFFFF &lt;&lt; (32 - subnetMask);</b>
+<b class="fc">&nbsp;            int network = ipInt &amp; mask;</b>
+<b class="fc">&nbsp;            int hostBits = 32 - subnetMask;</b>
+<b class="fc">&nbsp;            int numHosts = (1 &lt;&lt; hostBits) - 2; // Exclude network and broadcast</b>
+&nbsp;
+&nbsp;            // Generate all host IPs in range (limit to 254 for performance)
+<b class="fc">&nbsp;            int maxToScan = Math.min(numHosts, 254);</b>
+<b class="fc">&nbsp;            for (int i = 1; i &lt;= maxToScan; i++) {</b>
+<b class="fc">&nbsp;                int hostIP = network + i;</b>
+<b class="fc">&nbsp;                String ip = String.format(&quot;%d.%d.%d.%d&quot;,</b>
+<b class="fc">&nbsp;                    (hostIP &gt;&gt; 24) &amp; 0xFF,</b>
+<b class="fc">&nbsp;                    (hostIP &gt;&gt; 16) &amp; 0xFF,</b>
+<b class="fc">&nbsp;                    (hostIP &gt;&gt; 8) &amp; 0xFF,</b>
+<b class="fc">&nbsp;                    hostIP &amp; 0xFF</b>
+&nbsp;                );
+<b class="fc">&nbsp;                ipList.add(ip);</b>
+&nbsp;            }
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[LAN Scanner] Error calculating IP range: &quot; + e.getMessage());</b>
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        return ipList;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Check if a host is reachable on a specific port
+&nbsp;     */
+&nbsp;    private boolean isHostReachable(String ip, int port) {
+<b class="fc">&nbsp;        try (Socket socket = new Socket()) {</b>
+<b class="fc">&nbsp;            socket.connect(new InetSocketAddress(ip, port), 200); // 200ms timeout per port</b>
+<b class="fc">&nbsp;            return true;</b>
+&nbsp;        } catch (IOException e) {
+<b class="fc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Scan an IP for ConnectX peers on all common ports
+&nbsp;     * Returns the port number if found, or -1 if not found
+&nbsp;     */
+&nbsp;    private int findPeerPort(String ip) {
+<b class="fc">&nbsp;        String localIP = getLocalIP();</b>
+&nbsp;
+&nbsp;        // First check the primary port (most likely) on remote IPs only
+&nbsp;        // On our own IP or localhost, we&#39;ll check it via COMMON_PORTS loop (which allows skipping our own port)
+<b class="fc">&nbsp;        boolean isOwnIP = ip.equals(localIP) || ip.equals(&quot;127.0.0.1&quot;);</b>
+<b class="fc">&nbsp;        if (!isOwnIP) {  // Only check primaryPort on remote IPs</b>
+<b class="pc">&nbsp;            if (isHostReachable(ip, primaryPort)) {</b>
+<b class="nc">&nbsp;                return primaryPort;</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+&nbsp;        // Then check all common ports
+<b class="fc">&nbsp;        for (int port : COMMON_PORTS) {</b>
+&nbsp;            // Skip our own port on our own IP or localhost
+<b class="fc">&nbsp;            if ((ip.equals(localIP) || ip.equals(&quot;127.0.0.1&quot;)) &amp;&amp; port == primaryPort) {</b>
+&nbsp;                continue;
+&nbsp;            }
+&nbsp;
+<b class="fc">&nbsp;            if (isHostReachable(ip, port)) {</b>
+<b class="fc">&nbsp;                return port;</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        return -1; // Not found on any port</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Send CXHELLO to discover a peer
+&nbsp;     * IMPORTANT: Uses NEWNODE manual pattern for direct transmission to unknown peers
+&nbsp;     * This bypasses buildEvent() API because we don&#39;t have peer ID yet (can&#39;t use CXS routing)
+&nbsp;     * Instead relies on direct transmission fallback in OutConnectionController (line 252-266)
+&nbsp;     * which checks out.n != null &amp;&amp; out.n.addr != null
+&nbsp;     *
+&nbsp;     * Sends Node as SIGNED BLOB to enable .cxi persistence on receiver
+&nbsp;     */
+&nbsp;    private void sendCXHELLO(String targetIP, int targetPort) {
+&nbsp;        // Skip if target resolves to our own listening socket
+&nbsp;        // Match on IP + port: same IP and same P2P port = us
+<b class="pc">&nbsp;        if (connectX.nodeMesh != null &amp;&amp; connectX.nodeMesh.in != null</b>
+&nbsp;                &amp;&amp; connectX.nodeMesh.in.serverSocket != null) {
+<b class="fc">&nbsp;            int ownPort = connectX.nodeMesh.in.serverSocket.getLocalPort();</b>
+<b class="pc">&nbsp;            if (targetPort == ownPort) {</b>
+<b class="nc">&nbsp;                String localIP = getLocalIP();</b>
+<b class="nc">&nbsp;                if (targetIP.equals(localIP) || targetIP.equals(&quot;127.0.0.1&quot;)) {</b>
+<b class="nc">&nbsp;                    if (NodeConfig.DEBUG)</b>
+<b class="nc">&nbsp;                        System.out.println(&quot;[LAN Scanner] Skipping own P2P address &quot; + targetIP + &quot;:&quot; + targetPort);</b>
+&nbsp;                    return;
+&nbsp;                }
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+&nbsp;        try {
+&nbsp;            // Sign our Node object for .cxi persistence on receiver
+<b class="fc">&nbsp;            String nodeJson = ConnectX.serialize(&quot;cxJSON1&quot;, connectX.getSelf());</b>
+<b class="fc">&nbsp;            java.io.ByteArrayInputStream nodeInput = new java.io.ByteArrayInputStream(nodeJson.getBytes(&quot;UTF-8&quot;));</b>
+<b class="fc">&nbsp;            java.io.ByteArrayOutputStream signedNodeOutput = new java.io.ByteArrayOutputStream();</b>
+<b class="fc">&nbsp;            connectX.encryptionProvider.sign(nodeInput, signedNodeOutput);</b>
+&nbsp;            nodeInput.close();
+<b class="fc">&nbsp;            byte[] signedNodeBlob = signedNodeOutput.toByteArray();</b>
+&nbsp;            signedNodeOutput.close();
+&nbsp;
+&nbsp;            // Create CXHELLO payload using CXHello data structure
+&nbsp;            // Include peer&#39;s preferred address if available (for NAT/public IP scenarios)
+<b class="pc">&nbsp;            String peerAddress = (connectX.getSelf() != null) ? connectX.getSelf().addr : null;</b>
+<b class="fc">&nbsp;            dev.droppinganvil.v3.network.events.CXHello helloPayload =</b>
+<b class="fc">&nbsp;                new dev.droppinganvil.v3.network.events.CXHello(connectX.getOwnID(), primaryPort, signedNodeBlob, peerAddress);</b>
+&nbsp;
+<b class="fc">&nbsp;            String payloadJson = ConnectX.serialize(&quot;cxJSON1&quot;, helloPayload);</b>
+&nbsp;
+&nbsp;            // Sign the CXHELLO payload for consistency with CXHELLO_RESPONSE
+<b class="fc">&nbsp;            java.io.ByteArrayInputStream payloadInput = new java.io.ByteArrayInputStream(payloadJson.getBytes(&quot;UTF-8&quot;));</b>
+<b class="fc">&nbsp;            java.io.ByteArrayOutputStream signedPayloadOutput = new java.io.ByteArrayOutputStream();</b>
+<b class="fc">&nbsp;            connectX.encryptionProvider.sign(payloadInput, signedPayloadOutput);</b>
+&nbsp;            payloadInput.close();
+<b class="fc">&nbsp;            byte[] signedPayload = signedPayloadOutput.toByteArray();</b>
+&nbsp;            signedPayloadOutput.close();
+&nbsp;
+&nbsp;            // Manually create NetworkEvent (like NEWNODE bootstrap pattern)
+<b class="fc">&nbsp;            NetworkEvent helloEvent = new NetworkEvent(EventType.CXHELLO, signedPayload);</b>
+<b class="fc">&nbsp;            helloEvent.eT = EventType.CXHELLO.name();</b>
+<b class="fc">&nbsp;            helloEvent.iD = java.util.UUID.randomUUID().toString();</b>
+&nbsp;            // DON&#39;T set event.p (Permission/CXPath) - leave null for direct transmission fallback
+&nbsp;
+&nbsp;            // Create target node with address only (no peer ID known yet)
+<b class="fc">&nbsp;            Node targetNode = new Node();</b>
+<b class="fc">&nbsp;            targetNode.addr = targetIP + &quot;:&quot; + targetPort;</b>
+&nbsp;
+&nbsp;            // Manually create NetworkContainer
+<b class="fc">&nbsp;            NetworkContainer nc = new NetworkContainer();</b>
+<b class="fc">&nbsp;            nc.se = &quot;cxJSON1&quot;;</b>
+<b class="fc">&nbsp;            nc.s = false;  // Not E2E encrypted</b>
+<b class="fc">&nbsp;            nc.iD = connectX.getSelf().cxID;  // Set sender ID (like NewNode)</b>
+&nbsp;
+&nbsp;            // Create OutputBundle directly (bypassing buildEvent) - follows NEWNODE pattern
+<b class="fc">&nbsp;            OutputBundle bundle = new OutputBundle(helloEvent, targetNode, null, null, nc);</b>
+<b class="fc">&nbsp;            connectX.queueEvent(bundle);</b>
+&nbsp;
+<b class="fc">&nbsp;            System.out.println(&quot;[LAN Scanner] Queued CXHELLO for &quot; + targetIP + &quot;:&quot; + targetPort);</b>
+&nbsp;
+&nbsp;        } catch (Exception e) {
+&nbsp;            // Failed to send, skip (normal for non-ConnectX hosts)
+<b class="nc">&nbsp;            System.err.println(&quot;[LAN Scanner] Failed to send CXHELLO to &quot; + targetIP + &quot;:&quot; + targetPort + &quot; - &quot; + e.getMessage());</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Cleanup old CXHELLO sockets that have timed out
+&nbsp;     */
+&nbsp;    private void cleanupCXHELLOSockets() {
+<b class="fc">&nbsp;        long now = System.currentTimeMillis();</b>
+<b class="fc">&nbsp;        Iterator&lt;Map.Entry&lt;Socket, Long&gt;&gt; iterator = activeCXHELLOSockets.entrySet().iterator();</b>
+<b class="pc">&nbsp;        while (iterator.hasNext()) {</b>
+<b class="nc">&nbsp;            Map.Entry&lt;Socket, Long&gt; entry = iterator.next();</b>
+<b class="nc">&nbsp;            if (now - entry.getValue() &gt; SOCKET_TIMEOUT_MS) {</b>
+&nbsp;                try {
+<b class="nc">&nbsp;                    entry.getKey().close();</b>
+&nbsp;                } catch (Exception ignored) {}
+<b class="nc">&nbsp;                iterator.remove();</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Scan the local network for peers
+&nbsp;     */
+&nbsp;    public void scanNetwork() {
+<b class="pc">&nbsp;        if (scanning) {</b>
+<b class="nc">&nbsp;            System.out.println(&quot;[LAN Scanner] Scan already in progress&quot;);</b>
+&nbsp;            return;
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        Thread scanThread = new Thread(() -&gt; {</b>
+<b class="fc">&nbsp;            scanning = true;</b>
+<b class="fc">&nbsp;            discovered.set(0);</b>
+&nbsp;
+<b class="pc">&nbsp;            if (NodeConfig.DEBUG) System.out.println(&quot;\n[LAN Scanner] ========================================&quot;);</b>
+<b class="pc">&nbsp;            if (NodeConfig.DEBUG) System.out.println(&quot;[LAN Scanner] Starting active LAN peer discovery...&quot;);</b>
+<b class="pc">&nbsp;            if (NodeConfig.DEBUG) System.out.println(&quot;[LAN Scanner] ========================================&quot;);</b>
+&nbsp;
+<b class="fc">&nbsp;            String localIP = getLocalIP();</b>
+<b class="pc">&nbsp;            if (localIP == null) {</b>
+<b class="nc">&nbsp;                System.err.println(&quot;[LAN Scanner] Unable to determine local IP address&quot;);</b>
+<b class="nc">&nbsp;                scanning = false;</b>
+&nbsp;                return;
+&nbsp;            }
+&nbsp;
+<b class="fc">&nbsp;            int subnetMask = getSubnetMask(localIP);</b>
+<b class="pc">&nbsp;            if (NodeConfig.DEBUG) System.out.println(&quot;[LAN Scanner] Local IP: &quot; + localIP + &quot;/&quot; + subnetMask);</b>
+&nbsp;
+<b class="fc">&nbsp;            List&lt;String&gt; ipRange = getIPRange(localIP, subnetMask);</b>
+&nbsp;
+&nbsp;            // IMPORTANT: Also scan localhost (127.0.0.1) for same-machine peers
+&nbsp;            // This enables testing and supports multiple instances on same server
+<b class="pc">&nbsp;            if (!ipRange.contains(&quot;127.0.0.1&quot;)) {</b>
+<b class="fc">&nbsp;                ipRange.add(0, &quot;127.0.0.1&quot;);  // Add at beginning for priority</b>
+<b class="pc">&nbsp;                if (NodeConfig.DEBUG) System.out.println(&quot;[LAN Scanner] Added localhost (127.0.0.1) to scan range&quot;);</b>
+&nbsp;            }
+&nbsp;
+<b class="pc">&nbsp;            if (NodeConfig.DEBUG) System.out.println(&quot;[LAN Scanner] Scanning &quot; + ipRange.size() + &quot; addresses...&quot;);</b>
+<b class="pc">&nbsp;            if (NodeConfig.DEBUG) System.out.println(&quot;[LAN Scanner] Checking &quot; + (COMMON_PORTS.length + 1) + &quot; ports per host&quot;);</b>
+<b class="pc">&nbsp;            if (NodeConfig.DEBUG) System.out.println(&quot;[LAN Scanner] Primary port: &quot; + primaryPort);</b>
+&nbsp;
+<b class="fc">&nbsp;            AtomicInteger progress = new AtomicInteger(0);</b>
+<b class="fc">&nbsp;            List&lt;Thread&gt; scanThreads = new ArrayList&lt;&gt;();</b>
+&nbsp;
+<b class="fc">&nbsp;            for (String ip : ipRange) {</b>
+<b class="fc">&nbsp;                Thread scanner = new Thread(() -&gt; {</b>
+&nbsp;                    // Scan all common ports for this IP (findPeerPort already skips our own port)
+<b class="fc">&nbsp;                    int foundPort = findPeerPort(ip);</b>
+&nbsp;
+<b class="fc">&nbsp;                    if (foundPort != -1) {</b>
+<b class="fc">&nbsp;                        System.out.println(&quot;[LAN Scanner] ✓ Found active peer at &quot; + ip + &quot;:&quot; + foundPort);</b>
+&nbsp;                        //TODO is foundPort correct????
+<b class="fc">&nbsp;                        sendCXHELLO(ip, foundPort);</b>
+<b class="fc">&nbsp;                        discovered.incrementAndGet();</b>
+&nbsp;                    }
+&nbsp;
+<b class="fc">&nbsp;                    int p = progress.incrementAndGet();</b>
+<b class="fc">&nbsp;                    if (p % 25 == 0 || p == ipRange.size()) {</b>
+<b class="pc">&nbsp;                        if (NodeConfig.DEBUG) System.out.println(&quot;[LAN Scanner] Progress: &quot; + p + &quot;/&quot; + ipRange.size() +</b>
+<b class="nc">&nbsp;                                         &quot; (&quot; + discovered.get() + &quot; discovered)&quot;);</b>
+&nbsp;                    }
+&nbsp;                });
+&nbsp;
+<b class="fc">&nbsp;                scanThreads.add(scanner);</b>
+<b class="fc">&nbsp;                scanner.start();</b>
+&nbsp;
+&nbsp;                // Limit concurrent threads (reduced because we&#39;re checking multiple ports per host)
+<b class="fc">&nbsp;                if (scanThreads.size() &gt;= 20) {</b>
+<b class="fc">&nbsp;                    for (Thread t : scanThreads) {</b>
+&nbsp;                        try {
+<b class="fc">&nbsp;                            t.join();</b>
+&nbsp;                        } catch (InterruptedException e) {
+<b class="nc">&nbsp;                            Thread.currentThread().interrupt();</b>
+&nbsp;                        }
+&nbsp;                    }
+<b class="fc">&nbsp;                    scanThreads.clear();</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;
+&nbsp;            // Wait for remaining threads
+<b class="fc">&nbsp;            for (Thread t : scanThreads) {</b>
+&nbsp;                try {
+<b class="fc">&nbsp;                    t.join();</b>
+&nbsp;                } catch (InterruptedException e) {
+<b class="nc">&nbsp;                    Thread.currentThread().interrupt();</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;
+<b class="fc">&nbsp;            System.out.println(&quot;\n[LAN Scanner] ========================================&quot;);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;[LAN Scanner] Scan complete!&quot;);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;[LAN Scanner] Found &quot; + discovered.get() + &quot; active peers on local network&quot;);</b>
+<b class="pc">&nbsp;            if (NodeConfig.DEBUG) System.out.println(&quot;[LAN Scanner] Total peers in DataContainer: &quot; +</b>
+<b class="nc">&nbsp;                             connectX.dataContainer.getAllLocalPeerAddresses().size());</b>
+<b class="fc">&nbsp;            System.out.println(&quot;[LAN Scanner] ========================================\n&quot;);</b>
+&nbsp;
+&nbsp;            // Set ConnectX state to READY - signals that P2P discovery has completed
+<b class="fc">&nbsp;            connectX.state = dev.droppinganvil.v3.State.READY;</b>
+<b class="pc">&nbsp;            if (NodeConfig.DEBUG) System.out.println(&quot;[LAN Scanner] Network state set to READY&quot;);</b>
+&nbsp;
+<b class="fc">&nbsp;            scanning = false;</b>
+&nbsp;        });
+&nbsp;
+<b class="fc">&nbsp;        scanThread.setName(&quot;LAN-Scanner-Thread&quot;);</b>
+<b class="fc">&nbsp;        scanThread.setDaemon(true);</b>
+<b class="fc">&nbsp;        scanThread.start();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Broadcast CXHELLO to local network (UDP broadcast)
+&nbsp;     * Alternative to full scan - faster but less reliable
+&nbsp;     */
+&nbsp;    public void broadcastHello() {
+<b class="nc">&nbsp;        Thread broadcastThread = new Thread(() -&gt; {</b>
+&nbsp;            try {
+<b class="nc">&nbsp;                System.out.println(&quot;[LAN Scanner] Broadcasting CXHELLO to local network...&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;                DatagramSocket socket = new DatagramSocket();</b>
+<b class="nc">&nbsp;                socket.setBroadcast(true);</b>
+&nbsp;
+&nbsp;                // Create CXHELLO payload
+<b class="nc">&nbsp;                Map&lt;String, Object&gt; payload = new HashMap&lt;&gt;();</b>
+<b class="nc">&nbsp;                payload.put(&quot;peerID&quot;, connectX.getOwnID());</b>
+<b class="nc">&nbsp;                payload.put(&quot;port&quot;, primaryPort);</b>
+<b class="nc">&nbsp;                payload.put(&quot;broadcast&quot;, true);</b>
+&nbsp;
+<b class="nc">&nbsp;                String payloadJson = ConnectX.serialize(&quot;cxJSON1&quot;, payload);</b>
+<b class="nc">&nbsp;                byte[] data = payloadJson.getBytes(&quot;UTF-8&quot;);</b>
+&nbsp;
+&nbsp;                // Broadcast to subnet
+<b class="nc">&nbsp;                String localIP = getLocalIP();</b>
+<b class="nc">&nbsp;                if (localIP != null) {</b>
+<b class="nc">&nbsp;                    String[] parts = localIP.split(&quot;\\.&quot;);</b>
+<b class="nc">&nbsp;                    String broadcastIP = parts[0] + &quot;.&quot; + parts[1] + &quot;.&quot; + parts[2] + &quot;.255&quot;;</b>
+&nbsp;
+<b class="nc">&nbsp;                    InetAddress group = InetAddress.getByName(broadcastIP);</b>
+&nbsp;
+&nbsp;                    // Broadcast to all common ports
+<b class="nc">&nbsp;                    for (int port : COMMON_PORTS) {</b>
+<b class="nc">&nbsp;                        DatagramPacket packet = new DatagramPacket(data, data.length, group, port);</b>
+<b class="nc">&nbsp;                        socket.send(packet);</b>
+&nbsp;                    }
+&nbsp;
+<b class="nc">&nbsp;                    System.out.println(&quot;[LAN Scanner] Broadcast sent to &quot; + broadcastIP + &quot; on &quot; + COMMON_PORTS.length + &quot; ports&quot;);</b>
+&nbsp;                }
+&nbsp;
+&nbsp;                socket.close();
+&nbsp;            } catch (Exception e) {
+<b class="nc">&nbsp;                System.err.println(&quot;[LAN Scanner] Broadcast failed: &quot; + e.getMessage());</b>
+&nbsp;            }
+&nbsp;        });
+&nbsp;
+<b class="nc">&nbsp;        broadcastThread.setName(&quot;LAN-Broadcast-Thread&quot;);</b>
+<b class="nc">&nbsp;        broadcastThread.setDaemon(true);</b>
+<b class="nc">&nbsp;        broadcastThread.start();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Get number of discovered peers
+&nbsp;     */
+&nbsp;    public int getDiscoveredCount() {
+<b class="nc">&nbsp;        return discovered.get();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Check if scan is in progress
+&nbsp;     */
+&nbsp;    public boolean isScanning() {
+<b class="nc">&nbsp;        return scanning;</b>
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

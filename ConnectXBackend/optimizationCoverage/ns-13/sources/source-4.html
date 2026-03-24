@@ -1,0 +1,184 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > CXPeer3Test</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.test</a>
+</div>
+
+<h1>Coverage Summary for Class: CXPeer3Test (dev.droppinganvil.v3.test)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">CXPeer3Test</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    66.7%
+  </span>
+  <span class="absValue">
+    (2/3)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    96.8%
+  </span>
+  <span class="absValue">
+    (30/31)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2026. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.test;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.network.events.EventType;
+&nbsp;import dev.droppinganvil.v3.network.events.NodeModeration;
+&nbsp;import dev.droppinganvil.v3.network.events.NodeRegistration;
+&nbsp;import dev.droppinganvil.v3.network.events.PermissionChange;
+&nbsp;import dev.droppinganvil.v3.network.events.BlockExchange;
+&nbsp;import dev.droppinganvil.v3.network.events.ChainStatus;
+&nbsp;import dev.droppinganvil.v3.network.events.SeedExchange;
+&nbsp;import dev.droppinganvil.v3.network.events.ZeroTrustActivation;
+&nbsp;/**
+&nbsp; * This class exist to test the ease of use of ConnectX API as well as test networking functionality
+&nbsp; * Peer3 will be created or loaded send message &quot;1234&quot; to 01
+&nbsp; */
+<b class="nc">&nbsp;public class CXPeer3Test {</b>
+<b class="fc">&nbsp;    public static ConnectX peer3 = null;</b>
+&nbsp;    public static void main(String... args) throws Exception {
+<b class="fc">&nbsp;        peer3 = new ConnectX(&quot;CX-PEER3&quot;, 49158, &quot;03006000-0400-0500-0000-007000000001&quot;, &quot;Peer3&quot;);</b>
+<b class="fc">&nbsp;        peer3.updateHTTPBridgePort(8081);</b>
+<b class="fc">&nbsp;        peer3.setPublicBridgeAddress(&quot;cxHTTP1&quot;, &quot;https://cx7.anvildevelopment.us/cx&quot;);</b>
+<b class="fc">&nbsp;        peer3.buildEvent(EventType.MESSAGE, &quot;1234&quot;.getBytes(&quot;UTF-8&quot;)).toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;).signData().queue();</b>
+&nbsp;
+&nbsp;        // BLOCK_NODE test - block a node on CXNET
+<b class="fc">&nbsp;        String targetNode = &quot;02000000-0000-0000-0000-000000000001&quot;;</b>
+<b class="fc">&nbsp;        NodeModeration block = new NodeModeration(&quot;CXNET&quot;, targetNode, &quot;peer3 test block&quot;);</b>
+<b class="fc">&nbsp;        peer3.buildEvent(EventType.BLOCK_NODE, ConnectX.serialize(&quot;cxJSON1&quot;, block).getBytes(&quot;UTF-8&quot;))</b>
+<b class="fc">&nbsp;            .toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;).signData().queue();</b>
+&nbsp;
+&nbsp;        // UNBLOCK_NODE test - reverse the block
+<b class="fc">&nbsp;        NodeModeration unblock = new NodeModeration(&quot;CXNET&quot;, targetNode, null);</b>
+<b class="fc">&nbsp;        peer3.buildEvent(EventType.UNBLOCK_NODE, ConnectX.serialize(&quot;cxJSON1&quot;, unblock).getBytes(&quot;UTF-8&quot;))</b>
+<b class="fc">&nbsp;            .toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;).signData().queue();</b>
+&nbsp;
+&nbsp;        // REGISTER_NODE test
+<b class="fc">&nbsp;        NodeRegistration register = new NodeRegistration(&quot;CXNET&quot;, targetNode, peer3.getOwnID());</b>
+<b class="fc">&nbsp;        peer3.buildEvent(EventType.REGISTER_NODE, ConnectX.serialize(&quot;cxJSON1&quot;, register).getBytes(&quot;UTF-8&quot;))</b>
+<b class="fc">&nbsp;            .toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;).signData().queue();</b>
+&nbsp;
+&nbsp;        // GRANT_PERMISSION test
+<b class="fc">&nbsp;        PermissionChange grant = new PermissionChange(&quot;CXNET&quot;, targetNode, &quot;Record&quot;, 3L, 10);</b>
+<b class="fc">&nbsp;        peer3.buildEvent(EventType.GRANT_PERMISSION, ConnectX.serialize(&quot;cxJSON1&quot;, grant).getBytes(&quot;UTF-8&quot;))</b>
+<b class="fc">&nbsp;            .toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;).signData().queue();</b>
+&nbsp;
+&nbsp;        // REVOKE_PERMISSION test - same fields, priority left null
+<b class="fc">&nbsp;        PermissionChange revoke = new PermissionChange(&quot;CXNET&quot;, targetNode, &quot;Record&quot;, 3L, null);</b>
+<b class="fc">&nbsp;        peer3.buildEvent(EventType.REVOKE_PERMISSION, ConnectX.serialize(&quot;cxJSON1&quot;, revoke).getBytes(&quot;UTF-8&quot;))</b>
+<b class="fc">&nbsp;            .toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;).signData().queue();</b>
+&nbsp;
+&nbsp;        // SEED_REQUEST test
+<b class="fc">&nbsp;        peer3.buildEvent(EventType.SEED_REQUEST, ConnectX.serialize(&quot;cxJSON1&quot;, new SeedExchange(&quot;CXNET&quot;)).getBytes(&quot;UTF-8&quot;))</b>
+<b class="fc">&nbsp;            .toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;).signData().queue();</b>
+&nbsp;
+&nbsp;        // CHAIN_STATUS_REQUEST test
+<b class="fc">&nbsp;        peer3.buildEvent(EventType.CHAIN_STATUS_REQUEST, ConnectX.serialize(&quot;cxJSON1&quot;, new ChainStatus(&quot;CXNET&quot;)).getBytes(&quot;UTF-8&quot;))</b>
+<b class="fc">&nbsp;            .toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;).signData().queue();</b>
+&nbsp;
+&nbsp;        // BLOCK_REQUEST test
+<b class="fc">&nbsp;        peer3.buildEvent(EventType.BLOCK_REQUEST, ConnectX.serialize(&quot;cxJSON1&quot;, new BlockExchange(&quot;CXNET&quot;, 1L, 0L)).getBytes(&quot;UTF-8&quot;))</b>
+<b class="fc">&nbsp;            .toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;).signData().queue();</b>
+&nbsp;
+&nbsp;        // ZERO_TRUST_ACTIVATION test - disabled, do not fire against live network
+&nbsp;        if (false) {
+&nbsp;            ZeroTrustActivation zt = new ZeroTrustActivation(&quot;CXNET&quot;, System.currentTimeMillis(), null);
+&nbsp;            peer3.buildEvent(EventType.ZERO_TRUST_ACTIVATION, ConnectX.serialize(&quot;cxJSON1&quot;, zt).getBytes(&quot;UTF-8&quot;))
+&nbsp;                .toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;).signData().queue();
+&nbsp;        }
+&nbsp;        // E2E Test - to 01
+<b class="fc">&nbsp;        peer3.buildEvent(EventType.MESSAGE, &quot;12345677890&quot;.getBytes(&quot;UTF-8&quot;)).addRecipient(&quot;00000000-0000-0000-0000-000000000001&quot;).encrypt().toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;).queue();</b>
+<b class="fc">&nbsp;        peer3.buildEvent(EventType.MESSAGE, &quot;12345677890&quot;.getBytes(&quot;UTF-8&quot;)).addRecipient(&quot;00000000-0000-0000-0000-000000000001&quot;).encrypt().toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;).queue();</b>
+&nbsp;        // CXN - E2E, peer 2 should be offline for this test
+<b class="fc">&nbsp;        peer3.buildEvent(EventType.MESSAGE, &quot;123987&quot;.getBytes(&quot;UTF-8&quot;)).signData().toPeer(&quot;02000000-0000-0000-0000-000000000001&quot;).queue();</b>
+&nbsp;
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

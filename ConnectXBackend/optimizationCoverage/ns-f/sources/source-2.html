@@ -1,0 +1,495 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > HTTPBridgeProvider</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network.nodemesh.bridge.http</a>
+</div>
+
+<h1>Coverage Summary for Class: HTTPBridgeProvider (dev.droppinganvil.v3.network.nodemesh.bridge.http)</h1>
+
+<table class="coverageStats">
+
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">HTTPBridgeProvider</td>
+<td class="coverageStat">
+  <span class="percent">
+    64.3%
+  </span>
+  <span class="absValue">
+    (9/14)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    34.4%
+  </span>
+  <span class="absValue">
+    (11/32)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    60.6%
+  </span>
+  <span class="absValue">
+    (43/71)
+  </span>
+</td>
+</tr>
+  <tr>
+    <td class="name">HTTPBridgeProvider$CXMessageHandler</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (2/2)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    50%
+  </span>
+  <span class="absValue">
+    (1/2)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    60%
+  </span>
+  <span class="absValue">
+    (6/10)
+  </span>
+</td>
+  </tr>
+  <tr>
+    <td class="name">HTTPBridgeProvider$HealthCheckHandler</td>
+<td class="coverageStat">
+  <span class="percent">
+    50%
+  </span>
+  <span class="absValue">
+    (1/2)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/2)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    25%
+  </span>
+  <span class="absValue">
+    (1/4)
+  </span>
+</td>
+  </tr>
+<tr>
+  <td class="name"><strong>Total</strong></td>
+<td class="coverageStat">
+  <span class="percent">
+    66.7%
+  </span>
+  <span class="absValue">
+    (12/18)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    33.3%
+  </span>
+  <span class="absValue">
+    (12/36)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    58.8%
+  </span>
+  <span class="absValue">
+    (50/85)
+  </span>
+</td>
+</tr>
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2025. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network.nodemesh.bridge.http;
+&nbsp;
+&nbsp;import com.sun.net.httpserver.HttpExchange;
+&nbsp;import com.sun.net.httpserver.HttpHandler;
+&nbsp;import com.sun.net.httpserver.HttpServer;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.network.CXPath;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkContainer;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider;
+&nbsp;import okhttp3.*;
+&nbsp;
+&nbsp;import java.io.ByteArrayInputStream;
+&nbsp;import java.io.ByteArrayOutputStream;
+&nbsp;import java.io.IOException;
+&nbsp;import java.io.InputStream;
+&nbsp;import java.io.OutputStream;
+&nbsp;import java.net.InetSocketAddress;
+&nbsp;import java.util.ArrayList;
+&nbsp;import java.util.List;
+&nbsp;import java.util.concurrent.ConcurrentHashMap;
+&nbsp;import java.util.concurrent.LinkedBlockingQueue;
+&nbsp;import java.util.concurrent.TimeUnit;
+&nbsp;
+&nbsp;/**
+&nbsp; * cxHTTP1 Bridge Provider
+&nbsp; *
+&nbsp; * Enables CX networking over HTTP/HTTPS for:
+&nbsp; * - Reverse proxy compatibility (CloudFlare, RProx, nginx, etc.)
+&nbsp; * - Firewall traversal
+&nbsp; * - NAT bypass
+&nbsp; *
+&nbsp; * Architecture:
+&nbsp; * - CLIENT: Uses HTTPS for encrypted transport to reverse proxy
+&nbsp; * - SERVER: Plain HTTP behind reverse proxy (TLS termination at proxy)
+&nbsp; * - Trust Model: RProx (AnvilDevelopment.US/rprox.html) handles CloudFlare + TLS
+&nbsp; *
+&nbsp; * Example:
+&nbsp; * Client → HTTPS → CloudFlare/RProx → HTTP → EPOCH NMI Server
+&nbsp; *   URL: https://CXNET.AnvilDevelopment.US/cx
+&nbsp; *
+&nbsp; * HTTP Constraint: Request/Response model (not bidirectional)
+&nbsp; * Solution: Synchronous response collection
+&nbsp; *
+&nbsp; * Flow:
+&nbsp; * 1. Client POSTs NetworkContainer to /cx endpoint via HTTPS
+&nbsp; * 2. RProx terminates TLS and forwards to HTTP server
+&nbsp; * 3. Server processes event through normal CX stack
+&nbsp; * 4. Server captures any response events generated for this sender
+&nbsp; * 5. Server returns responses in HTTP body
+&nbsp; * 6. RProx encrypts response and returns to client via HTTPS
+&nbsp; * 7. Client processes responses locally
+&nbsp; */
+<b class="fc">&nbsp;public class HTTPBridgeProvider implements BridgeProvider {</b>
+&nbsp;
+&nbsp;    private static final String PROTOCOL = &quot;cxHTTP1&quot;;
+<b class="fc">&nbsp;    private static final MediaType OCTET_STREAM = MediaType.get(&quot;application/octet-stream&quot;);</b>
+&nbsp;
+&nbsp;    private ConnectX connectX;
+&nbsp;    private HttpServer httpServer;
+&nbsp;    private OkHttpClient httpClient;
+&nbsp;
+&nbsp;    // Response queues for synchronous HTTP handling
+&nbsp;    // Key: requestId (from NetworkEvent.iD), Value: responses for that request
+<b class="fc">&nbsp;    private static final ConcurrentHashMap&lt;String, LinkedBlockingQueue&lt;NetworkContainer&gt;&gt; responseQueues = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;
+&nbsp;    @Override
+&nbsp;    public String getBridgeProtocol() {
+<b class="fc">&nbsp;        return PROTOCOL;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    @Override
+&nbsp;    public void initialize(ConnectX connectX) {
+<b class="fc">&nbsp;        this.connectX = connectX;</b>
+&nbsp;        // Reduced timeouts for faster failure detection and retry queue processing
+&nbsp;        // Failed requests (e.g., offline EPOCH) move to retry queue instead of blocking output queue
+<b class="fc">&nbsp;        this.httpClient = new OkHttpClient.Builder()</b>
+<b class="fc">&nbsp;            .connectTimeout(2, TimeUnit.SECONDS)</b>
+<b class="fc">&nbsp;            .readTimeout(2, TimeUnit.SECONDS)</b>
+<b class="fc">&nbsp;            .writeTimeout(2, TimeUnit.SECONDS)</b>
+<b class="fc">&nbsp;            .build();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    @Override
+&nbsp;    public boolean isBidirectional() {
+<b class="nc">&nbsp;        return false; // HTTP is request/response only</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    @Override
+&nbsp;    public boolean requiresSyncResponses() {
+<b class="nc">&nbsp;        return true; // Must collect and return responses in same HTTP request</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Validates a cxHTTP1 peer address.
+&nbsp;     * Expected format: &quot;cxHTTP1:https://host/cx&quot; or &quot;cxHTTP1:http://host/cx&quot;
+&nbsp;     * Rejects anything missing the protocol prefix, a proper http/https scheme,
+&nbsp;     * or a host component - prevents malformed bridge entries from entering routing tables.
+&nbsp;     */
+&nbsp;    @Override
+&nbsp;    public boolean isValidAddress(String addr) {
+<b class="pc">&nbsp;        if (addr == null || addr.isEmpty()) return false;</b>
+&nbsp;        // Must start with our protocol prefix
+<b class="pc">&nbsp;        if (!addr.startsWith(PROTOCOL + &quot;:&quot;)) return false;</b>
+<b class="fc">&nbsp;        String url = addr.substring(PROTOCOL.length() + 1);</b>
+&nbsp;        // URL must use http or https scheme
+<b class="pc">&nbsp;        if (!url.startsWith(&quot;http://&quot;) &amp;&amp; !url.startsWith(&quot;https://&quot;)) return false;</b>
+&nbsp;        // Must have at least a minimal host after the scheme (e.g. &quot;https://x&quot; = 9 chars minimum)
+<b class="pc">&nbsp;        return url.length() &gt; 8;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * CLIENT SIDE: Send event via HTTPS POST and wait for sync responses
+&nbsp;     * Client uses HTTPS - TLS termination handled by RProx/CloudFlare
+&nbsp;     */
+&nbsp;    @Override
+&nbsp;    public List&lt;NetworkContainer&gt; transmitEvent(CXPath path, byte[] containerBytes) throws Exception {
+<b class="fc">&nbsp;        List&lt;NetworkContainer&gt; responses = new ArrayList&lt;&gt;();</b>
+&nbsp;
+&nbsp;        try {
+&nbsp;            // POST encrypted NetworkContainer to HTTPS endpoint
+<b class="fc">&nbsp;            RequestBody body = RequestBody.create(containerBytes, OCTET_STREAM);</b>
+<b class="fc">&nbsp;            Request request = new Request.Builder()</b>
+<b class="fc">&nbsp;                .url(path.bridgeArg)</b>
+<b class="fc">&nbsp;                .post(body)</b>
+<b class="fc">&nbsp;                .build();</b>
+&nbsp;
+<b class="fc">&nbsp;            Response response = httpClient.newCall(request).execute();</b>
+&nbsp;
+<b class="fc">&nbsp;            if (!response.isSuccessful()) {</b>
+<b class="fc">&nbsp;                throw new IOException(&quot;HTTP Bridge failed: &quot; + response.code() + &quot; &quot; + response.message());</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Parse response body as array of NetworkContainers
+&nbsp;            // TODO: Response format - for now assume single or multiple containers
+<b class="fc">&nbsp;            byte[] responseBody = response.body().bytes();</b>
+<b class="pc">&nbsp;            if (responseBody != null &amp;&amp; responseBody.length &gt; 0) {</b>
+&nbsp;                try {
+&nbsp;                    // Deserialize response NetworkContainers
+&nbsp;                    // This would be an array of signed NetworkContainers
+&nbsp;                    // For simplicity, treat as single container for now
+<b class="nc">&nbsp;                    ByteArrayOutputStream baos = new ByteArrayOutputStream();</b>
+<b class="nc">&nbsp;                    ByteArrayInputStream bais = new ByteArrayInputStream(responseBody);</b>
+&nbsp;
+&nbsp;                    // Decrypt and deserialize
+<b class="nc">&nbsp;                    Object decrypted = connectX.encryptionProvider.decrypt(bais, baos);</b>
+<b class="nc">&nbsp;                    String json = baos.toString(&quot;UTF-8&quot;);</b>
+&nbsp;
+&nbsp;                    // Skip if response is not JSON (e.g., &quot;OK&quot;, error messages)
+<b class="nc">&nbsp;                    String trimmed = json.trim();</b>
+<b class="nc">&nbsp;                    if (!trimmed.isEmpty() &amp;&amp; (trimmed.startsWith(&quot;{&quot;) || trimmed.startsWith(&quot;[&quot;))) {</b>
+<b class="nc">&nbsp;                        NetworkContainer nc = (NetworkContainer) ConnectX.deserialize(&quot;cxJSON1&quot;, json, NetworkContainer.class);</b>
+<b class="nc">&nbsp;                        responses.add(nc);</b>
+&nbsp;                    } else {
+<b class="nc">&nbsp;                        System.out.println(&quot;[HTTP Bridge] Received non-JSON response (acknowledgment): &quot; + trimmed);</b>
+&nbsp;                    }
+&nbsp;                } catch (Exception parseEx) {
+&nbsp;                    // Response parsing failed - likely an acknowledgment or error message
+<b class="nc">&nbsp;                    System.out.println(&quot;[HTTP Bridge] Response parse skipped (likely acknowledgment)&quot;);</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;
+&nbsp;            response.close();
+&nbsp;        } catch (Exception e) {
+<b class="fc">&nbsp;            System.err.println(&quot;HTTP Bridge transmit error: &quot; + e.getMessage());</b>
+&nbsp;            throw e;
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        return responses;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * SERVER SIDE: Start HTTP server for incoming CX messages
+&nbsp;     * Server uses plain HTTP - TLS termination handled by RProx reverse proxy
+&nbsp;     * IMPORTANT: This server should NOT be exposed directly to internet
+&nbsp;     *            Must be behind RProx/CloudFlare for security
+&nbsp;     */
+&nbsp;    @Override
+&nbsp;    public void startServer(int port) throws Exception {
+&nbsp;        // IMPORTANT: Bind to 0.0.0.0 (all interfaces) so RProx can reach us from LAN
+&nbsp;        // Default InetSocketAddress(port) may bind to localhost only on some systems
+<b class="fc">&nbsp;        httpServer = HttpServer.create(new InetSocketAddress(&quot;0.0.0.0&quot;, port), 0);</b>
+&nbsp;
+&nbsp;        // Main CX endpoint - receives forwarded requests from RProx
+<b class="fc">&nbsp;        httpServer.createContext(&quot;/cx&quot;, new CXMessageHandler());</b>
+&nbsp;
+&nbsp;        // Health check endpoint - for monitoring/load balancers
+<b class="fc">&nbsp;        httpServer.createContext(&quot;/health&quot;, new HealthCheckHandler());</b>
+&nbsp;
+&nbsp;        // NOTE: Seed download uses SEED_REQUEST event via /cx endpoint for security
+&nbsp;        // This ensures proper two-layer signature verification through CX protocol
+&nbsp;
+<b class="fc">&nbsp;        httpServer.setExecutor(null); // Use default executor</b>
+<b class="fc">&nbsp;        httpServer.start();</b>
+&nbsp;
+<b class="fc">&nbsp;        System.out.println(&quot;cxHTTP1 Bridge Server started on port &quot; + port);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;  Binding: 0.0.0.0:&quot; + port + &quot; (all interfaces)&quot;);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;  INTERNAL Endpoint: http://localhost:&quot; + port + &quot;/cx&quot;);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;  INTERNAL Health: http://localhost:&quot; + port + &quot;/health&quot;);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;  PUBLIC Endpoint: https://CXNET.AnvilDevelopment.US/cx (via RProx)&quot;);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;  ⚠️  WARNING: Server uses plain HTTP - MUST be behind RProx for security&quot;);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    @Override
+&nbsp;    public void stopServer() {
+<b class="pc">&nbsp;        if (httpServer != null) {</b>
+<b class="nc">&nbsp;            httpServer.stop(0);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;cxHTTP1 Bridge Server stopped&quot;);</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Register a response queue for a specific request
+&nbsp;     * Called before processing an HTTP request
+&nbsp;     */
+&nbsp;    public static void registerResponseQueue(String requestId) {
+<b class="nc">&nbsp;        responseQueues.put(requestId, new LinkedBlockingQueue&lt;&gt;());</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Add a response to the queue for a specific request
+&nbsp;     * Called when CX generates a response event
+&nbsp;     */
+&nbsp;    public static void queueResponse(String requestId, NetworkContainer response) {
+<b class="nc">&nbsp;        LinkedBlockingQueue&lt;NetworkContainer&gt; queue = responseQueues.get(requestId);</b>
+<b class="nc">&nbsp;        if (queue != null) {</b>
+<b class="nc">&nbsp;            queue.offer(response);</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Collect all responses for a request and clean up
+&nbsp;     */
+&nbsp;    public static List&lt;NetworkContainer&gt; collectResponses(String requestId, long timeoutMs) {
+<b class="nc">&nbsp;        List&lt;NetworkContainer&gt; responses = new ArrayList&lt;&gt;();</b>
+<b class="nc">&nbsp;        LinkedBlockingQueue&lt;NetworkContainer&gt; queue = responseQueues.get(requestId);</b>
+&nbsp;
+<b class="nc">&nbsp;        if (queue != null) {</b>
+&nbsp;            try {
+&nbsp;                // Wait a bit for responses to arrive
+<b class="nc">&nbsp;                NetworkContainer response = queue.poll(timeoutMs, TimeUnit.MILLISECONDS);</b>
+<b class="nc">&nbsp;                while (response != null) {</b>
+<b class="nc">&nbsp;                    responses.add(response);</b>
+<b class="nc">&nbsp;                    response = queue.poll(100, TimeUnit.MILLISECONDS); // Check for more</b>
+&nbsp;                }
+&nbsp;            } catch (InterruptedException e) {
+<b class="nc">&nbsp;                Thread.currentThread().interrupt();</b>
+&nbsp;            } finally {
+<b class="nc">&nbsp;                responseQueues.remove(requestId);</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        return responses;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Handler for CX messages over HTTP
+&nbsp;     */
+<b class="fc">&nbsp;    class CXMessageHandler implements HttpHandler {</b>
+&nbsp;        @Override
+&nbsp;        public void handle(HttpExchange exchange) throws IOException {
+<b class="pc">&nbsp;            if (!&quot;POST&quot;.equals(exchange.getRequestMethod())) {</b>
+<b class="nc">&nbsp;                sendResponse(exchange, 405, &quot;Method not allowed, use CX Protocol&quot;.getBytes());</b>
+&nbsp;                return;
+&nbsp;            }
+&nbsp;
+&nbsp;            try {
+&nbsp;                // Read encrypted NetworkContainer from request
+<b class="fc">&nbsp;                InputStream requestStream = exchange.getRequestBody();</b>
+<b class="fc">&nbsp;                byte[] requestBody = requestStream.readAllBytes();</b>
+&nbsp;                requestStream.close();
+&nbsp;
+&nbsp;                // Process event through normal CX stack
+<b class="fc">&nbsp;                connectX.nodeMesh.processNetworkInput(new ByteArrayInputStream(requestBody), null);</b>
+&nbsp;
+<b class="fc">&nbsp;                sendResponse(exchange, 200, new byte[0]);</b>
+&nbsp;
+&nbsp;            } catch (Exception e) {
+<b class="nc">&nbsp;                System.err.println(&quot;[HTTP Bridge Server] Error: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;                e.printStackTrace();</b>
+<b class="nc">&nbsp;                sendResponse(exchange, 500, (&quot;Error: &quot; + e.getMessage()).getBytes());</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Health check handler
+&nbsp;     */
+<b class="fc">&nbsp;    class HealthCheckHandler implements HttpHandler {</b>
+&nbsp;        @Override
+&nbsp;        public void handle(HttpExchange exchange) throws IOException {
+&nbsp;            String response = &quot;{\&quot;status\&quot;:\&quot;healthy\&quot;,\&quot;bridge\&quot;:\&quot;cxHTTP1\&quot;,\&quot;identity\&quot;:\&quot;&quot; +
+<b class="nc">&nbsp;                (connectX.getOwnID() != null ? connectX.getOwnID() : &quot;unknown&quot;) + &quot;\&quot;}&quot;;</b>
+&nbsp;
+<b class="nc">&nbsp;            exchange.getResponseHeaders().set(&quot;Content-Type&quot;, &quot;application/json&quot;);</b>
+<b class="nc">&nbsp;            sendResponse(exchange, 200, response.getBytes(&quot;UTF-8&quot;));</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    private void sendResponse(HttpExchange exchange, int statusCode, byte[] response) throws IOException {
+<b class="fc">&nbsp;        exchange.sendResponseHeaders(statusCode, response.length);</b>
+<b class="fc">&nbsp;        OutputStream os = exchange.getResponseBody();</b>
+<b class="fc">&nbsp;        os.write(response);</b>
+&nbsp;        os.close();
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

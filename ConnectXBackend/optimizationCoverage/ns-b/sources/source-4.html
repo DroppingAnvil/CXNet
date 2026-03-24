@@ -1,0 +1,260 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > CXNetwork</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network</a>
+</div>
+
+<h1>Coverage Summary for Class: CXNetwork (dev.droppinganvil.v3.network)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">CXNetwork</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    28.6%
+  </span>
+  <span class="absValue">
+    (2/7)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/28)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    25.8%
+  </span>
+  <span class="absValue">
+    (8/31)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2022. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.Configuration;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.State;
+&nbsp;import dev.droppinganvil.v3.edge.NetworkRecord;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkEvent;
+&nbsp;import us.anvildevelopment.util.tools.permissions.BasicPermissionContainer;
+&nbsp;
+<b class="fc">&nbsp;public class CXNetwork {</b>
+<b class="fc">&nbsp;    public State networkState = State.ConnectNetworks;</b>
+&nbsp;    public Configuration configuration;
+&nbsp;    public NetworkDictionary networkDictionary;
+&nbsp;    /**
+&nbsp;     * Zero Trust Mode
+&nbsp;     * CAUTION After enabled zero trust mode, NMI can no longer make edits to network, network configuration, use NMI permissions, or get authority on blockchain consensus
+&nbsp;     * This will essentially turn a centralized network that trust epoch into a fully decentralized P2P Mesh
+&nbsp;     * What happens:
+&nbsp;     * NMI executes .startZeroTrust();
+&nbsp;     * 1. Network Seed is updated by NMI to show zT = true
+&nbsp;     * (Note: NMI will still have its permissions in the permissions map but nodes will no longer treat it as NMI and practically block it from permissions actions, this is required to securely process the event)
+&nbsp;     * 2. NMI Distributes ZeroTrustEvent, ZeroTrustEvent which includes new Seed - without blockchain data, is now distributed CXN and recorded to C1, Nodes will use new consensus with existing block height events/request
+&nbsp;     * 3. Peers receive Zero Trust Event, apply new seed, switches to zT mode automatically due to seed application, then chains are resynced with Zero trust protocols
+&nbsp;     *
+&nbsp;     * This allows networks to be created and fine tuned centrally, then once stabilized, switch to a zero trust model
+&nbsp;     */
+<b class="fc">&nbsp;    public boolean zT = false;</b>
+&nbsp;    /**
+&nbsp;     * Administrative chain
+&nbsp;     */
+&nbsp;    public NetworkRecord c1;
+&nbsp;    /**
+&nbsp;     * Resources chain
+&nbsp;     */
+&nbsp;    public NetworkRecord c2;
+&nbsp;    /**
+&nbsp;     * Standard Events chain
+&nbsp;     */
+&nbsp;    public NetworkRecord c3;
+&nbsp;    /**
+&nbsp;     * Network permissions
+&nbsp;     */
+&nbsp;    public BasicPermissionContainer networkPermissions;
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Consensus configuration for multi-peer block verification
+&nbsp;     * These settings determine how the network reaches consensus on blockchain blocks
+&nbsp;     * when EPOCH/NMI is unavailable or in zero trust mode
+&nbsp;     */
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Minimum number of peers required to reach block consensus
+&nbsp;     * Default: 3 peers
+&nbsp;     */
+<b class="fc">&nbsp;    public Integer consensusMinPeers = 3;</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Minimum response rate required for consensus (0.0 to 1.0)
+&nbsp;     * Default: 0.6 (60% of queried peers must respond)
+&nbsp;     */
+<b class="fc">&nbsp;    public Double consensusMinResponseRate = 0.6;</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Consensus threshold - percentage of peers that must agree (0.0 to 1.0)
+&nbsp;     * Default: 0.67 (67% supermajority required)
+&nbsp;     */
+<b class="fc">&nbsp;    public Double consensusThreshold = 0.67;</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Timeout for block consensus requests in milliseconds
+&nbsp;     * Default: 30000 (30 seconds)
+&nbsp;     */
+<b class="fc">&nbsp;    public Long consensusTimeoutMs = 30000L;</b>
+&nbsp;
+&nbsp;    // NOTE: Whitelist (registered nodes) and blocklist (blocked nodes) are stored locally in DataContainer
+&nbsp;    // They are NOT distributed in network seeds for security reasons
+&nbsp;    // See ConnectX.dataContainer.networkRegisteredNodes and ConnectX.dataContainer.networkBlockedNodes
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Check if a device is the current Network Master Identity (NMI)
+&nbsp;     * @param deviceID Device UUID to check
+&nbsp;     * @return true if device is the NMI (first backend in backendSet), false otherwise
+&nbsp;     */
+&nbsp;    private boolean isCurrentNMI(String deviceID) {
+<b class="nc">&nbsp;        return configuration != null &amp;&amp;</b>
+&nbsp;               configuration.backendSet != null &amp;&amp;
+<b class="nc">&nbsp;               !configuration.backendSet.isEmpty() &amp;&amp;</b>
+<b class="nc">&nbsp;               configuration.backendSet.get(0).equals(deviceID);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public boolean checkChainPermission(String deviceID, String permission, Long chainID) {
+<b class="nc">&nbsp;        assert !permission.contains(&quot;-&quot;);</b>
+<b class="nc">&nbsp;        assert !deviceID.contains(&quot;SYSTEM&quot;);</b>
+&nbsp;
+&nbsp;        // Zero Trust Mode: Block NMI from using permissions
+&nbsp;        // After zT activation, NMI is treated as a regular node
+<b class="nc">&nbsp;        if (zT &amp;&amp; isCurrentNMI(deviceID)) {</b>
+<b class="nc">&nbsp;            System.out.println(&quot;[ZT-Blocked] NMI &quot; + deviceID.substring(0, 8) + &quot; blocked from chain permission: &quot; + permission + &quot;-&quot; + chainID);</b>
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        String p = permission + &quot;-&quot;+chainID;</b>
+<b class="nc">&nbsp;        return networkPermissions.allowed(deviceID, p);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public boolean checkNetworkPermission(String deviceID, String permission) {
+<b class="nc">&nbsp;        assert !permission.contains(&quot;-&quot;);</b>
+<b class="nc">&nbsp;        assert !deviceID.contains(&quot;SYSTEM&quot;);</b>
+&nbsp;
+&nbsp;        // Zero Trust Mode: Block NMI from using permissions
+<b class="nc">&nbsp;        if (zT &amp;&amp; isCurrentNMI(deviceID)) {</b>
+<b class="nc">&nbsp;            System.out.println(&quot;[ZT-Blocked] NMI &quot; + deviceID.substring(0, 8) + &quot; blocked from network permission: &quot; + permission);</b>
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        return networkPermissions.allowed(deviceID, permission);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public boolean checkGlobalPermission(String deviceID, String permission, ConnectX connectX) {
+&nbsp;        // Note: Global permissions are managed by CXNET, not individual networks
+&nbsp;        // Zero trust mode only affects network-level permissions, not global ones
+<b class="nc">&nbsp;        return connectX.checkGlobalPermission(deviceID, permission);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public Integer getVariableNetworkPermission(String deviceID, String permission) {
+&nbsp;        // Zero Trust Mode: Block NMI from using permissions
+<b class="nc">&nbsp;        if (zT &amp;&amp; isCurrentNMI(deviceID)) {</b>
+<b class="nc">&nbsp;            System.out.println(&quot;[ZT-Blocked] NMI &quot; + deviceID.substring(0, 8) + &quot; blocked from variable permission: &quot; + permission);</b>
+<b class="nc">&nbsp;            return null;</b>
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        if (checkNetworkPermission(deviceID,permission)) {</b>
+<b class="nc">&nbsp;            return networkPermissions.getEntryWeight(deviceID,permission);</b>
+<b class="nc">&nbsp;        } else return null;</b>
+&nbsp;    }
+&nbsp;
+<b class="fc">&nbsp;    public CXNetwork() {}</b>
+&nbsp;
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,141 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > NetworkRecord</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.edge</a>
+</div>
+
+<h1>Coverage Summary for Class: NetworkRecord (dev.droppinganvil.v3.edge)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">NetworkRecord</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (2/2)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (7/7)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2022. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.edge;
+&nbsp;
+&nbsp;import us.anvildevelopment.util.tools.database.annotations.MemoryOnly;
+&nbsp;
+&nbsp;import java.io.Serializable;
+&nbsp;import java.util.Map;
+&nbsp;import java.util.concurrent.ConcurrentHashMap;
+&nbsp;
+&nbsp;public class NetworkRecord implements Serializable {
+&nbsp;    public String networkID;
+&nbsp;    public Long chainID;
+<b class="fc">&nbsp;    public Integer blockLength = 100;</b>
+<b class="fc">&nbsp;    public boolean lock = false;</b>
+&nbsp;    @MemoryOnly
+&nbsp;    public NetworkBlock current;
+&nbsp;    /**
+&nbsp;     * Long Key is the block ID only unique inside it&#39;s chain
+&nbsp;     */
+<b class="fc">&nbsp;    public Map&lt;Long, NetworkBlock&gt; blockMap = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;
+&nbsp;    // Default constructor for Jackson deserialization
+<b class="fc">&nbsp;    public NetworkRecord() {</b>
+&nbsp;    }
+&nbsp;
+<b class="fc">&nbsp;    public NetworkRecord(String networkID, Long chainID) {</b>
+<b class="fc">&nbsp;        this.networkID = networkID;</b>
+<b class="fc">&nbsp;        this.chainID = chainID;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

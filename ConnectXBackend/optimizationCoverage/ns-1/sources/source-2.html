@@ -1,0 +1,2994 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > ConnectX</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3</a>
+</div>
+
+<h1>Coverage Summary for Class: ConnectX (dev.droppinganvil.v3)</h1>
+
+<table class="coverageStats">
+
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">ConnectX</td>
+<td class="coverageStat">
+  <span class="percent">
+    56.4%
+  </span>
+  <span class="absValue">
+    (44/78)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    30.3%
+  </span>
+  <span class="absValue">
+    (151/499)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    53.1%
+  </span>
+  <span class="absValue">
+    (443/834)
+  </span>
+</td>
+</tr>
+  <tr>
+    <td class="name">ConnectX$1</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/2)
+  </span>
+</td>
+  </tr>
+  <tr>
+    <td class="name">ConnectX$BlockchainStats</td>
+<td class="coverageStat">
+  <span class="percent">
+    50%
+  </span>
+  <span class="absValue">
+    (1/2)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    50%
+  </span>
+  <span class="absValue">
+    (1/2)
+  </span>
+</td>
+  </tr>
+  <tr>
+    <td class="name">ConnectX$EventBuilder</td>
+<td class="coverageStat">
+  <span class="percent">
+    28.9%
+  </span>
+  <span class="absValue">
+    (11/38)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    42.3%
+  </span>
+  <span class="absValue">
+    (11/26)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    44.6%
+  </span>
+  <span class="absValue">
+    (54/121)
+  </span>
+</td>
+  </tr>
+  <tr>
+    <td class="name">ConnectX$SeedResponseData</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+  </tr>
+<tr>
+  <td class="name"><strong>Total</strong></td>
+<td class="coverageStat">
+  <span class="percent">
+    47.5%
+  </span>
+  <span class="absValue">
+    (57/120)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    30.9%
+  </span>
+  <span class="absValue">
+    (162/525)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    52%
+  </span>
+  <span class="absValue">
+    (499/960)
+  </span>
+</td>
+</tr>
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2021 Christopher Willett
+&nbsp; * All Rights Reserved.
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.api.CXPlugin;
+&nbsp;import dev.droppinganvil.v3.crypt.core.CryptProvider;
+&nbsp;import dev.droppinganvil.v3.crypt.pgpainless.PainlessCryptProvider;
+&nbsp;import dev.droppinganvil.v3.edge.NetworkRecord;
+&nbsp;import dev.droppinganvil.v3.exceptions.UnsafeKeywordException;
+&nbsp;import dev.droppinganvil.v3.io.IOJob;
+&nbsp;import dev.droppinganvil.v3.io.strings.JacksonProvider;
+&nbsp;import dev.droppinganvil.v3.io.strings.SerializationProvider;
+&nbsp;import dev.droppinganvil.v3.network.BlockchainPersistence;
+&nbsp;import dev.droppinganvil.v3.network.BlockConsensusTracker;
+&nbsp;import dev.droppinganvil.v3.network.CXNetwork;
+&nbsp;import dev.droppinganvil.v3.network.CXPath;
+&nbsp;import dev.droppinganvil.v3.network.InputBundle;
+&nbsp;import dev.droppinganvil.v3.network.NetworkDictionary;
+&nbsp;import dev.droppinganvil.v3.network.events.EventType;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkContainer;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkEvent;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.Node;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.NodeConfig;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.LANScanner;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.NodeMesh;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.OutputBundle;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.PeerDirectory;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.bridge.CXBridge;
+&nbsp;import java.io.*;
+&nbsp;import java.nio.charset.StandardCharsets;
+&nbsp;import java.util.Arrays;
+&nbsp;import java.util.List;
+&nbsp;import java.util.Locale;
+&nbsp;import java.util.Map;
+&nbsp;import java.util.Queue;
+&nbsp;import java.util.concurrent.ConcurrentHashMap;
+&nbsp;import java.util.concurrent.ConcurrentLinkedQueue;
+&nbsp;
+<b class="fc">&nbsp;public class ConnectX {</b>
+&nbsp;    // EPOCH NMI Bootstrap Constants
+&nbsp;    public static final String EPOCH_UUID = &quot;00000000-0000-0000-0000-000000000001&quot;;
+&nbsp;
+&nbsp;    // TODO: Bootstrap URL Configuration
+&nbsp;    // PRODUCTION: Switch to public URL once RProx/Cloudflare configuration is verified
+&nbsp;    // - Verify health endpoint works through Cloudflare
+&nbsp;    // - Test bootstrap process end-to-end
+&nbsp;    // - Update to: cxHTTP1:https://CXNET.AnvilDevelopment.US/cx
+&nbsp;    // public static final String EPOCH_BRIDGE_ADDRESS = &quot;cxHTTP1:http://localhost:8080/cx&quot;;
+&nbsp;    public static final String EPOCH_BRIDGE_ADDRESS = &quot;cxHTTP1:https://CXNET.AnvilDevelopment.US/cx&quot;;
+&nbsp;
+&nbsp;    public static Platform platform;
+<b class="fc">&nbsp;    public State state = State.CXConnecting;</b>
+&nbsp;    // IMPORTANT: Per-instance network map to support multiple ConnectX instances in same JVM
+<b class="fc">&nbsp;    private final ConcurrentHashMap&lt;String, CXNetwork&gt; networkMap = new ConcurrentHashMap&lt;&gt;();</b>
+<b class="fc">&nbsp;    public CryptProvider encryptionProvider = null;</b>
+<b class="fc">&nbsp;    private static final transient ConcurrentHashMap&lt;String, SerializationProvider&gt; serializationProviders = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;    /** @deprecated Use per-instance bridge providers via {@link #addBridgeProvider} instead. */
+&nbsp;    @Deprecated
+<b class="fc">&nbsp;    public static final ConcurrentHashMap&lt;String, CXBridge&gt; bridgeMap = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;
+&nbsp;    // IMPORTANT: Per-instance bridge providers to support multiple ConnectX instances in same JVM
+&nbsp;    // Each instance gets its own bridge provider instances (e.g., separate HTTP servers on different ports)
+<b class="fc">&nbsp;    private final ConcurrentHashMap&lt;String, dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider&gt; bridgeProviders = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;
+<b class="fc">&nbsp;    public final Queue&lt;IOJob&gt; jobQueue = new ConcurrentLinkedQueue&lt;&gt;();</b>
+&nbsp;    // IMPORTANT: Instance queues (not static) to support multiple ConnectX instances in same JVM
+&nbsp;    // Each instance has its own queues and processors to avoid cross-instance contamination
+<b class="fc">&nbsp;    public final Queue&lt;InputBundle&gt; eventQueue = new ConcurrentLinkedQueue&lt;&gt;();</b>
+<b class="fc">&nbsp;    public final Queue&lt;OutputBundle&gt; outputQueue = new ConcurrentLinkedQueue&lt;&gt;();</b>
+&nbsp;    // Retry queue for failed events that need to be retried with exponential backoff
+&nbsp;    // This prevents failed events (e.g., to offline EPOCH) from blocking the main output queue
+<b class="fc">&nbsp;    public final Queue&lt;dev.droppinganvil.v3.network.nodemesh.RetryBundle&gt; retryQueue = new ConcurrentLinkedQueue&lt;&gt;();</b>
+<b class="fc">&nbsp;    public File cxRoot = new File(&quot;ConnectX&quot;);</b>
+&nbsp;    public File nodemesh;
+&nbsp;    public File resources;
+&nbsp;    private transient Node self;
+<b class="fc">&nbsp;    public int listeningPort = 0;</b>
+<b class="fc">&nbsp;    private final ConcurrentHashMap&lt;String, CXPlugin&gt; plugins = new ConcurrentHashMap&lt;&gt;();</b>
+<b class="fc">&nbsp;    private static transient List&lt;String&gt; reserved = Arrays.asList(&quot;SYSTEM&quot;, &quot;CX&quot;, &quot;cxJSON1&quot;, &quot;CXNET&quot;);</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * CXNET-level blocked nodes (global blocks across all networks)
+&nbsp;     * Populated by reading BLOCK_NODE events from CXNET&#39;s c1 (Admin) chain where network=&quot;CXNET&quot;
+&nbsp;     * Key: Node UUID
+&nbsp;     * Value: Block reason/metadata
+&nbsp;     *
+&nbsp;     * When a node is blocked at CXNET level, ALL transmissions from that node are rejected
+&nbsp;     * This is separate from network-specific blocks (stored in CXNetwork.blockedNodes)
+&nbsp;     */
+<b class="fc">&nbsp;    private final ConcurrentHashMap&lt;String, String&gt; cxnetBlockedNodes = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;
+&nbsp;    public NodeMesh nodeMesh;
+&nbsp;    public BlockchainPersistence blockchainPersistence;
+&nbsp;    public dev.droppinganvil.v3.edge.DataContainer dataContainer;
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Seed consensus collection for multi-peer verification
+&nbsp;     * Stores SEED_RESPONSE messages from multiple peers for consensus voting
+&nbsp;     * Key: Network ID (e.g., &quot;CXNET&quot;)
+&nbsp;     * Value: Map of peer ID -&gt; SeedResponseData
+&nbsp;     */
+<b class="fc">&nbsp;    public static class SeedResponseData {</b>
+&nbsp;        public dev.droppinganvil.v3.network.Seed dynamicSeed;
+&nbsp;        public dev.droppinganvil.v3.network.Seed epochSeed;
+&nbsp;        public boolean authoritative;
+&nbsp;        public String senderID;
+&nbsp;        public long timestamp;
+&nbsp;        public java.util.Map&lt;String, Number&gt; chainHeights;
+&nbsp;    }
+<b class="fc">&nbsp;    public final ConcurrentHashMap&lt;String, ConcurrentHashMap&lt;String, SeedResponseData&gt;&gt; seedConsensusMap = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Block consensus tracker for zero trust multi-peer verification
+&nbsp;     * Manages block requests and responses from multiple peers to reach consensus
+&nbsp;     * Used when network.zT = true (zero trust mode activated)
+&nbsp;     */
+<b class="fc">&nbsp;    public final BlockConsensusTracker blockConsensusTracker = new BlockConsensusTracker();</b>
+&nbsp;
+&nbsp;    public ConnectX() throws IOException {
+<b class="nc">&nbsp;        this(&quot;ConnectX&quot;);</b>
+&nbsp;    }
+&nbsp;
+<b class="fc">&nbsp;    public ConnectX(String rootDir) throws IOException {</b>
+<b class="fc">&nbsp;        initializeFileSystem(rootDir);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Constructor that automatically connects to the network
+&nbsp;     * @param rootDir Root directory for this ConnectX instance
+&nbsp;     * @param port P2P listening port
+&nbsp;     * @throws IOException if initialization or connection fails
+&nbsp;     */
+<b class="nc">&nbsp;    public ConnectX(String rootDir, int port) throws IOException {</b>
+<b class="nc">&nbsp;        initializeFileSystem(rootDir);</b>
+<b class="nc">&nbsp;        connect(port);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Constructor that fully initializes and connects with crypto
+&nbsp;     * @param rootDir Root directory for this ConnectX instance
+&nbsp;     * @param port P2P listening port
+&nbsp;     * @param cxID UUID for this node (null to generate random)
+&nbsp;     * @param password Password for private key encryption
+&nbsp;     * @throws Exception if initialization fails
+&nbsp;     */
+<b class="fc">&nbsp;    public ConnectX(String rootDir, int port, String cxID, String password) throws Exception {</b>
+<b class="fc">&nbsp;        initializeFileSystem(rootDir);</b>
+&nbsp;
+&nbsp;        // Initialize crypto with provided or generated UUID
+<b class="pc">&nbsp;        String actualID = cxID != null ? cxID : java.util.UUID.randomUUID().toString();</b>
+&nbsp;
+&nbsp;        // Address is optional - nodes can rely solely on HTTP bridge addresses
+&nbsp;        // For nodes with direct P2P connectivity, address will be discovered via CXHELLO
+<b class="fc">&nbsp;        String address = null;  // Will be populated by LAN discovery or bridge</b>
+<b class="fc">&nbsp;        initializeCrypto(actualID, password, address);</b>
+&nbsp;
+&nbsp;        // Connect to network
+<b class="fc">&nbsp;        connect(port);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Internal method to initialize file system and platform detection
+&nbsp;     * Called by all constructors
+&nbsp;     */
+&nbsp;    private void initializeFileSystem(String rootDir) throws IOException {
+<b class="fc">&nbsp;        this.cxRoot = new File(rootDir);</b>
+&nbsp;
+<b class="fc">&nbsp;        String osS = System.getProperty(&quot;os.name&quot;);</b>
+<b class="fc">&nbsp;        osS = osS.toLowerCase(Locale.ROOT);</b>
+<b class="pc">&nbsp;        if (osS.contains(&quot;linux&quot;)) {</b>
+<b class="nc">&nbsp;            platform = Platform.LINUX_GENERIC;</b>
+<b class="pc">&nbsp;        } else if (osS.contains(&quot;windows&quot;)) {</b>
+<b class="fc">&nbsp;            platform = Platform.WINDOWS;</b>
+<b class="nc">&nbsp;        } else if (osS.contains(&quot;osx&quot;)) {</b>
+<b class="nc">&nbsp;            platform = Platform.OSX;</b>
+<b class="nc">&nbsp;        } else if (osS.contains(&quot;connectx&quot;)) {</b>
+<b class="nc">&nbsp;            platform = Platform.ConnectX;</b>
+&nbsp;        }
+<b class="pc">&nbsp;        if (platform == null) platform = Platform.Unknown;</b>
+&nbsp;
+<b class="fc">&nbsp;        serializationProviders.put(&quot;cxJSON1&quot;, new JacksonProvider());</b>
+&nbsp;
+&nbsp;        //Setup filesystem
+<b class="pc">&nbsp;        if (!cxRoot.exists()) {</b>
+<b class="nc">&nbsp;            if (!cxRoot.mkdir()) throw new IOException();</b>
+&nbsp;        }
+<b class="fc">&nbsp;        nodemesh = new File(cxRoot, &quot;nodemesh&quot;);</b>
+<b class="pc">&nbsp;        if (!nodemesh.exists()) if (!nodemesh.mkdir()) throw new IOException();</b>
+&nbsp;
+&nbsp;        // Initialize nodeMesh.peerDirectory.peers for signed node persistence
+&nbsp;        //nodeMesh.peerDirectory.peers = nodemesh;
+&nbsp;
+<b class="fc">&nbsp;        resources = new File(nodemesh, &quot;nodemesh-resources&quot;);</b>
+<b class="pc">&nbsp;        if (!resources.exists()) if (!resources.mkdir()) throw new IOException();</b>
+&nbsp;
+&nbsp;        // Initialize blockchain persistence
+<b class="fc">&nbsp;        this.blockchainPersistence = new BlockchainPersistence(cxRoot);</b>
+&nbsp;
+&nbsp;        // Initialize or load DataContainer
+<b class="fc">&nbsp;        loadDataContainer();</b>
+&nbsp;
+&nbsp;        // Register default HTTP bridge provider (per-instance)
+&nbsp;        // Each ConnectX instance gets its own HTTPBridgeProvider for independent HTTP servers
+<b class="pc">&nbsp;        if (!isBridgeProviderPresent(&quot;cxHTTP1&quot;)) {</b>
+&nbsp;            try {
+<b class="fc">&nbsp;                dev.droppinganvil.v3.network.nodemesh.bridge.http.HTTPBridgeProvider httpBridge =</b>
+&nbsp;                    new dev.droppinganvil.v3.network.nodemesh.bridge.http.HTTPBridgeProvider();
+<b class="fc">&nbsp;                addBridgeProvider(httpBridge);</b>
+&nbsp;            } catch (Exception e) {
+&nbsp;                // Bridge registration failed - not critical for initialization
+<b class="nc">&nbsp;                System.err.println(&quot;[ConnectX] Failed to register default HTTP bridge: &quot; + e.getMessage());</b>
+&nbsp;            }
+&nbsp;        }
+<b class="fc">&nbsp;        encryptionProvider = new PainlessCryptProvider(this);</b>
+&nbsp;        //TODO network join
+&nbsp;    }
+&nbsp;    public static void checkSafety(String s) throws UnsafeKeywordException {
+&nbsp;        //TODO filesystem safety
+<b class="pc">&nbsp;        if (reserved.contains(s)) throw new UnsafeKeywordException();</b>
+&nbsp;    }
+&nbsp;    public static void checkProvider(String method) {
+<b class="pc">&nbsp;        if (!serializationProviders.containsKey(method)) throw new NullPointerException();</b>
+&nbsp;    }
+&nbsp;    public static boolean isProviderPresent(String method) {
+<b class="fc">&nbsp;        return serializationProviders.containsKey(method);</b>
+&nbsp;    }
+&nbsp;    public static String serialize(String method, Object o) throws Exception {
+<b class="fc">&nbsp;        checkProvider(method);</b>
+<b class="fc">&nbsp;        return serializationProviders.get(method).getString(o);</b>
+&nbsp;    }
+&nbsp;    public static void serialize(String method, Object o, OutputStream os) throws Exception {
+<b class="nc">&nbsp;        checkProvider(method);</b>
+<b class="nc">&nbsp;        serializationProviders.get(method).writeToStream(os, o);</b>
+&nbsp;    }
+&nbsp;    public static Object deserialize(String method, String s, Class&lt;?&gt; clazz) throws Exception {
+<b class="fc">&nbsp;        checkProvider(method);</b>
+<b class="fc">&nbsp;        return serializationProviders.get(method).getObject(s, clazz);</b>
+&nbsp;    }
+&nbsp;    public static Object deserialize(String method, InputStream is, Class&lt;?&gt; clazz) throws Exception {
+<b class="fc">&nbsp;        checkProvider(method);</b>
+<b class="fc">&nbsp;        return serializationProviders.get(method).getObject(is, clazz);</b>
+&nbsp;    }
+&nbsp;    public static void addSerializationProvider(String name, SerializationProvider provider) throws UnsafeKeywordException, IllegalAccessException {
+<b class="nc">&nbsp;        checkSafety(name);</b>
+<b class="nc">&nbsp;        if (serializationProviders.containsKey(name)) throw new IllegalAccessException();</b>
+<b class="nc">&nbsp;        serializationProviders.put(name, provider);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    // Bridge Provider Management (per-instance for multi-peer support)
+&nbsp;    public void addBridgeProvider(dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider provider) throws UnsafeKeywordException, IllegalAccessException {
+<b class="fc">&nbsp;        String protocol = provider.getBridgeProtocol();</b>
+<b class="fc">&nbsp;        checkSafety(protocol);</b>
+<b class="pc">&nbsp;        if (bridgeProviders.containsKey(protocol)) {</b>
+<b class="nc">&nbsp;            throw new IllegalAccessException(&quot;Bridge provider &quot; + protocol + &quot; already registered for this instance&quot;);</b>
+&nbsp;        }
+<b class="fc">&nbsp;        provider.initialize(this);</b>
+<b class="fc">&nbsp;        bridgeProviders.put(protocol, provider);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider getBridgeProvider(String protocol) {
+<b class="fc">&nbsp;        return bridgeProviders.get(protocol);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public boolean isBridgeProviderPresent(String protocol) {
+<b class="fc">&nbsp;        return bridgeProviders.containsKey(protocol);</b>
+&nbsp;    }
+&nbsp;    // Instance methods for signing (use these for proper per-instance crypto)
+&nbsp;    public Object getSignedObject(String cxID, InputStream is, Class&lt;?&gt; clazz, String method) throws Exception {
+<b class="fc">&nbsp;        ByteArrayOutputStream baos = new ByteArrayOutputStream();</b>
+<b class="pc">&nbsp;        if (encryptionProvider.verifyAndStrip(is, baos, cxID)) {</b>
+<b class="nc">&nbsp;            return deserialize(method, baos.toString(&quot;UTF-8&quot;), clazz);</b>
+&nbsp;        }
+<b class="fc">&nbsp;        return null;</b>
+&nbsp;    }
+&nbsp;    public Object getSignedObjectNoVerify(InputStream is, Class&lt;?&gt; clazz, String method) throws Exception {
+<b class="fc">&nbsp;        ByteArrayOutputStream baos = new ByteArrayOutputStream();</b>
+<b class="fc">&nbsp;        encryptionProvider.stripSignature(is, baos);</b>
+<b class="fc">&nbsp;        return deserialize(method, baos.toString(&quot;UTF-8&quot;), clazz);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public ByteArrayOutputStream signObject(Object o, Class&lt;?&gt; clazz, String method) throws Exception {
+<b class="fc">&nbsp;        ByteArrayOutputStream baos = new ByteArrayOutputStream();</b>
+<b class="fc">&nbsp;        String s = serialize(method, o);</b>
+<b class="fc">&nbsp;        ByteArrayInputStream bais = new ByteArrayInputStream(s.getBytes(StandardCharsets.UTF_8));</b>
+<b class="fc">&nbsp;        encryptionProvider.sign(bais, baos);</b>
+&nbsp;        bais.close();
+<b class="fc">&nbsp;        return baos;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    // Static methods kept for backward compatibility (deprecated - use instance methods)
+&nbsp;    @Deprecated
+&nbsp;    public static Object getSignedObject(ConnectX cx, String cxID, InputStream is, Class&lt;?&gt; clazz, String method) throws Exception {
+<b class="nc">&nbsp;        return cx.getSignedObject(cxID, is, clazz, method);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    @Deprecated
+&nbsp;    public static ByteArrayOutputStream signObject(ConnectX cx, Object o, Class&lt;?&gt; clazz, String method) throws Exception {
+<b class="nc">&nbsp;        return cx.signObject(o, clazz, method);</b>
+&nbsp;    }
+&nbsp;    public String getOwnID() {
+<b class="pc">&nbsp;        return self != null ? self.cxID : null;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Queue an event for transmission
+&nbsp;     * Encapsulates access to instance outputQueue
+&nbsp;     * @param bundle OutputBundle to queue
+&nbsp;     */
+&nbsp;    public void queueEvent(OutputBundle bundle) {
+&nbsp;        // Debug logging for CXHELLO
+<b class="pc">&nbsp;        if (bundle != null &amp;&amp; bundle.ne != null &amp;&amp; bundle.ne.eT != null &amp;&amp; bundle.ne.eT.contains(&quot;HELLO&quot;)) {</b>
+<b class="fc">&nbsp;            System.out.println(&quot;[queueEvent-DEBUG] Queuing &quot; + bundle.ne.eT +</b>
+<b class="fc">&nbsp;                &quot; to peer &quot; + getOwnID().substring(0, 8) +</b>
+<b class="fc">&nbsp;                &quot;, queue size before: &quot; + outputQueue.size());</b>
+&nbsp;        }
+<b class="fc">&nbsp;        outputQueue.add(bundle);</b>
+<b class="pc">&nbsp;        if (bundle != null &amp;&amp; bundle.ne != null &amp;&amp; bundle.ne.eT != null &amp;&amp; bundle.ne.eT.contains(&quot;HELLO&quot;)) {</b>
+<b class="fc">&nbsp;            System.out.println(&quot;[queueEvent-DEBUG] Queue size after: &quot; + outputQueue.size());</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Build an event using a fluent builder pattern
+&nbsp;     * Simplifies event creation by providing a concise API for required and optional parameters
+&nbsp;     *
+&nbsp;     * Example usage:
+&nbsp;     * &lt;pre&gt;
+&nbsp;     * // Network routing
+&nbsp;     * buildEvent(EventType.MESSAGE, &quot;Hello World&quot;.getBytes())
+&nbsp;     *     .toNetwork(&quot;CXNET&quot;)
+&nbsp;     *     .queue();
+&nbsp;     *
+&nbsp;     * // Peer-to-peer routing
+&nbsp;     * buildEvent(EventType.MESSAGE, &quot;Hello&quot;.getBytes())
+&nbsp;     *     .toPeer(targetCxID)
+&nbsp;     *     .encrypted(true)
+&nbsp;     *     .queue();
+&nbsp;     *
+&nbsp;     * // Bridge routing
+&nbsp;     * buildEvent(EventType.MESSAGE, data)
+&nbsp;     *     .viaBridge(&quot;cxHTTP1&quot;, &quot;https://example.com/cx&quot;)
+&nbsp;     *     .queue();
+&nbsp;     * &lt;/pre&gt;
+&nbsp;     *
+&nbsp;     * @param eventType The type of event to create
+&nbsp;     * @param data The event data payload
+&nbsp;     * @return EventBuilder for chaining optional parameters
+&nbsp;     */
+&nbsp;    public EventBuilder buildEvent(EventType eventType, byte[] data) {
+<b class="fc">&nbsp;        return new EventBuilder(this, eventType, data);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Fluent builder for creating and queuing NetworkEvents over the CX protocol.
+&nbsp;     *
+&nbsp;     * &lt;p&gt;Create an instance with {@link ConnectX#buildEvent(EventType, byte[])}. Chain the
+&nbsp;     * configuration methods you need, then call {@link #queue()} to submit.&lt;/p&gt;
+&nbsp;     *
+&nbsp;     * &lt;h2&gt;Routing scopes&lt;/h2&gt;
+&nbsp;     * &lt;ul&gt;
+&nbsp;     *   &lt;li&gt;&lt;b&gt;CXS&lt;/b&gt; - Single-peer delivery. Use {@link #toPeer(String)} or {@link #toPeer(Node)}.
+&nbsp;     *       The event is delivered only to that one node.&lt;/li&gt;
+&nbsp;     *   &lt;li&gt;&lt;b&gt;CXN&lt;/b&gt; - Network broadcast. Use {@link #toNetwork(String, Long)}.
+&nbsp;     *       The event is fanned out to every peer in the named network.&lt;/li&gt;
+&nbsp;     * &lt;/ul&gt;
+&nbsp;     *
+&nbsp;     * &lt;h2&gt;Signing vs encryption&lt;/h2&gt;
+&nbsp;     * &lt;ul&gt;
+&nbsp;     *   &lt;li&gt;{@link #signData()} - Signs {@code event.d} with the sender&#39;s key so the receiver can
+&nbsp;     *       verify authenticity. Required for most CXS events that are not E2E-encrypted.
+&nbsp;     *       The signed blob replaces {@code event.d}.&lt;/li&gt;
+&nbsp;     *   &lt;li&gt;{@link #addRecipient(String)} + {@link #encrypt()} - End-to-end encrypts {@code event.d}
+&nbsp;     *       for the listed recipients. Sets {@code event.e2e = true}. Call
+&nbsp;     *       {@code addRecipient} before {@code encrypt}, and call {@code encrypt} before
+&nbsp;     *       {@code toPeer} / {@code queue}. &lt;strong&gt;Do not also call {@code signData()} when
+&nbsp;     *       using E2E&lt;/strong&gt; - the encryption layer handles authentication.&lt;/li&gt;
+&nbsp;     * &lt;/ul&gt;
+&nbsp;     *
+&nbsp;     * &lt;h2&gt;Common patterns&lt;/h2&gt;
+&nbsp;     *
+&nbsp;     * &lt;p&gt;&lt;b&gt;1. Plain signed message to a peer (most common for protocol events)&lt;/b&gt;&lt;/p&gt;
+&nbsp;     * &lt;pre&gt;{@code
+&nbsp;     * connectX.buildEvent(EventType.MESSAGE, &quot;hello&quot;.getBytes(&quot;UTF-8&quot;))
+&nbsp;     *     .toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;)
+&nbsp;     *     .signData()
+&nbsp;     *     .queue();
+&nbsp;     * }&lt;/pre&gt;
+&nbsp;     *
+&nbsp;     * &lt;p&gt;&lt;b&gt;2. End-to-end encrypted message to a peer&lt;/b&gt;&lt;/p&gt;
+&nbsp;     * &lt;pre&gt;{@code
+&nbsp;     * String recipientID = &quot;00000000-0000-0000-0000-000000000001&quot;;
+&nbsp;     * connectX.buildEvent(EventType.MESSAGE, &quot;secret&quot;.getBytes(&quot;UTF-8&quot;))
+&nbsp;     *     .addRecipient(recipientID)   // who can decrypt
+&nbsp;     *     .encrypt()                   // encrypt BEFORE routing/queue
+&nbsp;     *     .toPeer(recipientID)         // where to deliver
+&nbsp;     *     .queue();
+&nbsp;     * }&lt;/pre&gt;
+&nbsp;     *
+&nbsp;     * &lt;p&gt;&lt;b&gt;3. Network broadcast (CXN) recorded to the event chain&lt;/b&gt;&lt;/p&gt;
+&nbsp;     * &lt;pre&gt;{@code
+&nbsp;     * // network.networkDictionary.c3 is the events chain ID
+&nbsp;     * connectX.buildEvent(EventType.REGISTER_NODE,
+&nbsp;     *         ConnectX.serialize(&quot;cxJSON1&quot;, myNodeRegistration).getBytes(&quot;UTF-8&quot;))
+&nbsp;     *     .toNetwork(&quot;MYNET&quot;, network.networkDictionary.c3)
+&nbsp;     *     .withRecordFlag(true)
+&nbsp;     *     .queue();
+&nbsp;     * }&lt;/pre&gt;
+&nbsp;     *
+&nbsp;     * &lt;p&gt;&lt;b&gt;4. Signed network management event to a specific peer&lt;/b&gt;&lt;/p&gt;
+&nbsp;     * &lt;pre&gt;{@code
+&nbsp;     * NodeModeration mod = new NodeModeration(&quot;CXNET&quot;, targetNodeID, &quot;reason&quot;);
+&nbsp;     * connectX.buildEvent(EventType.BLOCK_NODE,
+&nbsp;     *         ConnectX.serialize(&quot;cxJSON1&quot;, mod).getBytes(&quot;UTF-8&quot;))
+&nbsp;     *     .toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;)
+&nbsp;     *     .signData()
+&nbsp;     *     .queue();
+&nbsp;     * }&lt;/pre&gt;
+&nbsp;     *
+&nbsp;     * &lt;p&gt;&lt;b&gt;5. Routing via a bridge (e.g. HTTP reverse proxy)&lt;/b&gt;&lt;/p&gt;
+&nbsp;     * &lt;pre&gt;{@code
+&nbsp;     * connectX.buildEvent(EventType.MESSAGE, data)
+&nbsp;     *     .toPeer(&quot;00000000-0000-0000-0000-000000000001&quot;)
+&nbsp;     *     .viaBridge(&quot;cxHTTP1&quot;, &quot;https://cx7.anvildevelopment.us/cx&quot;)
+&nbsp;     *     .signData()
+&nbsp;     *     .queue();
+&nbsp;     * }&lt;/pre&gt;
+&nbsp;     *
+&nbsp;     * &lt;h2&gt;Common mistakes&lt;/h2&gt;
+&nbsp;     * &lt;ul&gt;
+&nbsp;     *   &lt;li&gt;&lt;strong&gt;Called {@code addRecipient()} but forgot {@code encrypt()}&lt;/strong&gt; - the data
+&nbsp;     *       is sent in the clear and a WARNING is printed. Always follow
+&nbsp;     *       {@code addRecipient} with {@code encrypt}.&lt;/li&gt;
+&nbsp;     *   &lt;li&gt;&lt;strong&gt;Called {@code encrypt()} without any {@code addRecipient()}&lt;/strong&gt; - throws
+&nbsp;     *       immediately. Add at least one recipient first.&lt;/li&gt;
+&nbsp;     *   &lt;li&gt;&lt;strong&gt;Called {@code signData()} on an E2E message&lt;/strong&gt; - unnecessary and can
+&nbsp;     *       break decryption. Use one or the other.&lt;/li&gt;
+&nbsp;     *   &lt;li&gt;&lt;strong&gt;Called {@code toNetwork(String)} without a chainID&lt;/strong&gt; - the overload
+&nbsp;     *       that omits chainID is deprecated; prefer
+&nbsp;     *       {@link #toNetwork(String, Long)} to specify which chain records the event.&lt;/li&gt;
+&nbsp;     * &lt;/ul&gt;
+&nbsp;     *
+&nbsp;     * &lt;h2&gt;Recommended call order&lt;/h2&gt;
+&nbsp;     * &lt;ol&gt;
+&nbsp;     *   &lt;li&gt;Optional: {@code addRecipient()} (one or more)&lt;/li&gt;
+&nbsp;     *   &lt;li&gt;Optional: {@code encrypt()} (E2E path) &lt;em&gt;or&lt;/em&gt; {@code signData()} (signed path)&lt;/li&gt;
+&nbsp;     *   &lt;li&gt;{@code toPeer()} or {@code toNetwork()} (sets routing scope)&lt;/li&gt;
+&nbsp;     *   &lt;li&gt;Optional: {@code viaBridge()}, {@code withRecordFlag()}, etc.&lt;/li&gt;
+&nbsp;     *   &lt;li&gt;{@code queue()} (terminal - submits the event)&lt;/li&gt;
+&nbsp;     * &lt;/ol&gt;
+&nbsp;     */
+&nbsp;    public static class EventBuilder {
+&nbsp;        private final ConnectX connectX;
+&nbsp;        private final NetworkEvent event;
+&nbsp;        private final NetworkContainer container;
+&nbsp;        private final CXPath path;
+<b class="fc">&nbsp;        private boolean lookupWait = false;</b>
+&nbsp;
+<b class="fc">&nbsp;        private Node targetNode = null;</b>
+<b class="fc">&nbsp;        private String recipientPublicKey = null;</b>
+<b class="fc">&nbsp;        private byte[] signature = null;</b>
+<b class="fc">&nbsp;        private java.util.List&lt;String&gt; encryptionRecipients = new java.util.ArrayList&lt;&gt;();</b>
+&nbsp;
+<b class="fc">&nbsp;        private EventBuilder(ConnectX connectX, EventType eventType, byte[] data) {</b>
+<b class="fc">&nbsp;            this.connectX = connectX;</b>
+&nbsp;
+&nbsp;            // Create event
+<b class="fc">&nbsp;            this.event = new NetworkEvent(eventType, data);</b>
+<b class="fc">&nbsp;            this.event.eT = eventType.name();</b>
+&nbsp;
+&nbsp;            // Create path with defaults
+<b class="fc">&nbsp;            this.path = new CXPath();</b>
+<b class="fc">&nbsp;            this.event.p = path;</b>
+&nbsp;
+&nbsp;            // Create container with defaults
+<b class="fc">&nbsp;            this.container = new NetworkContainer();</b>
+<b class="fc">&nbsp;            this.container.se = &quot;cxJSON1&quot;;  // Default serialization</b>
+<b class="fc">&nbsp;            this.container.s = false;        // Default not encrypted</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // ========== Convenience Methods for Common Routing Patterns ==========
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Route to a specific network using CXN scope
+&nbsp;         * Shorthand for scope(&quot;CXN&quot;).network(networkId)
+&nbsp;         * @param networkId The target network ID
+&nbsp;         * @deprecated Use toNetwork(networkId, chainID) to specify blockchain recording chain
+&nbsp;         */
+&nbsp;        public EventBuilder toNetwork(String networkId) {
+<b class="fc">&nbsp;            this.path.scope = &quot;CXN&quot;;</b>
+<b class="fc">&nbsp;            this.path.network = networkId;</b>
+<b class="fc">&nbsp;            this.path.cxID = &quot;*&quot;;  // Broadcast to all network peers by default</b>
+<b class="fc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Route to a specific network using CXN scope with blockchain recording
+&nbsp;         * @param networkId The target network ID
+&nbsp;         * @param chainID The chain ID to record events to (e.g., network.networkDictionary.c3 for events)
+&nbsp;         */
+&nbsp;        public EventBuilder toNetwork(String networkId, Long chainID) {
+<b class="nc">&nbsp;            this.path.scope = &quot;CXN&quot;;</b>
+<b class="nc">&nbsp;            this.path.network = networkId;</b>
+<b class="nc">&nbsp;            this.path.chainID = chainID;</b>
+<b class="nc">&nbsp;            this.path.cxID = &quot;*&quot;;  // Broadcast to all network peers by default</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Route directly to a peer using P2P scope (by cxID)
+&nbsp;         * The Node will be looked up from PeerDirectory during transmission
+&nbsp;         * @param cxID The target peer&#39;s cxID
+&nbsp;         */
+&nbsp;        public EventBuilder toPeer(String cxID) {
+<b class="fc">&nbsp;            this.path.scope = &quot;CXS&quot;;  // CXS = ConnectX Secure (single peer transmission)</b>
+<b class="fc">&nbsp;            this.path.cxID = cxID;</b>
+&nbsp;            // Node lookup will happen during transmission if not set
+<b class="fc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Route directly to a peer using P2P scope (with Node object)
+&nbsp;         * @param node The target Node object
+&nbsp;         */
+&nbsp;        public EventBuilder toPeer(Node node) {
+<b class="nc">&nbsp;            this.path.scope = &quot;CXS&quot;;  // CXS = ConnectX Secure (single peer transmission)</b>
+<b class="nc">&nbsp;            if (node != null) {</b>
+<b class="nc">&nbsp;                this.path.cxID = node.cxID;</b>
+<b class="nc">&nbsp;                this.targetNode = node;</b>
+&nbsp;            }
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Route via a bridge provider
+&nbsp;         * @param bridgeType The bridge provider type (e.g., &quot;cxHTTP1&quot;)
+&nbsp;         * @param bridgeArg The bridge-specific argument (e.g., URL)
+&nbsp;         */
+&nbsp;        public EventBuilder viaBridge(String bridgeType, String bridgeArg) {
+<b class="fc">&nbsp;            this.path.bridge = bridgeType;</b>
+<b class="fc">&nbsp;            this.path.bridgeArg = bridgeArg;</b>
+<b class="fc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Route to a specific resource on a network
+&nbsp;         * @param networkId The network ID
+&nbsp;         * @param resourceId The resource ID
+&nbsp;         */
+&nbsp;        public EventBuilder toResource(String networkId, String resourceId) {
+<b class="nc">&nbsp;            this.path.scope = &quot;CXN&quot;;</b>
+<b class="nc">&nbsp;            this.path.network = networkId;</b>
+<b class="nc">&nbsp;            this.path.resourceID = resourceId;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // ========== CXPath Configuration Methods ==========
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set the routing scope
+&nbsp;         * @param scope Routing scope (e.g., &quot;CXN&quot;, &quot;P2P&quot;, &quot;LAN&quot;)
+&nbsp;         */
+&nbsp;        public EventBuilder scope(String scope) {
+<b class="fc">&nbsp;            this.path.scope = scope;</b>
+<b class="fc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set the target network for CXN scope routing
+&nbsp;         * @param network Network ID
+&nbsp;         */
+&nbsp;        public EventBuilder network(String network) {
+<b class="nc">&nbsp;            this.path.network = network;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set the target peer by cxID
+&nbsp;         * @param cxID Target peer&#39;s cxID
+&nbsp;         */
+&nbsp;        public EventBuilder targetPeer(String cxID) {
+<b class="fc">&nbsp;            this.path.cxID = cxID;</b>
+&nbsp;            // Node lookup will happen during transmission if not set
+<b class="fc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set the target peer by Node object
+&nbsp;         * @param node Target Node object
+&nbsp;         */
+&nbsp;        public EventBuilder targetPeer(Node node) {
+<b class="nc">&nbsp;            if (node != null) {</b>
+<b class="nc">&nbsp;                this.path.cxID = node.cxID;</b>
+<b class="nc">&nbsp;                this.targetNode = node;</b>
+&nbsp;            }
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set the bridge provider type
+&nbsp;         * @param bridge Bridge type (e.g., &quot;cxHTTP1&quot;)
+&nbsp;         */
+&nbsp;        public EventBuilder bridge(String bridge) {
+<b class="nc">&nbsp;            this.path.bridge = bridge;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set the bridge-specific argument
+&nbsp;         * @param bridgeArg Bridge argument (e.g., URL, address)
+&nbsp;         */
+&nbsp;        public EventBuilder bridgeArg(String bridgeArg) {
+<b class="nc">&nbsp;            this.path.bridgeArg = bridgeArg;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set the target address
+&nbsp;         * @param address Network address
+&nbsp;         */
+&nbsp;        public EventBuilder address(String address) {
+<b class="nc">&nbsp;            this.path.address = address;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set the protocol version
+&nbsp;         * @param version Version number
+&nbsp;         */
+&nbsp;        public EventBuilder pathVersion(Integer version) {
+<b class="nc">&nbsp;            this.path.version = version;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set the target resource ID
+&nbsp;         * @param resourceID Resource identifier
+&nbsp;         */
+&nbsp;        public EventBuilder resourceID(String resourceID) {
+<b class="nc">&nbsp;            this.path.resourceID = resourceID;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set the target blockchain chain ID for recording
+&nbsp;         * @param chainID Chain identifier (c1, c2, or c3)
+&nbsp;         */
+&nbsp;        public EventBuilder chainID(Long chainID) {
+<b class="nc">&nbsp;            this.path.chainID = chainID;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set a complete custom CXPath
+&nbsp;         * @param customPath The CXPath to use
+&nbsp;         */
+&nbsp;        public EventBuilder path(CXPath customPath) {
+<b class="nc">&nbsp;            this.event.p = customPath;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // ========== NetworkEvent Configuration Methods ==========
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set custom event ID (normally auto-generated)
+&nbsp;         * @param eventId Event identifier
+&nbsp;         */
+&nbsp;        public EventBuilder eventId(String eventId) {
+<b class="nc">&nbsp;            this.event.iD = eventId;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set the processing method
+&nbsp;         * @param method Method identifier for event processing
+&nbsp;         */
+&nbsp;        public EventBuilder method(String method) {
+<b class="nc">&nbsp;            this.event.m = method;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set the auto-record flag
+&nbsp;         * When true, event will be automatically recorded to blockchain if sender has Record permission
+&nbsp;         * @param record True to enable automatic recording (default: false)
+&nbsp;         */
+&nbsp;        public EventBuilder withRecordFlag(boolean record) {
+<b class="nc">&nbsp;            this.event.r = record;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set the executeOnSync flag
+&nbsp;         * When true, event will be executed during blockchain sync to rebuild state
+&nbsp;         * @param executeOnSync True for state-modifying events (default: false)
+&nbsp;         */
+&nbsp;        public EventBuilder withExecuteOnSync(boolean executeOnSync) {
+<b class="nc">&nbsp;            this.event.executeOnSync = executeOnSync;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // ========== NetworkContainer Configuration Methods ==========
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set serialization format
+&nbsp;         * @param format Serialization format (default: &quot;cxJSON1&quot;)
+&nbsp;         */
+&nbsp;        public EventBuilder serialization(String format) {
+<b class="nc">&nbsp;            this.container.se = format;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set whether the event should be E2E encrypted
+&nbsp;         * @param encrypted True for encrypted transmission (default: false)
+&nbsp;         */
+&nbsp;        public EventBuilder encrypted(boolean encrypted) {
+<b class="nc">&nbsp;            this.container.s = encrypted;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set the container ID
+&nbsp;         * @param containerId Container identifier
+&nbsp;         */
+&nbsp;        public EventBuilder containerId(String containerId) {
+<b class="nc">&nbsp;            this.container.iD = containerId;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set transmission preferences
+&nbsp;         * @param transmitPref Transmission preference settings
+&nbsp;         */
+&nbsp;        public EventBuilder transmitPreference(dev.droppinganvil.v3.network.nodemesh.TransmitPref transmitPref) {
+<b class="nc">&nbsp;            this.container.tP = transmitPref;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set container version
+&nbsp;         * @param version Version number
+&nbsp;         */
+&nbsp;        public EventBuilder containerVersion(Double version) {
+<b class="nc">&nbsp;            this.container.v = version;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set thread ID
+&nbsp;         * @param threadId Thread identifier for conversation threading
+&nbsp;         */
+&nbsp;        public EventBuilder threadId(String threadId) {
+<b class="nc">&nbsp;            this.container.tID = threadId;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // ========== OutputBundle Configuration Methods ==========
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set recipient public key for encryption
+&nbsp;         * @param publicKey Recipient&#39;s public key
+&nbsp;         */
+&nbsp;        public EventBuilder recipientKey(String publicKey) {
+<b class="nc">&nbsp;            this.recipientPublicKey = publicKey;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Set custom signature (normally auto-generated during transmission)
+&nbsp;         * @param signature Pre-computed signature
+&nbsp;         */
+&nbsp;        public EventBuilder signature(byte[] signature) {
+<b class="nc">&nbsp;            this.signature = signature;</b>
+<b class="nc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         *  !IMPORTANT!
+&nbsp;         * Sign the event data payload
+&nbsp;         * Replaces event.d with a signed blob, preserving the original signature for relay
+&nbsp;         * Used for NewNode events where the Node blob must be signed by the sender
+&nbsp;         * IF E2E is not in use signData IS REQUIRED, it will fail to pass CX cryptography
+&nbsp;         * @return This builder for chaining
+&nbsp;         */
+&nbsp;        public EventBuilder signData() {
+&nbsp;            try {
+&nbsp;                // Sign the current data payload
+<b class="fc">&nbsp;                ByteArrayInputStream dataInput = new ByteArrayInputStream(this.event.d);</b>
+<b class="fc">&nbsp;                ByteArrayOutputStream signedOutput = new ByteArrayOutputStream();</b>
+<b class="fc">&nbsp;                connectX.encryptionProvider.sign(dataInput, signedOutput);</b>
+&nbsp;                dataInput.close();
+&nbsp;
+&nbsp;                // Replace event data with signed blob
+<b class="fc">&nbsp;                this.event.d = signedOutput.toByteArray();</b>
+&nbsp;                signedOutput.close();
+&nbsp;            } catch (Exception e) {
+<b class="nc">&nbsp;                throw new RuntimeException(&quot;Failed to sign event data&quot;, e);</b>
+&nbsp;            }
+<b class="fc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Add a recipient for E2E encryption
+&nbsp;         * Can be called multiple times to add multiple recipients
+&nbsp;         * Provider should encrypt the message so all listed recipients can decrypt it
+&nbsp;         * @param cxID Recipient&#39;s cxID
+&nbsp;         * @return This builder for chaining
+&nbsp;         */
+&nbsp;        public EventBuilder addRecipient(String cxID) {
+<b class="pc">&nbsp;            if (cxID != null &amp;&amp; !cxID.isEmpty()) {</b>
+<b class="fc">&nbsp;                this.encryptionRecipients.add(cxID);</b>
+&nbsp;            }
+<b class="fc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * !IMPORTANT!
+&nbsp;         * Encrypt the event data payload for all added recipients (E2E encryption)
+&nbsp;         * Sets the e2e flag to true so receiver knows to decrypt
+&nbsp;         * Replaces event.d with encrypted blob that can only be read by recipients
+&nbsp;         * Use addRecipient() before calling this to specify who can decrypt
+&nbsp;         * If not using signData(), encrypt() is REQUIRED
+&nbsp;         * @return This builder for chaining
+&nbsp;         */
+&nbsp;        public EventBuilder encrypt() {
+&nbsp;            try {
+<b class="pc">&nbsp;                if (encryptionRecipients.isEmpty()) {</b>
+<b class="nc">&nbsp;                    throw new RuntimeException(&quot;No encryption recipients specified - call addRecipient() first&quot;);</b>
+&nbsp;                }
+&nbsp;
+&nbsp;                // Encrypt the current data payload for all recipients
+<b class="fc">&nbsp;                ByteArrayInputStream dataInput = new ByteArrayInputStream(this.event.d);</b>
+<b class="fc">&nbsp;                ByteArrayOutputStream encryptedOutput = new ByteArrayOutputStream();</b>
+&nbsp;               // for (String cxID : encryptionRecipients) {
+&nbsp;             //       connectX.nodeMesh.peerDirectory.lookup(cxID, true, true);
+&nbsp;             //   }
+<b class="fc">&nbsp;                connectX.encryptionProvider.encrypt(dataInput, encryptedOutput, encryptionRecipients);</b>
+&nbsp;                dataInput.close();
+&nbsp;
+&nbsp;                // Replace event data with encrypted blob
+<b class="fc">&nbsp;                this.event.d = encryptedOutput.toByteArray();</b>
+&nbsp;                encryptedOutput.close();
+&nbsp;
+&nbsp;                // Set E2E flag so receiver knows to decrypt
+<b class="fc">&nbsp;                this.event.e2e = true;</b>
+&nbsp;
+<b class="fc">&nbsp;                System.out.println(&quot;[E2E] Encrypted event data for &quot; + encryptionRecipients.size() + &quot; recipients&quot;);</b>
+&nbsp;            } catch (Exception e) {
+<b class="nc">&nbsp;                throw new RuntimeException(&quot;Failed to encrypt event data&quot;, e);</b>
+&nbsp;            }
+<b class="fc">&nbsp;            return this;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // ========== Terminal Operations ==========
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Build the OutputBundle and queue it for transmission
+&nbsp;         * This is the terminal operation that actually queues the event
+&nbsp;         */
+&nbsp;        public void queue() {
+&nbsp;            // Warn if addRecipient() was called but encrypt() was never invoked - data will be sent in clear
+<b class="pc">&nbsp;            if (!encryptionRecipients.isEmpty() &amp;&amp; !event.e2e) {</b>
+<b class="nc">&nbsp;                System.err.println(&quot;[EventBuilder] WARNING: addRecipient() called but encrypt() was never invoked for &quot;</b>
+&nbsp;                    + event.eT + &quot; - call .encrypt() before .queue() for E2E encryption&quot;);
+&nbsp;            }
+&nbsp;
+&nbsp;            // Set origin CXID to sender&#39;s actual ID for signature verification
+<b class="pc">&nbsp;            if (this.path.oCXID == null &amp;&amp; connectX.self != null) {</b>
+<b class="fc">&nbsp;                this.path.oCXID = connectX.self.cxID;</b>
+&nbsp;            }
+&nbsp;            /// EXPERIMENTAL
+<b class="fc">&nbsp;            container.p = path;</b>
+&nbsp;            /*
+&nbsp;            The node should be looked up for future use and added with .toPeer(Node), this is for backwards compatibility with some features that require this method
+&nbsp;             */
+<b class="pc">&nbsp;           if (this.path.scope.equals(&quot;CXS&quot;) &amp;&amp; this.targetNode == null) {</b>
+<b class="fc">&nbsp;                targetNode = new Node();</b>
+<b class="fc">&nbsp;               targetNode.cxID = this.path.cxID;</b>
+&nbsp;            }
+&nbsp;           ///
+&nbsp;            // Create output bundle with all configured parameters
+<b class="fc">&nbsp;            OutputBundle bundle = new OutputBundle(</b>
+&nbsp;                event,
+&nbsp;                targetNode,
+&nbsp;                recipientPublicKey,
+&nbsp;                signature,
+&nbsp;                container
+&nbsp;            );
+&nbsp;
+&nbsp;            // Queue the event
+<b class="fc">&nbsp;            connectX.queueEvent(bundle);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Build the OutputBundle without queuing it
+&nbsp;         * Useful if you need to inspect or modify the bundle before queuing
+&nbsp;         * @return The constructed OutputBundle
+&nbsp;         */
+&nbsp;        public OutputBundle build() {
+&nbsp;            // Set origin CXID to sender&#39;s actual ID for signature verification
+<b class="nc">&nbsp;            if (this.path.oCXID == null &amp;&amp; connectX.self != null) {</b>
+<b class="nc">&nbsp;                this.path.oCXID = connectX.self.cxID;</b>
+&nbsp;            }
+&nbsp;
+<b class="nc">&nbsp;            return new OutputBundle(</b>
+&nbsp;                event,
+&nbsp;                targetNode,
+&nbsp;                recipientPublicKey,
+&nbsp;                signature,
+&nbsp;                container
+&nbsp;            );
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Get the NetworkEvent being built (for advanced use cases)
+&nbsp;         * @return The NetworkEvent instance
+&nbsp;         */
+&nbsp;        public NetworkEvent getEvent() {
+<b class="nc">&nbsp;            return event;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Get the NetworkContainer being built (for advanced use cases)
+&nbsp;         * @return The NetworkContainer instance
+&nbsp;         */
+&nbsp;        public NetworkContainer getContainer() {
+<b class="nc">&nbsp;            return container;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        /**
+&nbsp;         * Get the CXPath being built (for advanced use cases)
+&nbsp;         * @return The CXPath instance
+&nbsp;         */
+&nbsp;        public CXPath getPath() {
+<b class="fc">&nbsp;            return path;</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    public void setSelf(Node selfNode) {
+<b class="fc">&nbsp;        self = selfNode;</b>
+&nbsp;        // Purge self from peer directory in case stale data was loaded before identity was set
+<b class="pc">&nbsp;        if (selfNode != null &amp;&amp; nodeMesh != null) {</b>
+<b class="nc">&nbsp;            purgeFromPeerDirectory(nodeMesh.peerDirectory);</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Returns true if the given node represents this node itself.
+&nbsp;     * Checks both cxID and public key so a stale entry with a different ID
+&nbsp;     * but our key is also caught.
+&nbsp;     */
+&nbsp;    public boolean isSelfNode(dev.droppinganvil.v3.network.nodemesh.Node node) {
+<b class="pc">&nbsp;        if (node == null) return false;</b>
+<b class="pc">&nbsp;        if (node.cxID != null &amp;&amp; node.cxID.equals(getOwnID())) return true;</b>
+<b class="pc">&nbsp;        if (node.publicKey != null) {</b>
+<b class="pc">&nbsp;            String ownKey = encryptionProvider != null ? encryptionProvider.getPublicKey() : null;</b>
+<b class="pc">&nbsp;            if (ownKey != null &amp;&amp; ownKey.equals(node.publicKey)) return true;</b>
+&nbsp;        }
+<b class="fc">&nbsp;        return false;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /** Remove all self entries from all peer directory maps. Checks both cxID and public key. */
+&nbsp;    private void purgeFromPeerDirectory(dev.droppinganvil.v3.network.nodemesh.PeerDirectory pd) {
+<b class="nc">&nbsp;        if (pd == null) return;</b>
+<b class="nc">&nbsp;        purgeSelfFromMap(pd.hv);</b>
+<b class="nc">&nbsp;        purgeSelfFromMap(pd.seen);</b>
+<b class="nc">&nbsp;        purgeSelfFromMap(pd.lan);</b>
+<b class="nc">&nbsp;        purgeSelfFromMap(pd.peerCache);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    private void purgeSelfFromMap(java.util.concurrent.ConcurrentHashMap&lt;String, Node&gt; map) {
+<b class="nc">&nbsp;        if (map == null) return;</b>
+<b class="nc">&nbsp;        java.util.Iterator&lt;java.util.Map.Entry&lt;String, Node&gt;&gt; it = map.entrySet().iterator();</b>
+<b class="nc">&nbsp;        while (it.hasNext()) {</b>
+<b class="nc">&nbsp;            if (isSelfNode(it.next().getValue())) it.remove();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    public Node getSelf() {
+<b class="fc">&nbsp;        return self;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Register a high-value peer (e.g., NMI/EPOCH) in the peer directory.
+&nbsp;     * Use this instead of accessing nodeMesh.peerDirectory.hv directly.
+&nbsp;     *
+&nbsp;     * @param node The trusted node to register
+&nbsp;     */
+&nbsp;    public void registerHVPeer(Node node) {
+<b class="nc">&nbsp;        if (nodeMesh == null || node == null || node.cxID == null) return;</b>
+<b class="nc">&nbsp;        if (isSelfNode(node)) {</b>
+<b class="nc">&nbsp;            System.err.println(&quot;[registerHVPeer] Rejected attempt to register self as HV peer&quot;);</b>
+&nbsp;            return;
+&nbsp;        }
+<b class="nc">&nbsp;        if (nodeMesh.peerDirectory.hv == null) {</b>
+<b class="nc">&nbsp;            nodeMesh.peerDirectory.hv = new java.util.concurrent.ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;        }
+<b class="nc">&nbsp;        nodeMesh.peerDirectory.hv.put(node.cxID, node);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Initialize cryptography with a random UUID
+&nbsp;     * Convenience method for testing and simple deployments
+&nbsp;     * @param password Password for private key encryption
+&nbsp;     * @param listenAddress Listen address for this node (e.g., &quot;127.0.0.1:49153&quot;)
+&nbsp;     * @return The generated UUID (also accessible via getOwnID())
+&nbsp;     * @throws Exception if crypto initialization fails
+&nbsp;     */
+&nbsp;    public String initializeCrypto(String password, String listenAddress) throws Exception {
+<b class="nc">&nbsp;        String uuid = java.util.UUID.randomUUID().toString();</b>
+<b class="nc">&nbsp;        return initializeCrypto(uuid, password, listenAddress);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Initialize cryptography with a specific UUID
+&nbsp;     * @param cxID UUID for this node
+&nbsp;     * @param password Password for private key encryption
+&nbsp;     * @param listenAddress Listen address for this node (e.g., &quot;127.0.0.1:49153&quot;)
+&nbsp;     * @return The cxID (same as parameter)
+&nbsp;     * @throws Exception if crypto initialization fails
+&nbsp;     */
+&nbsp;    public String initializeCrypto(String cxID, String password, String listenAddress) throws Exception {
+&nbsp;        // Initialize encryption provider
+<b class="fc">&nbsp;        encryptionProvider.setup(cxID, password, cxRoot);</b>
+&nbsp;
+&nbsp;        // Create and set self node
+<b class="fc">&nbsp;        Node selfNode = new Node();</b>
+<b class="fc">&nbsp;        selfNode.cxID = cxID;</b>
+<b class="fc">&nbsp;        selfNode.publicKey = encryptionProvider.getPublicKey();</b>
+<b class="fc">&nbsp;        selfNode.addr = listenAddress;</b>
+<b class="fc">&nbsp;        setSelf(selfNode);</b>
+&nbsp;
+<b class="fc">&nbsp;        return cxID;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Set the public bridge address for this node
+&nbsp;     * Used when node is behind NAT/firewall and accessible via HTTP bridge
+&nbsp;     * @param bridgeProtocol Bridge protocol (e.g., &quot;cxHTTP1&quot;)
+&nbsp;     * @param bridgeEndpoint Public endpoint (e.g., &quot;https://cx1.anvildevelopment.us/cx&quot;)
+&nbsp;     */
+&nbsp;    public void setPublicBridgeAddress(String bridgeProtocol, String bridgeEndpoint) {
+<b class="pc">&nbsp;        if (self != null) {</b>
+<b class="fc">&nbsp;            self.addr = bridgeProtocol + &quot;:&quot; + bridgeEndpoint;</b>
+<b class="fc">&nbsp;            System.out.println(&quot;[ConnectX] Updated public address: &quot; + self.addr);</b>
+<b class="fc">&nbsp;            nodeMesh.ownAddresses.add(self.addr);</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Setup bootstrap seed from EPOCH&#39;s seed file
+&nbsp;     * Copies the provided seed file to this instance&#39;s cxnet-bootstrap.cxn
+&nbsp;     * This allows the instance to bootstrap into CXNET when connect() is called
+&nbsp;     *
+&nbsp;     * @param epochSeedFile Path to EPOCH&#39;s seed file (usually latest from EPOCH/seeds/)
+&nbsp;     * @throws Exception if seed copy fails
+&nbsp;     */
+&nbsp;    public void setupBootstrap(File epochSeedFile) throws Exception {
+<b class="nc">&nbsp;        if (!epochSeedFile.exists()) {</b>
+<b class="nc">&nbsp;            throw new FileNotFoundException(&quot;EPOCH seed file not found: &quot; + epochSeedFile.getAbsolutePath());</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Copy to bootstrap seed location
+<b class="nc">&nbsp;        File bootstrapSeed = new File(cxRoot, &quot;cxnet-bootstrap.cxn&quot;);</b>
+<b class="nc">&nbsp;        java.nio.file.Files.copy(</b>
+<b class="nc">&nbsp;            epochSeedFile.toPath(),</b>
+<b class="nc">&nbsp;            bootstrapSeed.toPath(),</b>
+&nbsp;            java.nio.file.StandardCopyOption.REPLACE_EXISTING
+&nbsp;        );
+&nbsp;
+&nbsp;        // Load seed to extract cx.asc
+<b class="nc">&nbsp;        dev.droppinganvil.v3.network.Seed seed = dev.droppinganvil.v3.network.Seed.load(bootstrapSeed);</b>
+&nbsp;
+&nbsp;        // Extract EPOCH&#39;s public key (cx.asc) if not already present
+<b class="nc">&nbsp;        if (seed.certificates != null &amp;&amp; seed.certificates.containsKey(EPOCH_UUID)) {</b>
+<b class="nc">&nbsp;            File cxAsc = new File(cxRoot, &quot;cx.asc&quot;);</b>
+<b class="nc">&nbsp;            if (!cxAsc.exists()) {</b>
+<b class="nc">&nbsp;                String epochPublicKey = seed.certificates.get(EPOCH_UUID);</b>
+<b class="nc">&nbsp;                FileWriter writer = new FileWriter(cxAsc);</b>
+<b class="nc">&nbsp;                writer.write(epochPublicKey);</b>
+<b class="nc">&nbsp;                writer.flush();</b>
+&nbsp;                writer.close();
+&nbsp;            }
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Attempt to bootstrap into CXNET if not already loaded
+&nbsp;     * Bootstrap sequence:
+&nbsp;     * 1. Check if CXNET network already exists
+&nbsp;     * 2. If not, check for distribution bootstrap seed (cxnet-bootstrap.cxn)
+&nbsp;     * 3. If found, apply bootstrap seed to get initial configuration
+&nbsp;     * 4. If not found, check local seeds/ directory for any seed
+&nbsp;     * 5. If no local seed, queue SEED_REQUEST to EPOCH for latest seed
+&nbsp;     * 6. After bootstrap, automatically check for seed updates from EPOCH
+&nbsp;     */
+&nbsp;    public void attemptCXNETBootstrap() {
+&nbsp;        try {
+&nbsp;            // Check if CXNET already exists
+<b class="fc">&nbsp;            if (networkMap.containsKey(&quot;CXNET&quot;)) {</b>
+<b class="fc">&nbsp;                System.out.println(&quot;[Bootstrap] CXNET already loaded&quot;);</b>
+&nbsp;                // Even if loaded, check for updates from EPOCH
+<b class="fc">&nbsp;                requestSeedUpdateFromEpoch();</b>
+&nbsp;                return;
+&nbsp;            }
+&nbsp;
+<b class="fc">&nbsp;            System.out.println(&quot;[Bootstrap] CXNET not found, attempting bootstrap...&quot;);</b>
+&nbsp;
+&nbsp;            // Step 1: Check for distribution bootstrap seed (shipped with software)
+<b class="fc">&nbsp;            File bootstrapSeed = new File(cxRoot, &quot;cxnet-bootstrap.cxn&quot;);</b>
+<b class="pc">&nbsp;            if (bootstrapSeed.exists()) {</b>
+<b class="fc">&nbsp;                System.out.println(&quot;[Bootstrap] Found distribution bootstrap seed&quot;);</b>
+<b class="fc">&nbsp;                dev.droppinganvil.v3.network.Seed seed = dev.droppinganvil.v3.network.Seed.load(bootstrapSeed);</b>
+&nbsp;
+&nbsp;                // Apply bootstrap seed to get initial CXNET config and EPOCH&#39;s public key
+<b class="fc">&nbsp;                applySeed(seed);</b>
+&nbsp;
+<b class="fc">&nbsp;                System.out.println(&quot;[Bootstrap] Successfully bootstrapped from distribution seed&quot;);</b>
+&nbsp;
+&nbsp;                // Copy bootstrap seed to seeds/ directory for future use
+<b class="fc">&nbsp;                File seedsDir = new File(cxRoot, &quot;seeds&quot;);</b>
+<b class="pc">&nbsp;                if (!seedsDir.exists()) {</b>
+<b class="nc">&nbsp;                    seedsDir.mkdirs();</b>
+&nbsp;                }
+<b class="fc">&nbsp;                File seedCopy = new File(seedsDir, seed.seedID + &quot;.cxn&quot;);</b>
+<b class="pc">&nbsp;                if (!seedCopy.exists()) {</b>
+<b class="nc">&nbsp;                    seed.save(seedCopy);</b>
+<b class="nc">&nbsp;                    System.out.println(&quot;[Bootstrap] Saved bootstrap seed to seeds/ directory&quot;);</b>
+&nbsp;                }
+&nbsp;
+&nbsp;                // Request updated seed from EPOCH (bootstrap seed may be outdated)
+<b class="fc">&nbsp;                requestSeedUpdateFromEpoch();</b>
+&nbsp;                return;
+&nbsp;            }
+&nbsp;
+&nbsp;            // Step 2: Check for local seeds directory
+<b class="nc">&nbsp;            File seedsDir = new File(cxRoot, &quot;seeds&quot;);</b>
+<b class="nc">&nbsp;            if (!seedsDir.exists()) {</b>
+<b class="nc">&nbsp;                seedsDir.mkdirs();</b>
+<b class="nc">&nbsp;                System.out.println(&quot;[Bootstrap] Created seeds/ directory&quot;);</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Look for existing seed files
+<b class="nc">&nbsp;            File[] seedFiles = seedsDir.listFiles((dir, name) -&gt; name.endsWith(&quot;.cxn&quot;));</b>
+<b class="nc">&nbsp;            if (seedFiles != null &amp;&amp; seedFiles.length &gt; 0) {</b>
+&nbsp;                // Load the most recently modified seed
+<b class="nc">&nbsp;                File latestSeed = seedFiles[0];</b>
+<b class="nc">&nbsp;                for (File f : seedFiles) {</b>
+<b class="nc">&nbsp;                    if (f.lastModified() &gt; latestSeed.lastModified()) {</b>
+<b class="nc">&nbsp;                        latestSeed = f;</b>
+&nbsp;                    }
+&nbsp;                }
+&nbsp;
+<b class="nc">&nbsp;                System.out.println(&quot;[Bootstrap] Loading local seed: &quot; + latestSeed.getName());</b>
+<b class="nc">&nbsp;                dev.droppinganvil.v3.network.Seed seed = dev.droppinganvil.v3.network.Seed.load(latestSeed);</b>
+&nbsp;
+&nbsp;                // Apply seed (loads networks, peers, certificates)
+<b class="nc">&nbsp;                applySeed(seed);</b>
+&nbsp;
+<b class="nc">&nbsp;                System.out.println(&quot;[Bootstrap] Successfully bootstrapped from local seed&quot;);</b>
+&nbsp;
+&nbsp;                // Initiate P2P discovery with peers from seed (works even if EPOCH is offline)
+<b class="nc">&nbsp;                initiateP2PDiscovery();</b>
+&nbsp;
+&nbsp;                // Request updated seed from EPOCH (local seed may be outdated)
+<b class="nc">&nbsp;                requestSeedUpdateFromEpoch();</b>
+&nbsp;                return;
+&nbsp;            }
+&nbsp;
+&nbsp;            // Step 3: No local seed found - request from EPOCH (if we&#39;re not EPOCH)
+<b class="nc">&nbsp;            if (self != null &amp;&amp; EPOCH_UUID.equals(self.cxID)) {</b>
+<b class="nc">&nbsp;                System.out.println(&quot;[Bootstrap] This is EPOCH - no bootstrap needed&quot;);</b>
+&nbsp;                return;
+&nbsp;            }
+&nbsp;
+<b class="nc">&nbsp;            System.out.println(&quot;[Bootstrap] No bootstrap or local seed found&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;[Bootstrap] Unable to bootstrap - please obtain cxnet-bootstrap.cxn&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;[Bootstrap] Download from: https://CXNET.AnvilDevelopment.US/bootstrap&quot;);</b>
+&nbsp;
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[Bootstrap] Bootstrap attempt failed: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;            e.printStackTrace();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Request updated seed from EPOCH (called after successful bootstrap)
+&nbsp;     * This allows nodes to get the latest network configuration
+&nbsp;     */
+&nbsp;    private void requestSeedUpdateFromEpoch() {
+<b class="pc">&nbsp;        if (self != null &amp;&amp; !EPOCH_UUID.equals(self.cxID)) {</b>
+<b class="fc">&nbsp;            System.out.println(&quot;[Bootstrap] Requesting seed update from EPOCH...&quot;);</b>
+<b class="fc">&nbsp;            requestSeedFromEpoch();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Apply a seed to this ConnectX instance
+&nbsp;     * Loads networks, adds peers to directory, caches certificates, and extracts NMI public key
+&nbsp;     * @param seed Seed to apply
+&nbsp;     * @throws Exception if application fails
+&nbsp;     */
+&nbsp;    private void applySeed(dev.droppinganvil.v3.network.Seed seed) throws Exception {
+<b class="fc">&nbsp;        System.out.println(&quot;[Seed] Applying seed &quot; + seed.seedID);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;[Seed]   Networks: &quot; + seed.networks.size());</b>
+<b class="fc">&nbsp;        System.out.println(&quot;[Seed]   HV Peers: &quot; + seed.hvPeers.size());</b>
+<b class="fc">&nbsp;        System.out.println(&quot;[Seed]   Certificates: &quot; + seed.certificates.size());</b>
+&nbsp;
+&nbsp;        // IMPORTANT: Extract and save NMI public key (cx.asc) first
+&nbsp;        // This allows nodes to initialize crypto before connecting
+<b class="pc">&nbsp;        if (seed.certificates != null &amp;&amp; seed.certificates.containsKey(EPOCH_UUID)) {</b>
+<b class="fc">&nbsp;            File cxAsc = new File(cxRoot, &quot;cx.asc&quot;);</b>
+<b class="pc">&nbsp;            if (!cxAsc.exists()) {</b>
+<b class="nc">&nbsp;                String nmiPublicKey = seed.certificates.get(EPOCH_UUID);</b>
+<b class="nc">&nbsp;                FileWriter writer = new FileWriter(cxAsc);</b>
+<b class="nc">&nbsp;                writer.write(nmiPublicKey);</b>
+<b class="nc">&nbsp;                writer.flush();</b>
+&nbsp;                writer.close();
+<b class="nc">&nbsp;                System.out.println(&quot;[Seed] Extracted NMI public key to cx.asc&quot;);</b>
+&nbsp;            } else {
+<b class="fc">&nbsp;                System.out.println(&quot;[Seed] cx.asc already exists, skipping extraction&quot;);</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+&nbsp;        // Add hv peers to directory (skip self by cxID or public key)
+<b class="fc">&nbsp;        for (dev.droppinganvil.v3.network.nodemesh.Node peer : seed.hvPeers) {</b>
+<b class="pc">&nbsp;            if (isSelfNode(peer)) {</b>
+<b class="nc">&nbsp;                System.out.println(&quot;[Seed] Skipped self in hvPeers: &quot; + peer.cxID);</b>
+&nbsp;                continue;
+&nbsp;            }
+<b class="fc">&nbsp;            nodeMesh.peerDirectory.addNode(peer);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;[Seed] Added peer: &quot; + peer.cxID);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Import networks using shared registration logic
+<b class="fc">&nbsp;        for (dev.droppinganvil.v3.network.CXNetwork network : seed.networks) {</b>
+<b class="fc">&nbsp;            String networkID = network.configuration.netID;</b>
+<b class="fc">&nbsp;            System.out.println(&quot;[Seed] Importing network: &quot; + networkID);</b>
+&nbsp;
+&nbsp;            try {
+&nbsp;                // Use shared network registration (handles persistence, replay, sync)
+<b class="fc">&nbsp;                registerNetwork(network);</b>
+&nbsp;            } catch (Exception e) {
+<b class="nc">&nbsp;                System.err.println(&quot;[Seed] Failed to register network &quot; + networkID + &quot;: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;                e.printStackTrace();</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+&nbsp;        // Cache certificates
+<b class="fc">&nbsp;        for (java.util.Map.Entry&lt;String, String&gt; cert : seed.certificates.entrySet()) {</b>
+&nbsp;            try {
+<b class="fc">&nbsp;                encryptionProvider.cacheCert(cert.getKey(), false, false, this);</b>
+<b class="fc">&nbsp;                System.out.println(&quot;[Seed] Cached certificate: &quot; + cert.getKey());</b>
+&nbsp;            } catch (Exception e) {
+<b class="nc">&nbsp;                System.err.println(&quot;[Seed] Failed to cache certificate for &quot; + cert.getKey() + &quot;: &quot; + e.getMessage());</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        System.out.println(&quot;[Seed] Seed application complete&quot;);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Request CXNET seed from EPOCH NMI via SEED_REQUEST event
+&nbsp;     * First introduces this node to EPOCH via NewNode, then requests seed
+&nbsp;     * Uses CXS scope for direct node-to-node communication during bootstrap
+&nbsp;     */
+&nbsp;    private void requestSeedFromEpoch() {
+&nbsp;        try {
+<b class="fc">&nbsp;            System.out.println(&quot;[Bootstrap] Contacting EPOCH at &quot; + EPOCH_BRIDGE_ADDRESS);</b>
+&nbsp;
+&nbsp;            // Step 1: Create hardcoded EPOCH node with bridge address for bootstrap
+<b class="fc">&nbsp;            Node epochNode = new Node();</b>
+<b class="fc">&nbsp;            epochNode.cxID = EPOCH_UUID;</b>
+<b class="fc">&nbsp;            epochNode.addr = EPOCH_BRIDGE_ADDRESS; // Use HTTP bridge for initial contact</b>
+&nbsp;            // Note: EPOCH&#39;s public key will be cached when we receive signed responses
+&nbsp;
+&nbsp;            // Add EPOCH to peer directory so we can reach it
+&nbsp;            try {
+<b class="fc">&nbsp;                nodeMesh.peerDirectory.addNode(epochNode);</b>
+<b class="fc">&nbsp;                System.out.println(&quot;[Bootstrap] Added EPOCH to peer directory&quot;);</b>
+&nbsp;            } catch (SecurityException e) {
+&nbsp;                // EPOCH already exists - this is fine
+<b class="nc">&nbsp;                System.out.println(&quot;[Bootstrap] EPOCH already in peer directory&quot;);</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Step 2: Introduce ourselves to EPOCH via NewNode event
+&nbsp;            // This allows EPOCH to cache our certificate and encrypt responses for us
+<b class="pc">&nbsp;            if (self != null &amp;&amp; self.publicKey != null) {</b>
+<b class="fc">&nbsp;                System.out.println(&quot;[Bootstrap] Introducing ourselves to EPOCH...&quot;);</b>
+&nbsp;
+&nbsp;                // Serialize our node information as the event payload
+<b class="fc">&nbsp;                String selfJson = serialize(&quot;cxJSON1&quot;, self);</b>
+&nbsp;
+&nbsp;                // Send NewNode using EventBuilder pattern with signature
+<b class="fc">&nbsp;                String[] bridgeParts = EPOCH_BRIDGE_ADDRESS.split(&quot;:&quot;, 2);</b>
+<b class="fc">&nbsp;                buildEvent(dev.droppinganvil.v3.network.events.EventType.NewNode, selfJson.getBytes(&quot;UTF-8&quot;))</b>
+<b class="fc">&nbsp;                    .toPeer(EPOCH_UUID)</b>
+<b class="fc">&nbsp;                    .viaBridge(bridgeParts[0], bridgeParts[1])</b>
+<b class="fc">&nbsp;                    .signData()</b>
+<b class="fc">&nbsp;                    .queue();</b>
+&nbsp;
+<b class="fc">&nbsp;                System.out.println(&quot;[Bootstrap] NewNode introduction queued&quot;);</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Step 3: Send SEED_REQUEST to EPOCH
+<b class="fc">&nbsp;            System.out.println(&quot;[Bootstrap] Requesting CXNET seed...&quot;);</b>
+&nbsp;
+&nbsp;            // Send SEED_REQUEST using EventBuilder pattern with signature
+<b class="fc">&nbsp;            String[] bridgeParts2 = EPOCH_BRIDGE_ADDRESS.split(&quot;:&quot;, 2);</b>
+<b class="fc">&nbsp;            buildEvent(dev.droppinganvil.v3.network.events.EventType.SEED_REQUEST,</b>
+<b class="fc">&nbsp;                serialize(&quot;cxJSON1&quot;, new dev.droppinganvil.v3.network.events.SeedExchange(&quot;CXNET&quot;)).getBytes(&quot;UTF-8&quot;))</b>
+<b class="fc">&nbsp;                .toPeer(EPOCH_UUID)</b>
+<b class="fc">&nbsp;                .viaBridge(bridgeParts2[0], bridgeParts2[1])</b>
+<b class="fc">&nbsp;                .signData()</b>
+<b class="fc">&nbsp;                .queue();</b>
+&nbsp;
+<b class="fc">&nbsp;            System.out.println(&quot;[Bootstrap] SEED_REQUEST queued for EPOCH&quot;);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;[Bootstrap] Waiting for SEED_RESPONSE via HTTP bridge...&quot;);</b>
+&nbsp;
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[Bootstrap] Failed to request seed from EPOCH: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;            e.printStackTrace();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Initiate P2P discovery with all peers from seed
+&nbsp;     * Sends NewNode and PeerFinding to establish crypto and discover more peers
+&nbsp;     * This allows bootstrap to work even when EPOCH is offline
+&nbsp;     */
+&nbsp;    private void initiateP2PDiscovery() {
+&nbsp;        try {
+<b class="nc">&nbsp;            System.out.println(&quot;[P2P Discovery] Contacting &quot; + nodeMesh.peerDirectory.hv.size() + &quot; peers from seed...&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            int contactAttempts = 0;</b>
+<b class="nc">&nbsp;            for (Node peer : nodeMesh.peerDirectory.hv.values()) {</b>
+<b class="nc">&nbsp;                if (peer.cxID == null || peer.cxID.equals(getOwnID())) {</b>
+&nbsp;                    continue; // Skip invalid or self
+&nbsp;                }
+&nbsp;
+&nbsp;                try {
+&nbsp;                    // Send NewNode with SIGNED Node blob (receiver will save original signed blob for relay)
+<b class="nc">&nbsp;                    System.out.println(&quot;[P2P Discovery] Sending NewNode to &quot; + peer.cxID.substring(0, 8));</b>
+<b class="nc">&nbsp;                    String selfJson = serialize(&quot;cxJSON1&quot;, self);</b>
+<b class="nc">&nbsp;                    buildEvent(EventType.NewNode, selfJson.getBytes(&quot;UTF-8&quot;))</b>
+<b class="nc">&nbsp;                        .signData()  // Sign Node JSON to create signed blob (preserves sender signature)</b>
+<b class="nc">&nbsp;                        .toPeer(peer.cxID)</b>
+<b class="nc">&nbsp;                        .queue();</b>
+&nbsp;
+&nbsp;                    // Send PeerFinding request to discover more peers
+<b class="nc">&nbsp;                    System.out.println(&quot;[P2P Discovery] Sending PeerFinding to &quot; + peer.cxID.substring(0, 8));</b>
+<b class="nc">&nbsp;                    dev.droppinganvil.v3.network.events.PeerFinding peerFindingReq =</b>
+&nbsp;                        new dev.droppinganvil.v3.network.events.PeerFinding();
+<b class="nc">&nbsp;                    peerFindingReq.t = &quot;request&quot;;</b>
+<b class="nc">&nbsp;                    peerFindingReq.network = &quot;CXNET&quot;; // Request CXNET peers</b>
+<b class="nc">&nbsp;                    String peerFindingJson = serialize(&quot;cxJSON1&quot;, peerFindingReq);</b>
+<b class="nc">&nbsp;                    buildEvent(EventType.PeerFinding, peerFindingJson.getBytes(&quot;UTF-8&quot;))</b>
+<b class="nc">&nbsp;                        .toPeer(peer.cxID)</b>
+<b class="nc">&nbsp;                        .signData()</b>
+<b class="nc">&nbsp;                        .queue();</b>
+&nbsp;
+<b class="nc">&nbsp;                    contactAttempts++;</b>
+&nbsp;
+&nbsp;                } catch (Exception e) {
+<b class="nc">&nbsp;                    System.out.println(&quot;[P2P Discovery] Failed to contact &quot; + peer.cxID.substring(0, 8) + &quot;: &quot; + e.getMessage());</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;
+<b class="nc">&nbsp;            System.out.println(&quot;[P2P Discovery] Initial discovery requests queued to &quot; + contactAttempts + &quot; peers&quot;);</b>
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[P2P Discovery] Discovery failed: &quot; + e.getMessage());</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Initialize and start the P2P network layer
+&nbsp;     * Automatically attempts to bootstrap CXNET if not already loaded
+&nbsp;     * @param port Port number for incoming connections
+&nbsp;     * @throws IOException if network initialization fails
+&nbsp;     */
+&nbsp;    public void connect(int port) throws IOException {
+<b class="fc">&nbsp;        this.listeningPort = port;</b>
+<b class="fc">&nbsp;        dev.droppinganvil.v3.network.nodemesh.OutConnectionController outController =</b>
+&nbsp;            new dev.droppinganvil.v3.network.nodemesh.OutConnectionController(this);
+<b class="fc">&nbsp;        nodeMesh = dev.droppinganvil.v3.network.nodemesh.NodeMesh.initializeNetwork(this, port, outController);</b>
+&nbsp;        // Initialize nodeMesh.peerDirectory.peers for signed node persistence
+<b class="fc">&nbsp;        nodeMesh.peerDirectory.peers = nodemesh;</b>
+&nbsp;
+&nbsp;        // Attempt automatic CXNET bootstrap after network layer is ready
+<b class="fc">&nbsp;        attemptCXNETBootstrap();</b>
+&nbsp;
+&nbsp;        // Initialize LAN scanner for local peer discovery
+&nbsp;        // Runs periodically every 5 minutes to maintain LAN peer connectivity
+<b class="fc">&nbsp;        Thread lanScanThread = new Thread(() -&gt; {</b>
+&nbsp;            try {
+&nbsp;                // Wait for socket to be ready
+<b class="fc">&nbsp;                Thread.sleep(10000); // Wait 10 seconds for network to stabilize and peers to bootstrap</b>
+&nbsp;
+<b class="fc">&nbsp;                System.out.println(&quot;[LAN Scanner] Starting periodic LAN discovery (every 5 minutes)&quot;);</b>
+&nbsp;
+&nbsp;                while (true) {
+&nbsp;                    try {
+&nbsp;                        // Verify socket is listening before scanning
+<b class="pc">&nbsp;                        if (nodeMesh != null &amp;&amp; nodeMesh.in != null &amp;&amp; nodeMesh.in.serverSocket != null &amp;&amp;</b>
+<b class="pc">&nbsp;                            nodeMesh.in.serverSocket.isBound() &amp;&amp; !nodeMesh.in.serverSocket.isClosed()) {</b>
+&nbsp;
+<b class="fc">&nbsp;                            System.out.println(&quot;[LAN Scanner] Starting LAN scan...&quot;);</b>
+<b class="fc">&nbsp;                            dev.droppinganvil.v3.network.nodemesh.LANScanner scanner =</b>
+&nbsp;                                new dev.droppinganvil.v3.network.nodemesh.LANScanner(this, port);
+<b class="fc">&nbsp;                            scanner.scanNetwork();</b>
+<b class="fc">&nbsp;                            System.out.println(&quot;[LAN Scanner] Scan complete, next scan in 5 minutes&quot;);</b>
+&nbsp;                        } else {
+<b class="nc">&nbsp;                            System.err.println(&quot;[LAN Scanner] Socket not ready, skipping scan&quot;);</b>
+&nbsp;                        }
+&nbsp;                    } catch (Exception e) {
+<b class="nc">&nbsp;                        System.err.println(&quot;[LAN Scanner] Scan failed: &quot; + e.getMessage());</b>
+&nbsp;                    }
+&nbsp;
+&nbsp;                    // Wait 5 minutes before next scan (matches peer discovery cycle)
+<b class="fc">&nbsp;                    Thread.sleep(300000); // 5 minutes = 300,000 ms</b>
+&nbsp;                }
+&nbsp;            } catch (InterruptedException e) {
+<b class="nc">&nbsp;                System.out.println(&quot;[LAN Scanner] Thread interrupted, stopping periodic scans&quot;);</b>
+&nbsp;            } catch (Exception e) {
+<b class="nc">&nbsp;                System.err.println(&quot;[LAN Scanner] Fatal error: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;                e.printStackTrace();</b>
+&nbsp;            }
+&nbsp;        });
+<b class="fc">&nbsp;        lanScanThread.setName(&quot;LAN-Scanner-Periodic&quot;);</b>
+<b class="fc">&nbsp;        lanScanThread.setDaemon(true);</b>
+<b class="fc">&nbsp;        lanScanThread.start();</b>
+&nbsp;
+&nbsp;        // Start persistence thread for periodic saves and peer discovery
+<b class="fc">&nbsp;        Thread persistenceThread = new Thread(() -&gt; {</b>
+&nbsp;            try {
+&nbsp;                // Wait for CXHELLO handshake to complete before starting persistence
+<b class="fc">&nbsp;                Thread.sleep(5000);</b>
+&nbsp;
+<b class="fc">&nbsp;                System.out.println(&quot;[Persistence] Starting periodic save and discovery thread&quot;);</b>
+<b class="fc">&nbsp;                System.out.println(&quot;[Persistence] - Blockchain saves: every 30 seconds&quot;);</b>
+<b class="fc">&nbsp;                System.out.println(&quot;[Persistence] - Peer discovery: every 5 minutes&quot;);</b>
+&nbsp;
+<b class="fc">&nbsp;                int cycleCount = 0; // Track cycles for peer discovery timing</b>
+&nbsp;
+&nbsp;                while (true) {
+&nbsp;                    try {
+&nbsp;                        // Save blockchain data (current blocks + metadata) for all networks
+<b class="fc">&nbsp;                        for (Map.Entry&lt;String, CXNetwork&gt; entry : networkMap.entrySet()) {</b>
+<b class="fc">&nbsp;                            String networkID = entry.getKey();</b>
+<b class="fc">&nbsp;                            CXNetwork network = entry.getValue();</b>
+&nbsp;
+<b class="pc">&nbsp;                            if (network == null) continue;</b>
+&nbsp;
+&nbsp;                            // Save c1 (Administrative chain)
+<b class="pc">&nbsp;                            if (network.c1 != null &amp;&amp; network.c1.current != null) {</b>
+&nbsp;                                try {
+<b class="fc">&nbsp;                                    blockchainPersistence.saveBlock(networkID, network.c1.chainID, network.c1.current);</b>
+<b class="fc">&nbsp;                                    blockchainPersistence.saveChainMetadata(network.c1, networkID);</b>
+&nbsp;                                } catch (Exception e) {
+<b class="nc">&nbsp;                                    System.err.println(&quot;[Persistence] Failed to save c1 for &quot; + networkID + &quot;: &quot; + e.getMessage());</b>
+&nbsp;                                }
+&nbsp;                            }
+&nbsp;
+&nbsp;                            // Save c2 (Resources chain)
+<b class="pc">&nbsp;                            if (network.c2 != null &amp;&amp; network.c2.current != null) {</b>
+&nbsp;                                try {
+<b class="fc">&nbsp;                                    blockchainPersistence.saveBlock(networkID, network.c2.chainID, network.c2.current);</b>
+<b class="fc">&nbsp;                                    blockchainPersistence.saveChainMetadata(network.c2, networkID);</b>
+&nbsp;                                } catch (Exception e) {
+<b class="nc">&nbsp;                                    System.err.println(&quot;[Persistence] Failed to save c2 for &quot; + networkID + &quot;: &quot; + e.getMessage());</b>
+&nbsp;                                }
+&nbsp;                            }
+&nbsp;
+&nbsp;                            // Save c3 (Events chain)
+<b class="pc">&nbsp;                            if (network.c3 != null &amp;&amp; network.c3.current != null) {</b>
+&nbsp;                                try {
+<b class="fc">&nbsp;                                    blockchainPersistence.saveBlock(networkID, network.c3.chainID, network.c3.current);</b>
+<b class="fc">&nbsp;                                    blockchainPersistence.saveChainMetadata(network.c3, networkID);</b>
+&nbsp;                                } catch (Exception e) {
+<b class="nc">&nbsp;                                    System.err.println(&quot;[Persistence] Failed to save c3 for &quot; + networkID + &quot;: &quot; + e.getMessage());</b>
+&nbsp;                                }
+&nbsp;                            }
+&nbsp;                        }
+&nbsp;
+&nbsp;                        // TODO: Persist PeerDirectory
+&nbsp;                        // Save discovered LAN and WAN peers to disk
+&nbsp;
+&nbsp;                        // TODO: Persist DataContainer
+&nbsp;                        // Save network registrations, blocklists, and other network data
+&nbsp;
+&nbsp;                        // Peer discovery every 5 minutes (10 cycles of 30 seconds) PROD
+&nbsp;                        // We are using 30 seconds for testing
+&nbsp;                        //TODO REMOVE TEST
+<b class="fc">&nbsp;                        cycleCount++;</b>
+<b class="pc">&nbsp;                        if (cycleCount &gt;= 1) {</b>
+<b class="fc">&nbsp;                            cycleCount = 0;</b>
+&nbsp;
+&nbsp;                            /// Send CXHELLO&#39;s to addresses waiting
+<b class="fc">&nbsp;                        System.out.println(&quot;[ConnectX] Sending CXHELLO to &quot; + dataContainer.waitingAddresses.size() + &quot; addresses&quot;);</b>
+<b class="fc">&nbsp;                        for (String s : dataContainer.waitingAddresses) {</b>
+<b class="pc">&nbsp;                            if (isValidPeerAddress(s) &amp;&amp; !isSelfAddress(s)) {</b>
+&nbsp;                                //TODO Store static self node blob locally, no need to generate it each time for ALL events
+<b class="fc">&nbsp;                                String nodeJson = ConnectX.serialize(&quot;cxJSON1&quot;, getSelf());</b>
+<b class="fc">&nbsp;                                java.io.ByteArrayInputStream nodeInput = new java.io.ByteArrayInputStream(nodeJson.getBytes(&quot;UTF-8&quot;));</b>
+<b class="fc">&nbsp;                                java.io.ByteArrayOutputStream signedNodeOutput = new java.io.ByteArrayOutputStream();</b>
+<b class="fc">&nbsp;                                encryptionProvider.sign(nodeInput, signedNodeOutput);</b>
+&nbsp;                                nodeInput.close();
+<b class="fc">&nbsp;                                byte[] signedNodeBlob = signedNodeOutput.toByteArray();</b>
+&nbsp;                                signedNodeOutput.close();
+&nbsp;
+&nbsp;                                // Create CXHELLO payload using CXHello data structure
+&nbsp;                                // Include peer&#39;s preferred address if available (for NAT/public IP scenarios)
+<b class="pc">&nbsp;                                String peerAddress = (getSelf() != null) ? getSelf().addr : null;</b>
+<b class="fc">&nbsp;                                dev.droppinganvil.v3.network.events.CXHello helloPayload =</b>
+<b class="fc">&nbsp;                                        new dev.droppinganvil.v3.network.events.CXHello(getOwnID(), listeningPort, signedNodeBlob, peerAddress);</b>
+&nbsp;
+<b class="fc">&nbsp;                                String payloadJson = ConnectX.serialize(&quot;cxJSON1&quot;, helloPayload);</b>
+&nbsp;
+&nbsp;                                // Sign the CXHELLO payload for consistency with CXHELLO_RESPONSE
+<b class="fc">&nbsp;                                java.io.ByteArrayInputStream payloadInput = new java.io.ByteArrayInputStream(payloadJson.getBytes(&quot;UTF-8&quot;));</b>
+<b class="fc">&nbsp;                                java.io.ByteArrayOutputStream signedPayloadOutput = new java.io.ByteArrayOutputStream();</b>
+<b class="fc">&nbsp;                                encryptionProvider.sign(payloadInput, signedPayloadOutput);</b>
+&nbsp;                                payloadInput.close();
+<b class="fc">&nbsp;                                byte[] signedPayload = signedPayloadOutput.toByteArray();</b>
+&nbsp;                                signedPayloadOutput.close();
+&nbsp;
+&nbsp;                                // Manually create NetworkEvent (like NEWNODE bootstrap pattern)
+<b class="fc">&nbsp;                                NetworkEvent helloEvent = new NetworkEvent(EventType.CXHELLO, signedPayload);</b>
+<b class="fc">&nbsp;                                helloEvent.eT = EventType.CXHELLO.name();</b>
+<b class="fc">&nbsp;                                helloEvent.iD = java.util.UUID.randomUUID().toString();</b>
+&nbsp;                                // DON&#39;T set event.p (CXPath) - leave null for direct transmission fallback
+&nbsp;
+&nbsp;                                // Create target node with address only (no peer ID known yet)
+<b class="fc">&nbsp;                                Node targetNode = new Node();</b>
+<b class="fc">&nbsp;                                targetNode.addr = s;</b>
+&nbsp;
+&nbsp;                                // Manually create NetworkContainer
+<b class="fc">&nbsp;                                NetworkContainer nc = new NetworkContainer();</b>
+<b class="fc">&nbsp;                                nc.se = &quot;cxJSON1&quot;;</b>
+<b class="fc">&nbsp;                                nc.s = false;  // Not E2E encrypted</b>
+<b class="fc">&nbsp;                                nc.iD = getSelf().cxID;  // Set sender ID (like NewNode)</b>
+&nbsp;
+&nbsp;                                // Create OutputBundle directly (bypassing buildEvent) - follows NEWNODE pattern
+<b class="fc">&nbsp;                                OutputBundle bundle = new OutputBundle(helloEvent, targetNode, null, null, nc);</b>
+<b class="fc">&nbsp;                                queueEvent(bundle);</b>
+<b class="fc">&nbsp;                                System.out.println(&quot;[ConnectX] Queued CXHELLO to &quot; + s);</b>
+&nbsp;                            } else {
+<b class="nc">&nbsp;                                System.out.println(&quot;[ConnectX] Skipped CXHELLO target (self or invalid): &quot; + s);</b>
+&nbsp;                            }
+&nbsp;                        }
+&nbsp;                        //Clear after
+&nbsp;                            //TODO evaluate thread safety
+<b class="fc">&nbsp;                            dataContainer.waitingAddresses.clear();</b>
+&nbsp;
+&nbsp;                            try {
+<b class="fc">&nbsp;                                System.out.println(&quot;[Peer Discovery] Sending PeerFinding requests to known peers...&quot;);</b>
+&nbsp;
+&nbsp;                                // Send PeerFinding to a subset of known peers to discover new nodes/bridges
+<b class="fc">&nbsp;                                int peersSent = 0;</b>
+<b class="fc">&nbsp;                                int maxPeersToContact = 5; // Contact up to 5 peers per discovery cycle</b>
+&nbsp;
+<b class="pc">&nbsp;                                if (nodeMesh.peerDirectory.hv != null &amp;&amp; !nodeMesh.peerDirectory.hv.isEmpty()) {</b>
+<b class="fc">&nbsp;                                    for (Node peer : nodeMesh.peerDirectory.hv.values()) {</b>
+<b class="pc">&nbsp;                                        if (peersSent &gt;= maxPeersToContact) break;</b>
+&nbsp;
+<b class="pc">&nbsp;                                        if (peer.cxID == null || peer.cxID.equals(getOwnID())) {</b>
+&nbsp;                                            continue; // Skip invalid or self
+&nbsp;                                        }
+&nbsp;
+&nbsp;                                        try {
+&nbsp;                                            // Create PeerFinding request
+<b class="fc">&nbsp;                                            dev.droppinganvil.v3.network.events.PeerFinding peerFindingReq =</b>
+&nbsp;                                                new dev.droppinganvil.v3.network.events.PeerFinding();
+<b class="fc">&nbsp;                                            peerFindingReq.t = &quot;request&quot;;</b>
+<b class="fc">&nbsp;                                            peerFindingReq.network = &quot;CXNET&quot;; // Request CXNET peers</b>
+<b class="fc">&nbsp;                                            String peerFindingJson = serialize(&quot;cxJSON1&quot;, peerFindingReq);</b>
+&nbsp;
+<b class="fc">&nbsp;                                            buildEvent(EventType.PeerFinding, peerFindingJson.getBytes(&quot;UTF-8&quot;))</b>
+<b class="fc">&nbsp;                                                .toPeer(peer.cxID)</b>
+<b class="fc">&nbsp;                                                .signData()</b>
+<b class="fc">&nbsp;                                                .queue();</b>
+&nbsp;
+<b class="fc">&nbsp;                                            peersSent++;</b>
+&nbsp;                                        } catch (Exception e) {
+<b class="nc">&nbsp;                                            System.err.println(&quot;[Peer Discovery] Failed to send to &quot; +</b>
+<b class="nc">&nbsp;                                                (peer.cxID.length() &gt;= 8 ? peer.cxID.substring(0, 8) : peer.cxID) +</b>
+<b class="nc">&nbsp;                                                &quot;: &quot; + e.getMessage());</b>
+&nbsp;                                        }
+&nbsp;                                    }
+&nbsp;
+<b class="pc">&nbsp;                                    if (peersSent &gt; 0) {</b>
+<b class="fc">&nbsp;                                        System.out.println(&quot;[Peer Discovery] Sent PeerFinding requests to &quot; + peersSent + &quot; peers&quot;);</b>
+&nbsp;                                    } else {
+<b class="nc">&nbsp;                                        System.out.println(&quot;[Peer Discovery] No peers available for discovery&quot;);</b>
+&nbsp;                                    }
+&nbsp;                                }
+&nbsp;                            } catch (Exception e) {
+<b class="nc">&nbsp;                                System.err.println(&quot;[Peer Discovery] Error during peer discovery: &quot; + e.getMessage());</b>
+&nbsp;                            }
+&nbsp;                        }
+&nbsp;
+&nbsp;                    } catch (Exception e) {
+<b class="nc">&nbsp;                        System.err.println(&quot;[Persistence] Error during periodic save: &quot; + e.getMessage());</b>
+&nbsp;                    }
+&nbsp;
+&nbsp;                    // Wait 30 seconds before next cycle
+<b class="fc">&nbsp;                    Thread.sleep(30000);</b>
+&nbsp;                }
+&nbsp;            } catch (InterruptedException e) {
+<b class="nc">&nbsp;                System.out.println(&quot;[Persistence] Thread interrupted, stopping periodic saves&quot;);</b>
+&nbsp;            } catch (Exception e) {
+<b class="nc">&nbsp;                System.err.println(&quot;[Persistence] Fatal error in persistence thread: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;                e.printStackTrace();</b>
+&nbsp;            }
+&nbsp;        });
+<b class="fc">&nbsp;        persistenceThread.setName(&quot;Persistence-Discovery-Thread&quot;);</b>
+<b class="fc">&nbsp;        persistenceThread.setDaemon(true);</b>
+<b class="fc">&nbsp;        persistenceThread.start();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public void connect() throws IOException {
+<b class="nc">&nbsp;        connect(49152); // Default P2P port</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Create a new CXNetwork with this node as Network Master Identity (NMI)
+&nbsp;     * @param networkID Unique network identifier (NOT &quot;CXNET&quot; - reserved for global network)
+&nbsp;     * @return The created CXNetwork
+&nbsp;     * @throws IllegalAccessException if networkID is reserved or node is not initialized
+&nbsp;     */
+&nbsp;    public CXNetwork createNetwork(String networkID) throws IllegalAccessException {
+&nbsp;        // TODO: Re-enable CXNET reservation after EPOCH NMI initialization
+&nbsp;        // if (networkID.equalsIgnoreCase(&quot;CXNET&quot;)) {
+&nbsp;        //     throw new IllegalAccessException(&quot;CXNET is reserved for the global network&quot;);
+&nbsp;        // }
+<b class="pc">&nbsp;        if (self == null || self.cxID == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalAccessException(&quot;Node must be initialized before creating network&quot;);</b>
+&nbsp;        }
+<b class="pc">&nbsp;        if (encryptionProvider.getPublicKey() == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalAccessException(&quot;Encryption provider must be initialized before creating network&quot;);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Create network object
+<b class="fc">&nbsp;        CXNetwork network = new CXNetwork();</b>
+<b class="fc">&nbsp;        network.networkState = State.ConnectNetworks;</b>
+&nbsp;
+&nbsp;        // Setup Configuration
+<b class="fc">&nbsp;        network.configuration = new Configuration();</b>
+<b class="fc">&nbsp;        network.configuration.netID = networkID;</b>
+<b class="fc">&nbsp;        network.configuration.nmiPub = encryptionProvider.getPublicKey();</b>
+<b class="fc">&nbsp;        network.configuration.backendSet = new java.util.ArrayList&lt;&gt;();</b>
+<b class="fc">&nbsp;        network.configuration.backendSet.add(self.cxID); // NMI is first backend</b>
+<b class="fc">&nbsp;        network.configuration.active = true;</b>
+&nbsp;
+&nbsp;        // Setup NetworkDictionary
+<b class="fc">&nbsp;        network.networkDictionary = new NetworkDictionary();</b>
+<b class="fc">&nbsp;        network.networkDictionary.nmi = encryptionProvider.getPublicKey();</b>
+<b class="fc">&nbsp;        network.networkDictionary.networkID = networkID;</b>
+<b class="fc">&nbsp;        network.networkDictionary.networkCreate = System.currentTimeMillis();</b>
+<b class="fc">&nbsp;        network.networkDictionary.lastUpdate = System.currentTimeMillis();</b>
+&nbsp;
+&nbsp;        // Assign chain IDs
+<b class="fc">&nbsp;        network.networkDictionary.c1 = 1L; // Administrative chain</b>
+<b class="fc">&nbsp;        network.networkDictionary.c2 = 2L; // Resources chain</b>
+<b class="fc">&nbsp;        network.networkDictionary.c3 = 3L; // Events chain</b>
+<b class="fc">&nbsp;        network.networkDictionary.backendSet.add(self.cxID);</b>
+&nbsp;
+&nbsp;        // Initialize blockchain chains with genesis blocks
+<b class="fc">&nbsp;        network.c1 = new dev.droppinganvil.v3.edge.NetworkRecord(networkID, 1L);</b>
+<b class="fc">&nbsp;        network.c1.networkID = networkID;</b>
+<b class="fc">&nbsp;        network.c1.chainID = 1L;</b>
+<b class="fc">&nbsp;        network.c1.current = new dev.droppinganvil.v3.edge.NetworkBlock(0L, 1L);</b>
+<b class="fc">&nbsp;        network.c1.blockMap.put(0L, network.c1.current);</b>
+&nbsp;
+<b class="fc">&nbsp;        network.c2 = new dev.droppinganvil.v3.edge.NetworkRecord(networkID, 2L);</b>
+<b class="fc">&nbsp;        network.c2.networkID = networkID;</b>
+<b class="fc">&nbsp;        network.c2.chainID = 2L;</b>
+<b class="fc">&nbsp;        network.c2.current = new dev.droppinganvil.v3.edge.NetworkBlock(0L, 2L);</b>
+<b class="fc">&nbsp;        network.c2.blockMap.put(0L, network.c2.current);</b>
+&nbsp;
+<b class="fc">&nbsp;        network.c3 = new dev.droppinganvil.v3.edge.NetworkRecord(networkID, 3L);</b>
+<b class="fc">&nbsp;        network.c3.networkID = networkID;</b>
+<b class="fc">&nbsp;        network.c3.chainID = 3L;</b>
+<b class="fc">&nbsp;        network.c3.current = new dev.droppinganvil.v3.edge.NetworkBlock(0L, 3L);</b>
+<b class="fc">&nbsp;        network.c3.blockMap.put(0L, network.c3.current);</b>
+&nbsp;
+&nbsp;        // Setup network permissions
+<b class="fc">&nbsp;        network.networkPermissions = new us.anvildevelopment.util.tools.permissions.BasicPermissionContainer();</b>
+&nbsp;
+&nbsp;        // Initialize NMI permissions directly (bootstrap problem - no prior authority)
+<b class="fc">&nbsp;        java.util.Map&lt;String, us.anvildevelopment.util.tools.permissions.Entry&gt; nmiPermissions = new java.util.HashMap&lt;&gt;();</b>
+&nbsp;
+&nbsp;        // Grant NMI full network-level permissions with high weight (100)
+<b class="fc">&nbsp;        nmiPermissions.put(Permission.AddAccount.name(),</b>
+<b class="fc">&nbsp;            new us.anvildevelopment.util.tools.permissions.BasicEntry(Permission.AddAccount.name(), true, 100));</b>
+<b class="fc">&nbsp;        nmiPermissions.put(Permission.NetworkUpload.name(),</b>
+<b class="fc">&nbsp;            new us.anvildevelopment.util.tools.permissions.BasicEntry(Permission.NetworkUpload.name(), true, 100));</b>
+<b class="fc">&nbsp;        nmiPermissions.put(Permission.UploadGlobalResource.name(),</b>
+<b class="fc">&nbsp;            new us.anvildevelopment.util.tools.permissions.BasicEntry(Permission.UploadGlobalResource.name(), true, 100));</b>
+&nbsp;
+&nbsp;        // Grant NMI chain-specific permissions (Record-{chainID} format)
+<b class="fc">&nbsp;        nmiPermissions.put(Permission.Record.name() + &quot;-&quot; + network.networkDictionary.c1,</b>
+<b class="fc">&nbsp;            new us.anvildevelopment.util.tools.permissions.BasicEntry(Permission.Record.name() + &quot;-&quot; + network.networkDictionary.c1, true, 100));</b>
+<b class="fc">&nbsp;        nmiPermissions.put(Permission.Record.name() + &quot;-&quot; + network.networkDictionary.c2,</b>
+<b class="fc">&nbsp;            new us.anvildevelopment.util.tools.permissions.BasicEntry(Permission.Record.name() + &quot;-&quot; + network.networkDictionary.c2, true, 100));</b>
+<b class="fc">&nbsp;        nmiPermissions.put(Permission.Record.name() + &quot;-&quot; + network.networkDictionary.c3,</b>
+<b class="fc">&nbsp;            new us.anvildevelopment.util.tools.permissions.BasicEntry(Permission.Record.name() + &quot;-&quot; + network.networkDictionary.c3, true, 100));</b>
+&nbsp;
+&nbsp;        // Grant permission management capabilities
+<b class="fc">&nbsp;        nmiPermissions.put(us.anvildevelopment.util.tools.permissions.Actions.ADD_ENTRY.name(),</b>
+<b class="fc">&nbsp;            new us.anvildevelopment.util.tools.permissions.BasicEntry(us.anvildevelopment.util.tools.permissions.Actions.ADD_ENTRY.name(), true, 100));</b>
+<b class="fc">&nbsp;        nmiPermissions.put(us.anvildevelopment.util.tools.permissions.Actions.EDIT_ENTRY.name(),</b>
+<b class="fc">&nbsp;            new us.anvildevelopment.util.tools.permissions.BasicEntry(us.anvildevelopment.util.tools.permissions.Actions.EDIT_ENTRY.name(), true, 100));</b>
+&nbsp;
+<b class="fc">&nbsp;        network.networkPermissions.permissionSet.put(self.cxID, nmiPermissions);</b>
+&nbsp;
+&nbsp;        // Add lower-privilege default permissions for joining nodes (weight 10)
+&nbsp;        // CXNET: Only AddAccount (no blockchain recording by default for system health)
+&nbsp;        // Other networks: AddAccount + Record-c3 (events chain)
+<b class="fc">&nbsp;        java.util.Map&lt;String, us.anvildevelopment.util.tools.permissions.Entry&gt; defaultPermissions = new java.util.HashMap&lt;&gt;();</b>
+<b class="fc">&nbsp;        defaultPermissions.put(Permission.AddAccount.name(),</b>
+<b class="fc">&nbsp;            new us.anvildevelopment.util.tools.permissions.BasicEntry(Permission.AddAccount.name(), true, 10));</b>
+&nbsp;
+&nbsp;        // Only grant blockchain recording for non-CXNET networks
+&nbsp;        // CXNET requires explicit permission grants to ensure system health
+<b class="fc">&nbsp;        if (!&quot;CXNET&quot;.equals(networkID)) {</b>
+<b class="fc">&nbsp;            defaultPermissions.put(Permission.Record.name() + &quot;-&quot; + network.networkDictionary.c3,</b>
+<b class="fc">&nbsp;                new us.anvildevelopment.util.tools.permissions.BasicEntry(Permission.Record.name() + &quot;-&quot; + network.networkDictionary.c3, true, 10));</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Store default permissions template (used when nodes join)
+<b class="fc">&nbsp;        network.networkPermissions.permissionSet.put(&quot;DEFAULT_NODE&quot;, defaultPermissions);</b>
+&nbsp;
+&nbsp;        // Copy permissions to NetworkDictionary
+<b class="fc">&nbsp;        network.networkDictionary.networkPermissions = network.networkPermissions;</b>
+&nbsp;
+&nbsp;        // Add network to global map
+<b class="fc">&nbsp;        networkMap.put(networkID, network);</b>
+&nbsp;
+&nbsp;        // Persist blockchain to disk
+&nbsp;        try {
+&nbsp;            // Save genesis blocks for all three chains
+<b class="fc">&nbsp;            blockchainPersistence.saveBlock(networkID, 1L, network.c1.current);</b>
+<b class="fc">&nbsp;            blockchainPersistence.saveBlock(networkID, 2L, network.c2.current);</b>
+<b class="fc">&nbsp;            blockchainPersistence.saveBlock(networkID, 3L, network.c3.current);</b>
+&nbsp;
+&nbsp;            // Save chain metadata
+<b class="fc">&nbsp;            blockchainPersistence.saveChainMetadata(network.c1, networkID);</b>
+<b class="fc">&nbsp;            blockchainPersistence.saveChainMetadata(network.c2, networkID);</b>
+<b class="fc">&nbsp;            blockchainPersistence.saveChainMetadata(network.c3, networkID);</b>
+&nbsp;
+<b class="fc">&nbsp;            System.out.println(&quot;[Blockchain] Network &quot; + networkID + &quot; persisted to disk&quot;);</b>
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[Blockchain] Failed to persist network &quot; + networkID + &quot;: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;            e.printStackTrace();</b>
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        return network;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Activate Zero Trust mode for a network (NMI-only, IRREVERSIBLE)
+&nbsp;     *
+&nbsp;     * This method transitions a network from centralized (NMI-controlled) to fully decentralized (zero trust).
+&nbsp;     * After activation:
+&nbsp;     * - NMI loses all special permissions
+&nbsp;     * - Network becomes fully peer-governed
+&nbsp;     * - Blockchain consensus switches to multi-peer voting
+&nbsp;     * - Operation is PERMANENT and CANNOT be reversed
+&nbsp;     *
+&nbsp;     * @param networkID Network to activate zero trust mode for
+&nbsp;     * @throws IllegalAccessException if caller is not NMI or network doesn&#39;t exist
+&nbsp;     * @throws Exception if event creation, signing, or distribution fails
+&nbsp;     */
+&nbsp;    public void startZeroTrust(String networkID) throws IllegalAccessException, Exception {
+&nbsp;        // Verify node is initialized
+<b class="nc">&nbsp;        if (self == null || self.cxID == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalAccessException(&quot;Node must be initialized before activating zero trust&quot;);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Get network
+<b class="nc">&nbsp;        CXNetwork network = networkMap.get(networkID);</b>
+<b class="nc">&nbsp;        if (network == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalAccessException(&quot;Network &quot; + networkID + &quot; not found&quot;);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Verify caller is NMI (first backend)
+<b class="nc">&nbsp;        if (network.configuration == null || network.configuration.backendSet == null ||</b>
+<b class="nc">&nbsp;            network.configuration.backendSet.isEmpty() ||</b>
+<b class="nc">&nbsp;            !network.configuration.backendSet.get(0).equals(self.cxID)) {</b>
+<b class="nc">&nbsp;            throw new IllegalAccessException(&quot;Only NMI can activate zero trust mode&quot;);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Verify network is not already in zero trust mode
+<b class="nc">&nbsp;        if (network.zT) {</b>
+<b class="nc">&nbsp;            throw new IllegalAccessException(&quot;Network &quot; + networkID + &quot; is already in zero trust mode&quot;);</b>
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        System.out.println(&quot;[Zero Trust] Activating zero trust mode for network &quot; + networkID);</b>
+<b class="nc">&nbsp;        System.out.println(&quot;[Zero Trust] WARNING: This operation is IRREVERSIBLE&quot;);</b>
+&nbsp;
+&nbsp;        // Set zT flag in network configuration
+<b class="nc">&nbsp;        network.zT = true;</b>
+&nbsp;
+<b class="nc">&nbsp;        dev.droppinganvil.v3.network.events.ZeroTrustActivation payload =</b>
+&nbsp;            new dev.droppinganvil.v3.network.events.ZeroTrustActivation(
+<b class="nc">&nbsp;                networkID, System.currentTimeMillis(), network.configuration.nmiPub);</b>
+&nbsp;
+<b class="nc">&nbsp;        String payloadJson = serialize(&quot;cxJSON1&quot;, payload);</b>
+<b class="nc">&nbsp;        System.out.println(&quot;[Zero Trust] Created ZERO_TRUST_ACTIVATION event payload&quot;);</b>
+&nbsp;
+&nbsp;        // Build and queue ZERO_TRUST_ACTIVATION event
+&nbsp;        // Record to c1 (Admin chain) and distribute to all network participants
+<b class="nc">&nbsp;        buildEvent(dev.droppinganvil.v3.network.events.EventType.ZERO_TRUST_ACTIVATION, payloadJson.getBytes(&quot;UTF-8&quot;))</b>
+<b class="nc">&nbsp;            .withRecordFlag(true)  // Enable automatic recording</b>
+<b class="nc">&nbsp;            .toNetwork(networkID, network.networkDictionary.c1)  // Record to c1 (Admin chain)</b>
+<b class="nc">&nbsp;            .queue();</b>
+&nbsp;
+<b class="nc">&nbsp;        System.out.println(&quot;[Zero Trust] ZERO_TRUST_ACTIVATION event queued for network &quot; + networkID);</b>
+<b class="nc">&nbsp;        System.out.println(&quot;[Zero Trust] NMI permissions will be blocked after event is processed&quot;);</b>
+<b class="nc">&nbsp;        System.out.println(&quot;[Zero Trust] Network is now in zero trust mode&quot;);</b>
+&nbsp;
+&nbsp;        // Persist updated network configuration
+&nbsp;        try {
+<b class="nc">&nbsp;            blockchainPersistence.saveChainMetadata(network.c1, networkID);</b>
+<b class="nc">&nbsp;            blockchainPersistence.saveChainMetadata(network.c2, networkID);</b>
+<b class="nc">&nbsp;            blockchainPersistence.saveChainMetadata(network.c3, networkID);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;[Zero Trust] Network configuration persisted&quot;);</b>
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[Zero Trust] Failed to persist network configuration: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;            e.printStackTrace();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Export a network configuration to a signed file using NetworkContainer pattern
+&nbsp;     * @param networkID Network to export
+&nbsp;     * @param exportFile File to write the signed network data to
+&nbsp;     * @throws Exception if network doesn&#39;t exist, signing fails, or IO error occurs
+&nbsp;     */
+&nbsp;    public void exportNetwork(String networkID, File exportFile) throws Exception {
+<b class="nc">&nbsp;        CXNetwork network = networkMap.get(networkID);</b>
+<b class="nc">&nbsp;        if (network == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalArgumentException(&quot;Network &quot; + networkID + &quot; not found&quot;);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Follow the same pattern as OutConnectionController.transmitEvent()
+<b class="nc">&nbsp;        dev.droppinganvil.v3.network.events.NetworkContainer nc = new dev.droppinganvil.v3.network.events.NetworkContainer();</b>
+<b class="nc">&nbsp;        nc.se = &quot;cxJSON1&quot;;</b>
+<b class="nc">&nbsp;        nc.s = false; // Not E2E encrypted</b>
+<b class="nc">&nbsp;        nc.iD = getOwnID(); // Sender&#39;s cxID</b>
+<b class="nc">&nbsp;        if (NodeConfig.revealVersion) nc.v = NodeConfig.cxV;</b>
+&nbsp;
+&nbsp;        // Sign the inner CXNetwork object
+<b class="nc">&nbsp;        byte[] signedNetwork = signObject(network, CXNetwork.class, nc.se).toByteArray();</b>
+<b class="nc">&nbsp;        nc.e = signedNetwork;</b>
+&nbsp;
+&nbsp;        // Sign the outer NetworkContainer
+<b class="nc">&nbsp;        byte[] signedContainer = signObject(nc, dev.droppinganvil.v3.network.events.NetworkContainer.class, nc.se).toByteArray();</b>
+&nbsp;
+&nbsp;        // Write to file
+<b class="nc">&nbsp;        FileOutputStream fos = new FileOutputStream(exportFile);</b>
+<b class="nc">&nbsp;        fos.write(signedContainer);</b>
+&nbsp;        fos.close();
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Import a network configuration from a signed file using NetworkContainer pattern
+&nbsp;     * Follows same pattern as NodeMesh.processNetworkInput() with both encryption layers
+&nbsp;     * @param importFile File containing signed network data
+&nbsp;     * @return The imported CXNetwork
+&nbsp;     * @throws Exception if verification fails, deserialization fails, or IO error occurs
+&nbsp;     */
+&nbsp;    public CXNetwork importNetwork(File importFile) throws Exception {
+&nbsp;        // Follow the same pattern as NodeMesh.processNetworkInput()
+<b class="nc">&nbsp;        FileInputStream fis = new FileInputStream(importFile);</b>
+<b class="nc">&nbsp;        ByteArrayOutputStream baos = new ByteArrayOutputStream();</b>
+&nbsp;
+&nbsp;        // Step 1: Decrypt outer NetworkContainer (verifies outer signature)
+<b class="nc">&nbsp;        Object o = encryptionProvider.decrypt(fis, baos);</b>
+<b class="nc">&nbsp;        String networkContainer = baos.toString(&quot;UTF-8&quot;);</b>
+&nbsp;
+&nbsp;        // Step 2: Deserialize NetworkContainer from decrypted JSON
+<b class="nc">&nbsp;        dev.droppinganvil.v3.network.events.NetworkContainer nc =</b>
+<b class="nc">&nbsp;            (dev.droppinganvil.v3.network.events.NetworkContainer) deserialize(</b>
+&nbsp;                &quot;cxJSON1&quot;, networkContainer, dev.droppinganvil.v3.network.events.NetworkContainer.class);
+&nbsp;
+<b class="nc">&nbsp;        if (nc == null || nc.iD == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalAccessException(&quot;Invalid network container - missing sender ID&quot;);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Step 3: Verify and extract inner CXNetwork using sender&#39;s cxID from nc.iD
+<b class="nc">&nbsp;        ByteArrayInputStream bais = new ByteArrayInputStream(nc.e);</b>
+<b class="nc">&nbsp;        ByteArrayOutputStream networkBaos = new ByteArrayOutputStream();</b>
+&nbsp;
+<b class="nc">&nbsp;        boolean verified = encryptionProvider.verifyAndStrip(bais, networkBaos, nc.iD);</b>
+<b class="nc">&nbsp;        if (!verified) {</b>
+<b class="nc">&nbsp;            throw new IllegalAccessException(&quot;Network verification failed - invalid signature from &quot; + nc.iD);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Step 4: Deserialize the inner CXNetwork
+<b class="nc">&nbsp;        CXNetwork network = (CXNetwork) deserialize(nc.se, networkBaos.toString(&quot;UTF-8&quot;), CXNetwork.class);</b>
+&nbsp;
+<b class="nc">&nbsp;        if (network == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalAccessException(&quot;Network deserialization failed&quot;);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Verify network has required components
+<b class="nc">&nbsp;        if (network.configuration == null || network.networkDictionary == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalStateException(&quot;Invalid network structure - missing required components&quot;);</b>
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        String networkID = network.configuration.netID;</b>
+<b class="nc">&nbsp;        if (networkID == null || networkID.isEmpty()) {</b>
+<b class="nc">&nbsp;            throw new IllegalStateException(&quot;Invalid network - missing network ID&quot;);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Register network (shared logic for both import and seed application)
+<b class="nc">&nbsp;        registerNetwork(network);</b>
+&nbsp;
+&nbsp;        fis.close();
+&nbsp;        baos.close();
+&nbsp;        bais.close();
+&nbsp;        networkBaos.close();
+&nbsp;
+<b class="nc">&nbsp;        return network;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Register a network in this ConnectX instance
+&nbsp;     * Handles blockchain persistence, replay, and sync for both network creation and import
+&nbsp;     * Shared logic used by createNetwork(), importNetwork(), and applySeed()
+&nbsp;     *
+&nbsp;     * @param network Network to register
+&nbsp;     * @throws Exception if registration fails
+&nbsp;     */
+&nbsp;    private void registerNetwork(CXNetwork network) throws Exception {
+<b class="fc">&nbsp;        String networkID = network.configuration.netID;</b>
+&nbsp;
+&nbsp;        // Add to network map
+<b class="fc">&nbsp;        networkMap.put(networkID, network);</b>
+&nbsp;
+&nbsp;        // Try to load persisted blockchain data from disk
+&nbsp;        try {
+<b class="pc">&nbsp;            if (blockchainPersistence.exists(networkID)) {</b>
+<b class="fc">&nbsp;                System.out.println(&quot;[Blockchain] Loading persisted chains for network &quot; + networkID);</b>
+&nbsp;
+&nbsp;                // Load chains (lazy loading - only current blocks initially)
+<b class="fc">&nbsp;                NetworkRecord c1 = blockchainPersistence.loadChain(networkID, 1L, false);</b>
+<b class="fc">&nbsp;                NetworkRecord c2 = blockchainPersistence.loadChain(networkID, 2L, false);</b>
+<b class="fc">&nbsp;                NetworkRecord c3 = blockchainPersistence.loadChain(networkID, 3L, false);</b>
+&nbsp;
+&nbsp;                // Apply loaded chains if they exist
+<b class="pc">&nbsp;                if (c1 != null) {</b>
+<b class="fc">&nbsp;                    network.c1 = c1;</b>
+<b class="fc">&nbsp;                    System.out.println(&quot;[Blockchain] Loaded chain c1 (&quot; + c1.blockMap.size() + &quot; blocks in memory)&quot;);</b>
+&nbsp;                }
+<b class="pc">&nbsp;                if (c2 != null) {</b>
+<b class="fc">&nbsp;                    network.c2 = c2;</b>
+<b class="fc">&nbsp;                    System.out.println(&quot;[Blockchain] Loaded chain c2 (&quot; + c2.blockMap.size() + &quot; blocks in memory)&quot;);</b>
+&nbsp;                }
+<b class="pc">&nbsp;                if (c3 != null) {</b>
+<b class="fc">&nbsp;                    network.c3 = c3;</b>
+<b class="fc">&nbsp;                    System.out.println(&quot;[Blockchain] Loaded chain c3 (&quot; + c3.blockMap.size() + &quot; blocks in memory)&quot;);</b>
+&nbsp;                }
+&nbsp;            } else {
+<b class="nc">&nbsp;                System.out.println(&quot;[Blockchain] No persisted blockchain found for network &quot; + networkID);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;[Blockchain] Persisting genesis blocks from network configuration...&quot;);</b>
+&nbsp;
+&nbsp;                // Persist the genesis blocks that came with the network configuration
+&nbsp;                // This ensures peers have blockchain data on disk for future restarts
+&nbsp;                try {
+<b class="nc">&nbsp;                    if (network.c1 != null &amp;&amp; network.c1.current != null) {</b>
+<b class="nc">&nbsp;                        blockchainPersistence.saveBlock(networkID, 1L, network.c1.current);</b>
+<b class="nc">&nbsp;                        blockchainPersistence.saveChainMetadata(network.c1, networkID);</b>
+&nbsp;                    }
+<b class="nc">&nbsp;                    if (network.c2 != null &amp;&amp; network.c2.current != null) {</b>
+<b class="nc">&nbsp;                        blockchainPersistence.saveBlock(networkID, 2L, network.c2.current);</b>
+<b class="nc">&nbsp;                        blockchainPersistence.saveChainMetadata(network.c2, networkID);</b>
+&nbsp;                    }
+<b class="nc">&nbsp;                    if (network.c3 != null &amp;&amp; network.c3.current != null) {</b>
+<b class="nc">&nbsp;                        blockchainPersistence.saveBlock(networkID, 3L, network.c3.current);</b>
+<b class="nc">&nbsp;                        blockchainPersistence.saveChainMetadata(network.c3, networkID);</b>
+&nbsp;                    }
+<b class="nc">&nbsp;                    System.out.println(&quot;[Blockchain] Genesis blocks persisted to disk&quot;);</b>
+&nbsp;                } catch (Exception saveEx) {
+<b class="nc">&nbsp;                    System.err.println(&quot;[Blockchain] Failed to persist genesis blocks: &quot; + saveEx.getMessage());</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[Blockchain] Failed to load persisted chains for &quot; + networkID + &quot;: &quot; + e.getMessage());</b>
+&nbsp;            // Not fatal - network can still function with in-memory chains
+&nbsp;        }
+&nbsp;
+&nbsp;        // Replay blockchain to restore state after loading from disk
+<b class="fc">&nbsp;        replayBlockchain(network);</b>
+&nbsp;
+&nbsp;        // Request chain status from NMI to trigger automatic blockchain sync
+<b class="fc">&nbsp;        requestChainStatusFromNMI(network);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Grant permissions to a node to join this network
+&nbsp;     * Call this after importing a network to allow self to participate
+&nbsp;     * @param networkID Network to join
+&nbsp;     * @throws IllegalAccessException if network doesn&#39;t exist or permissions can&#39;t be granted
+&nbsp;     */
+&nbsp;    public void joinNetwork(String networkID) throws IllegalAccessException {
+<b class="nc">&nbsp;        CXNetwork network = networkMap.get(networkID);</b>
+<b class="nc">&nbsp;        if (network == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalArgumentException(&quot;Network &quot; + networkID + &quot; not found - import it first&quot;);</b>
+&nbsp;        }
+<b class="nc">&nbsp;        if (self == null || self.cxID == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalAccessException(&quot;Node must be initialized before joining network&quot;);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Copy default permissions template for this node
+<b class="nc">&nbsp;        if (network.networkPermissions.permissionSet.containsKey(&quot;DEFAULT_NODE&quot;)) {</b>
+<b class="nc">&nbsp;            java.util.Map&lt;String, us.anvildevelopment.util.tools.permissions.Entry&gt; defaultPerms =</b>
+<b class="nc">&nbsp;                network.networkPermissions.permissionSet.get(&quot;DEFAULT_NODE&quot;);</b>
+&nbsp;
+&nbsp;            // Create new permission map for this node
+<b class="nc">&nbsp;            java.util.Map&lt;String, us.anvildevelopment.util.tools.permissions.Entry&gt; nodePerms = new java.util.HashMap&lt;&gt;();</b>
+<b class="nc">&nbsp;            for (java.util.Map.Entry&lt;String, us.anvildevelopment.util.tools.permissions.Entry&gt; entry : defaultPerms.entrySet()) {</b>
+<b class="nc">&nbsp;                us.anvildevelopment.util.tools.permissions.Entry e = entry.getValue();</b>
+<b class="nc">&nbsp;                nodePerms.put(e.getName(),</b>
+<b class="nc">&nbsp;                    new us.anvildevelopment.util.tools.permissions.BasicEntry(e.getName(), e.getAllow(), e.getWeight()));</b>
+&nbsp;            }
+&nbsp;
+<b class="nc">&nbsp;            network.networkPermissions.permissionSet.put(self.cxID, nodePerms);</b>
+&nbsp;        } else {
+<b class="nc">&nbsp;            throw new IllegalAccessException(&quot;Network does not have default permissions template&quot;);</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    public boolean checkGlobalPermission(String cxID, String permission) {
+<b class="nc">&nbsp;        assert !cxID.contains(&quot;SYSTEM&quot;);</b>
+<b class="nc">&nbsp;        CXNetwork cxnet = getNetwork(&quot;CXNET&quot;);</b>
+<b class="nc">&nbsp;        if (cxnet == null) return false;</b>
+<b class="nc">&nbsp;        return cxnet.checkNetworkPermission(cxID, permission);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Check if a node is blocked at CXNET level (global block)
+&nbsp;     * CXNET-level blocks reject ALL transmissions from the node across all networks
+&nbsp;     * @param nodeID Node UUID to check
+&nbsp;     * @return true if node is blocked at CXNET level
+&nbsp;     */
+&nbsp;    public boolean isCXNETBlocked(String nodeID) {
+<b class="nc">&nbsp;        return cxnetBlockedNodes.containsKey(nodeID);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Block a node at CXNET level (global block across all networks)
+&nbsp;     * This should only be called when processing a BLOCK_NODE event where network=&quot;CXNET&quot;
+&nbsp;     * @param nodeID Node UUID to block
+&nbsp;     * @param reason Block reason/metadata
+&nbsp;     */
+&nbsp;    public void blockNodeCXNET(String nodeID, String reason) {
+<b class="fc">&nbsp;        cxnetBlockedNodes.put(nodeID, reason);</b>
+<b class="fc">&nbsp;        System.out.println(&quot;[CXNET] Blocked node globally: &quot; + nodeID + &quot; (reason: &quot; + reason + &quot;)&quot;);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Unblock a node from CXNET level
+&nbsp;     * This should only be called when processing an UNBLOCK_NODE event where network=&quot;CXNET&quot;
+&nbsp;     * @param nodeID Node UUID to unblock
+&nbsp;     */
+&nbsp;    public void unblockNodeCXNET(String nodeID) {
+<b class="nc">&nbsp;        String reason = cxnetBlockedNodes.remove(nodeID);</b>
+<b class="nc">&nbsp;        if (reason != null) {</b>
+<b class="nc">&nbsp;            System.out.println(&quot;[CXNET] Unblocked node globally: &quot; + nodeID + &quot; (was blocked for: &quot; + reason + &quot;)&quot;);</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;
+&nbsp;    public boolean addPlugin(CXPlugin cxp) {
+&nbsp;        try {
+<b class="nc">&nbsp;            checkSafety(cxp.serviceName);</b>
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            e.printStackTrace();</b>
+&nbsp;        }
+<b class="nc">&nbsp;        if (plugins.containsKey(cxp.serviceName)) return false;</b>
+<b class="nc">&nbsp;        plugins.put(cxp.serviceName, cxp);</b>
+<b class="nc">&nbsp;        return true;</b>
+&nbsp;    }
+&nbsp;    public boolean sendPluginEvent(InputBundle ib, String eventType) {
+<b class="pc">&nbsp;        if (!plugins.containsKey(eventType)) return false;</b>
+<b class="nc">&nbsp;        CXPlugin plugin = plugins.get(eventType);</b>
+&nbsp;        try {
+<b class="nc">&nbsp;            switch (plugin.dataLevel != null ? plugin.dataLevel : dev.droppinganvil.v3.api.DataLevel.NETWORK_EVENT) {</b>
+&nbsp;                case INPUT_BUNDLE:
+<b class="nc">&nbsp;                    return plugin.handleEvent(ib);</b>
+&nbsp;                case OBJECT:
+<b class="nc">&nbsp;                    if (plugin.type == null || ib.verifiedObjectBytes == null) return false;</b>
+<b class="nc">&nbsp;                    String se = (ib.nc != null &amp;&amp; ib.nc.se != null) ? ib.nc.se : &quot;cxJSON1&quot;;</b>
+<b class="nc">&nbsp;                    if (!ib.readyObject(plugin.type, se, this)) return false;</b>
+<b class="nc">&nbsp;                    return plugin.handleEvent(ib.object);</b>
+&nbsp;                case NETWORK_EVENT:
+&nbsp;                default:
+<b class="nc">&nbsp;                    return plugin.handleEvent(ib.ne);</b>
+&nbsp;            }
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[Plugin] Error dispatching event to plugin &#39;&quot; + eventType + &quot;&#39;: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;    /**
+&nbsp;     * Record a NetworkEvent to the blockchain
+&nbsp;     * @param ne NetworkEvent to record
+&nbsp;     * @param senderID cxID of the node attempting to record (for permission check)
+&nbsp;     * @return true if successfully recorded, false otherwise
+&nbsp;     */
+&nbsp;    /**
+&nbsp;     * Validates a block chronologically - ensures all events had proper permissions AT THE TIME
+&nbsp;     * This prevents retroactive permission exploits by replaying blockchain state
+&nbsp;     *
+&nbsp;     * @param network The network this block belongs to
+&nbsp;     * @param chainID Which chain (c1, c2, or c3)
+&nbsp;     * @param block The block to validate
+&nbsp;     * @param previousBlocks All blocks before this one (in order) to rebuild permission state
+&nbsp;     * @return true if all events in block are valid, false if any event is invalid
+&nbsp;     */
+&nbsp;    public boolean validateBlockChronologically(CXNetwork network, Long chainID, dev.droppinganvil.v3.edge.NetworkBlock block,
+&nbsp;                                               java.util.List&lt;dev.droppinganvil.v3.edge.NetworkBlock&gt; previousBlocks) {
+<b class="nc">&nbsp;        if (network == null || block == null) {</b>
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Build permission state by replaying all previous blocks
+&nbsp;        // Start with genesis/initial permissions
+<b class="nc">&nbsp;        java.util.Map&lt;String, java.util.Map&lt;String, us.anvildevelopment.util.tools.permissions.Entry&gt;&gt; permissionState =</b>
+&nbsp;            new java.util.HashMap&lt;&gt;(network.networkPermissions.permissionSet);
+&nbsp;
+&nbsp;        // Replay previous blocks to build current permission state
+<b class="nc">&nbsp;        if (previousBlocks != null) {</b>
+<b class="nc">&nbsp;            for (dev.droppinganvil.v3.edge.NetworkBlock prevBlock : previousBlocks) {</b>
+&nbsp;                // Prepare previous block: verify and deserialize all events
+<b class="nc">&nbsp;                prevBlock.prepare(this);</b>
+&nbsp;
+&nbsp;                // Process permission-modifying events in this block
+<b class="nc">&nbsp;                for (NetworkEvent event : prevBlock.deserializedEvents.values()) {</b>
+<b class="nc">&nbsp;                    updatePermissionState(permissionState, event, network);</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+&nbsp;        // Prepare target block: verify and deserialize all events
+<b class="nc">&nbsp;        block.prepare(this);</b>
+&nbsp;
+&nbsp;        // Now validate each event in the target block against permission state
+<b class="nc">&nbsp;        for (java.util.Map.Entry&lt;Integer, NetworkEvent&gt; entry : block.deserializedEvents.entrySet()) {</b>
+<b class="nc">&nbsp;            NetworkEvent event = entry.getValue();</b>
+&nbsp;
+&nbsp;            // Determine sender from event path or container (stored in event during recording)
+&nbsp;            // For now, we&#39;ll need the sender ID - this should be added to event metadata
+&nbsp;            // TODO: Store sender ID in NetworkEvent for validation
+&nbsp;
+&nbsp;            // For events that modify permissions, check if sender has permission to do so
+&nbsp;            // Then update permission state for next events
+<b class="nc">&nbsp;            if (event.eT != null) {</b>
+&nbsp;                try {
+<b class="nc">&nbsp;                    EventType et = EventType.valueOf(event.eT);</b>
+<b class="nc">&nbsp;                    switch (et) {</b>
+&nbsp;                        case UPDATE_NMI:
+&nbsp;                        case ADD_NMI:
+&nbsp;                        case DELETE_NMI:
+&nbsp;                            // Only NMI can modify NMI list
+&nbsp;                            // Verify event is signed by current NMI
+&nbsp;                            // TODO: Implement NMI signature verification
+&nbsp;                            break;
+&nbsp;                        // Other permission-modifying events would go here
+&nbsp;                    }
+&nbsp;                } catch (IllegalArgumentException ignored) {
+&nbsp;                    // Unknown event type
+&nbsp;                }
+&nbsp;            }
+&nbsp;
+&nbsp;            // Update permission state after processing this event
+<b class="nc">&nbsp;            updatePermissionState(permissionState, event, network);</b>
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        return true; // All events validated successfully</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Updates permission state based on a permission-modifying event
+&nbsp;     * Called during chronological validation to replay blockchain state
+&nbsp;     */
+&nbsp;    private void updatePermissionState(java.util.Map&lt;String, java.util.Map&lt;String, us.anvildevelopment.util.tools.permissions.Entry&gt;&gt; permissionState,
+&nbsp;                                      NetworkEvent event, CXNetwork network) {
+<b class="nc">&nbsp;        if (event == null || event.eT == null) {</b>
+&nbsp;            return;
+&nbsp;        }
+&nbsp;
+&nbsp;        try {
+<b class="nc">&nbsp;            EventType et = EventType.valueOf(event.eT);</b>
+<b class="nc">&nbsp;            switch (et) {</b>
+&nbsp;                case UPDATE_NMI:
+&nbsp;                case ADD_NMI:
+&nbsp;                case DELETE_NMI:
+&nbsp;                    // TODO: Update NMI list in permission state
+&nbsp;                    // This would modify the permissionState map to reflect NMI changes
+&nbsp;                    break;
+&nbsp;                // Handle other permission-modifying events
+&nbsp;                // e.g., AddAccount would add new node with default permissions
+&nbsp;            }
+&nbsp;        } catch (IllegalArgumentException ignored) {
+&nbsp;            // Not a known event type
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Record an already-signed network event to the blockchain
+&nbsp;     * Used for events received from other peers (already signed by sender)
+&nbsp;     *
+&nbsp;     * @param ne Deserialized network event
+&nbsp;     * @param senderID Sender&#39;s cxID (must match signature)
+&nbsp;     * @param signedBlob Pre-signed event bytes (cryptographically signed by sender)
+&nbsp;     * @return true if recorded successfully
+&nbsp;     */
+&nbsp;    public boolean Event(NetworkEvent ne, String senderID, byte[] signedBlob) {
+<b class="nc">&nbsp;        if (ne == null || ne.p == null || signedBlob == null) {</b>
+<b class="nc">&nbsp;            System.err.println(&quot;[Blockchain-Debug] Event() null check failed: ne=&quot; + (ne != null) + &quot;, ne.p=&quot; + (ne != null &amp;&amp; ne.p != null) + &quot;, signedBlob=&quot; + (signedBlob != null));</b>
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Get network ID from CXPath
+<b class="nc">&nbsp;        String networkID = ne.p.network;</b>
+<b class="nc">&nbsp;        if (networkID == null || networkID.isEmpty()) {</b>
+<b class="nc">&nbsp;            System.err.println(&quot;[Blockchain-Debug] Event() networkID check failed: networkID=&quot; + networkID);</b>
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Get the network
+<b class="nc">&nbsp;        CXNetwork network = networkMap.get(networkID);</b>
+<b class="nc">&nbsp;        if (network == null) {</b>
+<b class="nc">&nbsp;            System.err.println(&quot;[Blockchain-Debug] Event() network not found: networkID=&quot; + networkID + &quot;, available networks=&quot; + networkMap.keySet());</b>
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Get chain ID from CXPath (now stored in path instead of inferred from event type)
+<b class="nc">&nbsp;        Long chainID = ne.p.chainID;</b>
+<b class="nc">&nbsp;        if (chainID == null) {</b>
+<b class="nc">&nbsp;            System.err.println(&quot;[Blockchain] Event missing chain ID in path&quot;);</b>
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Get target chain
+<b class="nc">&nbsp;        NetworkRecord targetChain = null;</b>
+<b class="nc">&nbsp;        if (chainID.equals(network.networkDictionary.c1)) {</b>
+<b class="nc">&nbsp;            targetChain = network.c1;</b>
+<b class="nc">&nbsp;        } else if (chainID.equals(network.networkDictionary.c2)) {</b>
+<b class="nc">&nbsp;            targetChain = network.c2;</b>
+<b class="nc">&nbsp;        } else if (chainID.equals(network.networkDictionary.c3)) {</b>
+<b class="nc">&nbsp;            targetChain = network.c3;</b>
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        if (targetChain == null) {</b>
+<b class="nc">&nbsp;            System.err.println(&quot;[Blockchain] Invalid chain ID: &quot; + chainID + &quot; (c1=&quot; + network.networkDictionary.c1 + &quot;, c2=&quot; + network.networkDictionary.c2 + &quot;, c3=&quot; + network.networkDictionary.c3 + &quot;)&quot;);</b>
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Check if sender has permission to record to this chain
+<b class="nc">&nbsp;        if (!network.checkChainPermission(senderID, Permission.Record.name(), chainID)) {</b>
+<b class="nc">&nbsp;            System.err.println(&quot;[Blockchain-Debug] Event() permission check failed: senderID=&quot; + (senderID != null ? senderID.substring(0, 8) : &quot;null&quot;) + &quot;, chainID=&quot; + chainID);</b>
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Synchronize on the chain to prevent concurrent modification
+<b class="nc">&nbsp;        synchronized (targetChain) {</b>
+&nbsp;            // Get current block
+<b class="nc">&nbsp;            dev.droppinganvil.v3.edge.NetworkBlock currentBlock = targetChain.current;</b>
+<b class="nc">&nbsp;            if (currentBlock == null) {</b>
+&nbsp;                // Create genesis block if none exists
+<b class="nc">&nbsp;                currentBlock = new dev.droppinganvil.v3.edge.NetworkBlock(0L, chainID);</b>
+<b class="nc">&nbsp;                targetChain.current = currentBlock;</b>
+<b class="nc">&nbsp;                targetChain.blockMap.put(0L, currentBlock);</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Check if current block is full
+<b class="nc">&nbsp;            if (currentBlock.networkEvents.size() &gt;= targetChain.blockLength) {</b>
+&nbsp;                // Save the completed block to disk before rotating
+&nbsp;                try {
+<b class="nc">&nbsp;                    blockchainPersistence.saveBlock(networkID, chainID, currentBlock);</b>
+<b class="nc">&nbsp;                    blockchainPersistence.saveChainMetadata(targetChain, networkID);</b>
+&nbsp;                } catch (Exception e) {
+<b class="nc">&nbsp;                    System.err.println(&quot;[Blockchain] Failed to persist block &quot; + currentBlock.block +</b>
+<b class="nc">&nbsp;                                     &quot; for chain &quot; + chainID + &quot;: &quot; + e.getMessage());</b>
+&nbsp;                }
+&nbsp;
+&nbsp;                // Create new block
+<b class="nc">&nbsp;                Long newBlockID = currentBlock.block + 1;</b>
+<b class="nc">&nbsp;                dev.droppinganvil.v3.edge.NetworkBlock newBlock = new dev.droppinganvil.v3.edge.NetworkBlock(newBlockID, chainID);</b>
+&nbsp;
+&nbsp;                // Add to block map
+<b class="nc">&nbsp;                targetChain.blockMap.put(newBlockID, newBlock);</b>
+&nbsp;
+&nbsp;                // Update current block reference
+<b class="nc">&nbsp;                targetChain.current = newBlock;</b>
+<b class="nc">&nbsp;                currentBlock = newBlock;</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Add event to current block with signed blob
+<b class="nc">&nbsp;            int eventIndex = currentBlock.networkEvents.size();</b>
+<b class="nc">&nbsp;            if (!currentBlock.addEvent(eventIndex, signedBlob, this)) {</b>
+<b class="nc">&nbsp;                System.err.println(&quot;[Blockchain] Failed to add event to block&quot;);</b>
+<b class="nc">&nbsp;                return false;</b>
+&nbsp;            }
+<b class="nc">&nbsp;        }</b>
+&nbsp;
+<b class="nc">&nbsp;        return true;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * @deprecated Recording should happen at transmission time using Event(ne, senderID, signedBlob)
+&nbsp;     *             with the same blob being sent to peers. Do not use this method.
+&nbsp;     */
+&nbsp;    @Deprecated
+&nbsp;    public boolean Event(NetworkEvent ne, String senderID) {
+<b class="nc">&nbsp;        System.err.println(&quot;[Blockchain] DEPRECATED: Event(ne, senderID) called - use Event(ne, senderID, signedBlob) at transmission time&quot;);</b>
+<b class="nc">&nbsp;        return false;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * @deprecated Use instance method recordEvent(NetworkEvent, String) instead
+&nbsp;     */
+&nbsp;    @Deprecated
+&nbsp;    public static boolean recordEvent(NetworkEvent ne) {
+&nbsp;        // Legacy static method - cannot determine sender or instance
+&nbsp;        // Return false to indicate recording not performed
+<b class="nc">&nbsp;        return false;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public CXNetwork getNetwork(String networkID) {
+<b class="fc">&nbsp;        if (!networkMap.containsKey(networkID)) return null;</b>
+<b class="fc">&nbsp;        return networkMap.get(networkID);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public void loadLan() {
+<b class="nc">&nbsp;        File lan = new File(cxRoot, &quot;lan&quot;);</b>
+<b class="nc">&nbsp;        if (!lan.exists()) lan.mkdir();</b>
+<b class="nc">&nbsp;        File[] files = lan.listFiles();</b>
+<b class="nc">&nbsp;        if (files == null) return;</b>
+<b class="nc">&nbsp;        for (File f : files) {</b>
+<b class="nc">&nbsp;            if (f.getName().contains(&quot;.cxi&quot;)) {</b>
+&nbsp;                try {
+<b class="nc">&nbsp;                    Node n = (Node) getSignedObject(getOwnID(), f.toURL().openStream(), Node.class, &quot;cxJSON1&quot;);</b>
+<b class="nc">&nbsp;                    nodeMesh.peerDirectory.lan.put(n.cxID, n);</b>
+&nbsp;                } catch (Exception e) {
+<b class="nc">&nbsp;                    e.printStackTrace();</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    public static boolean connectBridge(CXBridge cxBridge) {
+<b class="nc">&nbsp;        if (bridgeMap.containsKey(cxBridge.getProtocol())) return false;</b>
+<b class="nc">&nbsp;        bridgeMap.put(cxBridge.getProtocol(), cxBridge);</b>
+<b class="nc">&nbsp;        return true;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Get blockchain statistics for a network
+&nbsp;     * Utility method for testing and monitoring
+&nbsp;     */
+&nbsp;    public BlockchainStats getBlockchainStats(CXNetwork network) {
+<b class="pc">&nbsp;        if (network == null) return null;</b>
+&nbsp;
+<b class="fc">&nbsp;        BlockchainStats stats = new BlockchainStats();</b>
+<b class="fc">&nbsp;        stats.networkID = network.configuration.netID;</b>
+<b class="fc">&nbsp;        stats.exists = blockchainPersistence.exists(network.configuration.netID);</b>
+&nbsp;
+<b class="pc">&nbsp;        if (network.c1 != null) {</b>
+<b class="fc">&nbsp;            stats.c1BlockCount = network.c1.blockMap.size();</b>
+<b class="pc">&nbsp;            stats.c1CurrentBlock = (network.c1.current != null) ? network.c1.current.block : null;</b>
+&nbsp;        }
+<b class="pc">&nbsp;        if (network.c2 != null) {</b>
+<b class="fc">&nbsp;            stats.c2BlockCount = network.c2.blockMap.size();</b>
+<b class="pc">&nbsp;            stats.c2CurrentBlock = (network.c2.current != null) ? network.c2.current.block : null;</b>
+&nbsp;        }
+<b class="pc">&nbsp;        if (network.c3 != null) {</b>
+<b class="fc">&nbsp;            stats.c3BlockCount = network.c3.blockMap.size();</b>
+<b class="pc">&nbsp;            stats.c3CurrentBlock = (network.c3.current != null) ? network.c3.current.block : null;</b>
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        return stats;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Get blockchain statistics for a network by ID
+&nbsp;     */
+&nbsp;    public BlockchainStats getBlockchainStats(String networkID) {
+<b class="nc">&nbsp;        return getBlockchainStats(getNetwork(networkID));</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Force save all blockchain data for a network
+&nbsp;     * Utility method for testing
+&nbsp;     */
+&nbsp;    public void forceBlockchainSave(CXNetwork network) throws Exception {
+<b class="nc">&nbsp;        if (network == null) throw new IllegalArgumentException(&quot;Network cannot be null&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;        String networkID = network.configuration.netID;</b>
+&nbsp;
+&nbsp;        // Save all blocks for each chain
+<b class="nc">&nbsp;        if (network.c1 != null) {</b>
+<b class="nc">&nbsp;            blockchainPersistence.saveAllBlocks(network.c1, networkID);</b>
+<b class="nc">&nbsp;            blockchainPersistence.saveChainMetadata(network.c1, networkID);</b>
+&nbsp;        }
+<b class="nc">&nbsp;        if (network.c2 != null) {</b>
+<b class="nc">&nbsp;            blockchainPersistence.saveAllBlocks(network.c2, networkID);</b>
+<b class="nc">&nbsp;            blockchainPersistence.saveChainMetadata(network.c2, networkID);</b>
+&nbsp;        }
+<b class="nc">&nbsp;        if (network.c3 != null) {</b>
+<b class="nc">&nbsp;            blockchainPersistence.saveAllBlocks(network.c3, networkID);</b>
+<b class="nc">&nbsp;            blockchainPersistence.saveChainMetadata(network.c3, networkID);</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Force save all blockchain data for a network by ID
+&nbsp;     */
+&nbsp;    public void forceBlockchainSave(String networkID) throws Exception {
+<b class="nc">&nbsp;        CXNetwork network = getNetwork(networkID);</b>
+<b class="nc">&nbsp;        if (network == null) throw new IllegalArgumentException(&quot;Network not found: &quot; + networkID);</b>
+<b class="nc">&nbsp;        forceBlockchainSave(network);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Clear blockchain data for a network
+&nbsp;     * Utility method for testing
+&nbsp;     */
+&nbsp;    public void clearBlockchainData(CXNetwork network) throws Exception {
+<b class="nc">&nbsp;        if (network == null) throw new IllegalArgumentException(&quot;Network cannot be null&quot;);</b>
+<b class="nc">&nbsp;        blockchainPersistence.deleteNetwork(network.configuration.netID);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Clear blockchain data for a network by ID
+&nbsp;     */
+&nbsp;    public void clearBlockchainData(String networkID) throws Exception {
+<b class="nc">&nbsp;        blockchainPersistence.deleteNetwork(networkID);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Replay blockchain events to rebuild node state after restart
+&nbsp;     *
+&nbsp;     * Loads all blocks from disk and processes state-modifying events (executeOnSync=true)
+&nbsp;     * to rebuild:
+&nbsp;     * - registeredNodes (from REGISTER_NODE events in c1)
+&nbsp;     * - blockedNodes (from BLOCK_NODE/UNBLOCK_NODE events in c1)
+&nbsp;     * - Any other state tracked in blockchain
+&nbsp;     *
+&nbsp;     * Processing order: c1 (Admin) → c2 (Resources) → c3 (Events)
+&nbsp;     * This ensures permissions and registrations are restored before other state
+&nbsp;     *
+&nbsp;     * @param network Network to replay blockchain for
+&nbsp;     */
+&nbsp;    public void replayBlockchain(CXNetwork network) {
+<b class="pc">&nbsp;        if (network == null) {</b>
+<b class="nc">&nbsp;            System.err.println(&quot;[Blockchain Replay] Network is null, skipping&quot;);</b>
+&nbsp;            return;
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        String networkID = network.configuration.netID;</b>
+<b class="fc">&nbsp;        System.out.println(&quot;[Blockchain Replay] Starting replay for network: &quot; + networkID);</b>
+&nbsp;
+&nbsp;        try {
+&nbsp;            // Check if blockchain exists on disk
+<b class="fc">&nbsp;            File blockchainDir = new File(cxRoot, &quot;blockchain/&quot; + networkID);</b>
+<b class="pc">&nbsp;            if (!blockchainDir.exists()) {</b>
+<b class="nc">&nbsp;                System.out.println(&quot;[Blockchain Replay] No blockchain data on disk for &quot; + networkID);</b>
+&nbsp;                return;
+&nbsp;            }
+&nbsp;
+<b class="fc">&nbsp;            int totalEventsReplayed = 0;</b>
+<b class="fc">&nbsp;            int totalEventsSkipped = 0;</b>
+&nbsp;
+&nbsp;            // Replay c1 (Admin) chain first - contains registrations, blocks, permissions
+<b class="fc">&nbsp;            totalEventsReplayed += replayChain(network, network.networkDictionary.c1, &quot;c1 (Admin)&quot;);</b>
+&nbsp;
+&nbsp;            // Replay c2 (Resources) chain - contains resource metadata
+<b class="fc">&nbsp;            totalEventsReplayed += replayChain(network, network.networkDictionary.c2, &quot;c2 (Resources)&quot;);</b>
+&nbsp;
+&nbsp;            // Replay c3 (Events) chain - mostly ephemeral, but may have state events
+<b class="fc">&nbsp;            totalEventsReplayed += replayChain(network, network.networkDictionary.c3, &quot;c3 (Events)&quot;);</b>
+&nbsp;
+<b class="fc">&nbsp;            System.out.println(&quot;[Blockchain Replay] Complete for &quot; + networkID);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;[Blockchain Replay]   Events replayed: &quot; + totalEventsReplayed);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;[Blockchain Replay]   Events skipped (ephemeral): &quot; + totalEventsSkipped);</b>
+&nbsp;
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[Blockchain Replay] Error replaying blockchain for &quot; + networkID + &quot;: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;            e.printStackTrace();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Replay events from a specific chain
+&nbsp;     * @return Number of events replayed
+&nbsp;     */
+&nbsp;    private int replayChain(CXNetwork network, Long chainID, String chainName) {
+<b class="fc">&nbsp;        int eventsReplayed = 0;</b>
+<b class="fc">&nbsp;        String networkID = network.configuration.netID;</b>
+&nbsp;
+&nbsp;        try {
+<b class="fc">&nbsp;            System.out.println(&quot;[Blockchain Replay] Loading &quot; + chainName + &quot;...&quot;);</b>
+&nbsp;
+&nbsp;            // Load chain from disk (load all blocks)
+<b class="fc">&nbsp;            dev.droppinganvil.v3.edge.NetworkRecord chain = blockchainPersistence.loadChain(networkID, chainID, true);</b>
+&nbsp;
+<b class="pc">&nbsp;            if (chain == null || chain.blockMap.isEmpty()) {</b>
+<b class="nc">&nbsp;                System.out.println(&quot;[Blockchain Replay]   No blocks found in &quot; + chainName);</b>
+<b class="nc">&nbsp;                return 0;</b>
+&nbsp;            }
+&nbsp;
+<b class="fc">&nbsp;            System.out.println(&quot;[Blockchain Replay]   Found &quot; + chain.blockMap.size() + &quot; blocks&quot;);</b>
+&nbsp;
+&nbsp;            // Process blocks in order (0, 1, 2, ...)
+<b class="fc">&nbsp;            for (long blockNum = 0; blockNum &lt; chain.blockMap.size(); blockNum++) {</b>
+<b class="fc">&nbsp;                dev.droppinganvil.v3.edge.NetworkBlock block = chain.blockMap.get(blockNum);</b>
+<b class="pc">&nbsp;                if (block == null) continue;</b>
+&nbsp;
+&nbsp;                // Prepare block: verify and deserialize all events
+<b class="fc">&nbsp;                block.prepare(this);</b>
+&nbsp;
+&nbsp;                // Process events in this block
+<b class="pc">&nbsp;                for (java.util.Map.Entry&lt;Integer, dev.droppinganvil.v3.network.events.NetworkEvent&gt; entry : block.deserializedEvents.entrySet()) {</b>
+<b class="nc">&nbsp;                    dev.droppinganvil.v3.network.events.NetworkEvent event = entry.getValue();</b>
+&nbsp;
+&nbsp;                    // Only replay state-modifying events
+<b class="nc">&nbsp;                    if (event.executeOnSync) {</b>
+&nbsp;                        try {
+&nbsp;                            // Queue event for processing through existing framework
+&nbsp;                            // Create a simple NetworkContainer for the replayed event
+<b class="nc">&nbsp;                            dev.droppinganvil.v3.network.events.NetworkContainer nc =</b>
+&nbsp;                                new dev.droppinganvil.v3.network.events.NetworkContainer();
+<b class="nc">&nbsp;                            nc.se = &quot;cxJSON1&quot;;</b>
+<b class="nc">&nbsp;                            nc.s = false;</b>
+&nbsp;
+&nbsp;                            // Create InputBundle and add to eventQueue
+<b class="nc">&nbsp;                            InputBundle ib = new InputBundle(event, nc);</b>
+<b class="nc">&nbsp;                            eventQueue.add(ib);</b>
+&nbsp;
+<b class="nc">&nbsp;                            eventsReplayed++;</b>
+&nbsp;
+<b class="nc">&nbsp;                            if (eventsReplayed &lt;= 5 || eventsReplayed % 10 == 0) {</b>
+<b class="nc">&nbsp;                                System.out.println(&quot;[Blockchain Replay]     Queued &quot; + event.eT + &quot; event (ID: &quot; + event.iD + &quot;)&quot;);</b>
+&nbsp;                            }
+&nbsp;                        } catch (Exception e) {
+<b class="nc">&nbsp;                            System.err.println(&quot;[Blockchain Replay]     Failed to queue event &quot; + event.iD + &quot;: &quot; + e.getMessage());</b>
+&nbsp;                        }
+&nbsp;                    }
+&nbsp;                }
+&nbsp;            }
+&nbsp;
+<b class="fc">&nbsp;            System.out.println(&quot;[Blockchain Replay]   &quot; + chainName + &quot; complete: &quot; + eventsReplayed + &quot; events replayed&quot;);</b>
+&nbsp;
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[Blockchain Replay] Error loading &quot; + chainName + &quot;: &quot; + e.getMessage());</b>
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        return eventsReplayed;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Automatically request chain status from NMI to trigger blockchain sync
+&nbsp;     * Called after loading a network to ensure fresh peers sync blockchain data
+&nbsp;     */
+&nbsp;    private void requestChainStatusFromNMI(CXNetwork network) {
+<b class="pc">&nbsp;        if (network == null || network.configuration == null) {</b>
+&nbsp;            return;
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        String networkID = network.configuration.netID;</b>
+&nbsp;
+&nbsp;        try {
+&nbsp;            // Check if network has NMI/Backend configured
+<b class="pc">&nbsp;            if (network.configuration.backendSet == null || network.configuration.backendSet.isEmpty()) {</b>
+<b class="nc">&nbsp;                System.out.println(&quot;[Auto-Sync] No NMI configured for network &quot; + networkID + &quot;, skipping auto-sync&quot;);</b>
+&nbsp;                return;
+&nbsp;            }
+&nbsp;
+&nbsp;            // Get first NMI from backend set
+<b class="fc">&nbsp;            String nmiID = network.configuration.backendSet.iterator().next();</b>
+<b class="fc">&nbsp;            Node nmiNode = nodeMesh.peerDirectory.lookup(nmiID, true, true);</b>
+&nbsp;
+<b class="pc">&nbsp;            if (nmiNode == null) {</b>
+<b class="nc">&nbsp;                System.out.println(&quot;[Auto-Sync] NMI &quot; + nmiID + &quot; not found in peer directory, cannot request sync&quot;);</b>
+&nbsp;                return;
+&nbsp;            }
+&nbsp;
+<b class="fc">&nbsp;            System.out.println(&quot;[Auto-Sync] Requesting chain status from NMI &quot; + nmiID.substring(0, 8) + &quot;...&quot;);</b>
+&nbsp;
+&nbsp;            // Create CHAIN_STATUS_REQUEST
+<b class="fc">&nbsp;            String requestJson = serialize(&quot;cxJSON1&quot;, new dev.droppinganvil.v3.network.events.ChainStatus(networkID));</b>
+&nbsp;
+&nbsp;            // Send request using EventBuilder pattern with automatic signature
+<b class="fc">&nbsp;            EventBuilder eb = buildEvent(</b>
+&nbsp;                dev.droppinganvil.v3.network.events.EventType.CHAIN_STATUS_REQUEST,
+<b class="fc">&nbsp;                requestJson.getBytes(&quot;UTF-8&quot;)</b>
+<b class="fc">&nbsp;            ).toPeer(nmiID).signData();</b>
+<b class="fc">&nbsp;            eb.getPath().network = networkID;</b>
+<b class="fc">&nbsp;            eb.queue();</b>
+&nbsp;
+<b class="fc">&nbsp;            System.out.println(&quot;[Auto-Sync] Chain status request queued for NMI&quot;);</b>
+&nbsp;
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[Auto-Sync] Error requesting chain status: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;            e.printStackTrace();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Blockchain statistics container
+&nbsp;     */
+<b class="fc">&nbsp;    public static class BlockchainStats {</b>
+&nbsp;        public String networkID;
+&nbsp;        public boolean exists;
+&nbsp;        public int c1BlockCount;
+&nbsp;        public Long c1CurrentBlock;
+&nbsp;        public int c2BlockCount;
+&nbsp;        public Long c2CurrentBlock;
+&nbsp;        public int c3BlockCount;
+&nbsp;        public Long c3CurrentBlock;
+&nbsp;
+&nbsp;        @Override
+&nbsp;        public String toString() {
+<b class="nc">&nbsp;            return &quot;BlockchainStats{&quot; +</b>
+&nbsp;                &quot;network=&#39;&quot; + networkID + &#39;\&#39;&#39; +
+&nbsp;                &quot;, onDisk=&quot; + exists +
+&nbsp;                &quot;, c1=&quot; + c1BlockCount + &quot; blocks (current=&quot; + c1CurrentBlock + &quot;)&quot; +
+&nbsp;                &quot;, c2=&quot; + c2BlockCount + &quot; blocks (current=&quot; + c2CurrentBlock + &quot;)&quot; +
+&nbsp;                &quot;, c3=&quot; + c3BlockCount + &quot; blocks (current=&quot; + c3CurrentBlock + &quot;)&quot; +
+&nbsp;                &#39;}&#39;;
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Load DataContainer from disk (local security data)
+&nbsp;     * Creates new container if file doesn&#39;t exist
+&nbsp;     */
+&nbsp;    private void loadDataContainer() {
+<b class="fc">&nbsp;        File dataFile = new File(cxRoot, &quot;data.cxd&quot;);</b>
+<b class="pc">&nbsp;        if (!dataFile.exists()) {</b>
+&nbsp;            // Create new container
+<b class="fc">&nbsp;            dataContainer = new dev.droppinganvil.v3.edge.DataContainer();</b>
+&nbsp;            return;
+&nbsp;        }
+&nbsp;
+&nbsp;        try {
+&nbsp;            // Deserialize from JSON
+<b class="nc">&nbsp;            FileInputStream fis = new FileInputStream(dataFile);</b>
+<b class="nc">&nbsp;            dataContainer = (dev.droppinganvil.v3.edge.DataContainer) deserialize(</b>
+&nbsp;                &quot;cxJSON1&quot;, fis, dev.droppinganvil.v3.edge.DataContainer.class);
+&nbsp;            fis.close();
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[DataContainer] Failed to load data.cxd: &quot; + e.getMessage());</b>
+&nbsp;            // Create new container on error
+<b class="nc">&nbsp;            dataContainer = new dev.droppinganvil.v3.edge.DataContainer();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Save DataContainer to disk (persists whitelist/blocklist data)
+&nbsp;     */
+&nbsp;    public void saveDataContainer() throws Exception {
+<b class="nc">&nbsp;        if (dataContainer == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalStateException(&quot;DataContainer not initialized&quot;);</b>
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        File dataFile = new File(cxRoot, &quot;data.cxd&quot;);</b>
+<b class="nc">&nbsp;        String json = serialize(&quot;cxJSON1&quot;, dataContainer);</b>
+<b class="nc">&nbsp;        FileWriter writer = new FileWriter(dataFile);</b>
+<b class="nc">&nbsp;        writer.write(json);</b>
+<b class="nc">&nbsp;        writer.flush();</b>
+&nbsp;        writer.close();
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Returns true if the address string is well-formed and safe to route to.
+&nbsp;     *
+&nbsp;     * Bridge addresses (&quot;protocol:url&quot;) are validated by the registered BridgeProvider
+&nbsp;     * for that protocol — each bridge owns its own spec.
+&nbsp;     * Plain IP:port addresses are validated inline (valid port 1-65535, non-empty host).
+&nbsp;     * Null, empty, or addresses that match no registered bridge and are not valid IP:port
+&nbsp;     * are rejected.
+&nbsp;     */
+&nbsp;    public boolean isValidPeerAddress(String addr) {
+<b class="pc">&nbsp;        if (addr == null || addr.isEmpty() || addr.length() &gt; 256) return false;</b>
+&nbsp;
+&nbsp;        // Bridge address: contains &quot;://&quot; after the protocol prefix
+<b class="fc">&nbsp;        if (addr.contains(&quot;://&quot;)) {</b>
+<b class="fc">&nbsp;            int firstColon = addr.indexOf(&#39;:&#39;);</b>
+<b class="pc">&nbsp;            if (firstColon &lt;= 0) return false;</b>
+<b class="fc">&nbsp;            String protocol = addr.substring(0, firstColon);</b>
+<b class="fc">&nbsp;            BridgeProvider provider = bridgeProviders.get(protocol);</b>
+<b class="pc">&nbsp;            if (provider == null) return false; // Unknown bridge protocol</b>
+<b class="fc">&nbsp;            return provider.isValidAddress(addr);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Plain IP:port
+<b class="fc">&nbsp;        int lastColon = addr.lastIndexOf(&#39;:&#39;);</b>
+<b class="pc">&nbsp;        if (lastColon &lt;= 0) return false;</b>
+<b class="fc">&nbsp;        String host = addr.substring(0, lastColon);</b>
+<b class="pc">&nbsp;        if (host.isEmpty()) return false;</b>
+&nbsp;        try {
+<b class="fc">&nbsp;            int port = Integer.parseInt(addr.substring(lastColon + 1));</b>
+<b class="pc">&nbsp;            return port &gt;= 1 &amp;&amp; port &lt;= 65535;</b>
+&nbsp;        } catch (NumberFormatException e) {
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Returns true if the given address string refers to this node&#39;s own endpoint.
+&nbsp;     * Handles three formats:
+&nbsp;     *   - Socket toString format:  /127.0.0.1:9001  (from ownAddresses)
+&nbsp;     *   - Plain IP:port:           127.0.0.1:9001   (from waitingAddresses / PeerFinding)
+&nbsp;     *   - Bridge address:          cxHTTP1:https://.../cx
+&nbsp;     *
+&nbsp;     * Checks in order:
+&nbsp;     *   1. Direct match against self.addr
+&nbsp;     *   2. Normalized match against all entries in nodeMesh.ownAddresses
+&nbsp;     *   3. Port-based match: port == listeningPort and IP is own local or loopback
+&nbsp;     */
+&nbsp;    public boolean isSelfAddress(String addr) {
+<b class="pc">&nbsp;        if (addr == null || addr.isEmpty()) return false;</b>
+&nbsp;
+&nbsp;        // Normalize: strip leading slash from socket-toString format
+<b class="pc">&nbsp;        String normalized = addr.startsWith(&quot;/&quot;) ? addr.substring(1) : addr;</b>
+&nbsp;
+&nbsp;        // 1. Direct match against advertised self address
+<b class="pc">&nbsp;        if (self != null &amp;&amp; self.addr != null &amp;&amp; normalized.equals(self.addr)) return true;</b>
+&nbsp;
+&nbsp;        // 2. Normalized match against all accumulated own addresses
+<b class="pc">&nbsp;        if (nodeMesh != null) {</b>
+<b class="fc">&nbsp;            for (String own : nodeMesh.ownAddresses) {</b>
+<b class="pc">&nbsp;                if (own == null) continue;</b>
+<b class="pc">&nbsp;                String ownNorm = own.startsWith(&quot;/&quot;) ? own.substring(1) : own;</b>
+<b class="pc">&nbsp;                if (normalized.equals(ownNorm)) return true;</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+&nbsp;        // 3. Port-based check for plain IP:port addresses (no protocol scheme)
+<b class="pc">&nbsp;        if (listeningPort &gt; 0 &amp;&amp; normalized.contains(&quot;:&quot;) &amp;&amp; !normalized.contains(&quot;://&quot;)) {</b>
+&nbsp;            try {
+<b class="fc">&nbsp;                int lastColon = normalized.lastIndexOf(&#39;:&#39;);</b>
+<b class="fc">&nbsp;                int port = Integer.parseInt(normalized.substring(lastColon + 1));</b>
+<b class="fc">&nbsp;                if (port == listeningPort) {</b>
+<b class="fc">&nbsp;                    String ip = normalized.substring(0, lastColon);</b>
+<b class="fc">&nbsp;                    String localIP = LANScanner.getLocalIP();</b>
+<b class="pc">&nbsp;                    if (&quot;127.0.0.1&quot;.equals(ip) || &quot;localhost&quot;.equals(ip)</b>
+<b class="pc">&nbsp;                            || &quot;0.0.0.0&quot;.equals(ip)</b>
+<b class="pc">&nbsp;                            || (localIP != null &amp;&amp; localIP.equals(ip))) {</b>
+<b class="fc">&nbsp;                        return true;</b>
+&nbsp;                    }
+&nbsp;                }
+&nbsp;            } catch (NumberFormatException ignored) {}
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        return false;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public void updateHTTPBridgePort(Integer port) throws Exception {
+<b class="pc">&nbsp;        if (bridgeProviders.containsKey(&quot;cxHTTP1&quot;)) {</b>
+<b class="fc">&nbsp;            BridgeProvider bridge = bridgeProviders.get(&quot;cxHTTP1&quot;);</b>
+<b class="fc">&nbsp;            bridge.stopServer();</b>
+<b class="fc">&nbsp;            bridge.startServer(port);</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,145 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > SeedExchange</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network.events</a>
+</div>
+
+<h1>Coverage Summary for Class: SeedExchange (dev.droppinganvil.v3.network.events)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">SeedExchange</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (2/2)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (3/3)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2026. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network.events;
+&nbsp;
+&nbsp;/**
+&nbsp; * Payload for SEED_REQUEST and SEED_RESPONSE events.
+&nbsp; * One class serves both event types. Direction is determined solely by the
+&nbsp; * EventType constant on the NetworkEvent, not by the presence or absence of any field.
+&nbsp; * Fields not relevant to a given event type are left null.
+&nbsp; *
+&nbsp; * SEED_REQUEST: only {@code network} is set.
+&nbsp; * SEED_RESPONSE: all remaining fields are set; {@code network} identifies the subject network.
+&nbsp; */
+&nbsp;public class SeedExchange {
+&nbsp;    /** Network ID the request or response applies to */
+&nbsp;    public String network;
+&nbsp;    /** Current dynamic seed built from live peer state. Response only. */
+&nbsp;    public dev.droppinganvil.v3.network.Seed dynamicSeed;
+&nbsp;    /** Signed epoch seed loaded from disk, if available. Response only. */
+&nbsp;    public dev.droppinganvil.v3.network.Seed epochSeed;
+&nbsp;    /** True if the responding peer is an authoritative NMI/backend node. Response only. */
+&nbsp;    public Boolean authoritative;
+&nbsp;    /** ID of the responding peer. Response only. */
+&nbsp;    public String senderID;
+&nbsp;    /** Chain 1 block height at time of response. Response only. */
+&nbsp;    public Long c1;
+&nbsp;    /** Chain 2 block height at time of response. Response only. */
+&nbsp;    public Long c2;
+&nbsp;    /** Chain 3 block height at time of response. Response only. */
+&nbsp;    public Long c3;
+&nbsp;
+<b class="fc">&nbsp;    public SeedExchange() {}</b>
+&nbsp;
+&nbsp;    /** Convenience constructor for a SEED_REQUEST payload. */
+<b class="fc">&nbsp;    public SeedExchange(String network) {</b>
+<b class="fc">&nbsp;        this.network = network;</b>
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

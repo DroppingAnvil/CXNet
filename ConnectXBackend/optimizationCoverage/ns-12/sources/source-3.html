@@ -1,0 +1,281 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > RetryProcessor</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network.threads</a>
+</div>
+
+<h1>Coverage Summary for Class: RetryProcessor (dev.droppinganvil.v3.network.threads)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">RetryProcessor</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (3/3)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    50%
+  </span>
+  <span class="absValue">
+    (19/38)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    68.6%
+  </span>
+  <span class="absValue">
+    (48/70)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2025. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network.threads;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.NodeConfig;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.OutConnectionController;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.RetryBundle;
+&nbsp;
+&nbsp;import java.util.ArrayList;
+&nbsp;import java.util.List;
+&nbsp;
+&nbsp;/**
+&nbsp; * Processes retry queue for failed network events
+&nbsp; * Uses exponential backoff to retry failed transmissions without blocking main output queue
+&nbsp; */
+&nbsp;public class RetryProcessor implements Runnable {
+<b class="fc">&nbsp;    public static boolean active = true;</b>
+&nbsp;    private OutConnectionController outController;
+&nbsp;    private static final long CHECK_INTERVAL_MS = 1000; // Check retry queue every second
+&nbsp;
+<b class="fc">&nbsp;    public RetryProcessor(OutConnectionController outController) {</b>
+<b class="fc">&nbsp;        this.outController = outController;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    @Override
+&nbsp;    public void run() {
+<b class="fc">&nbsp;        String peerID = outController.connectXAPI.getOwnID();</b>
+<b class="pc">&nbsp;        String peerShort = (peerID != null &amp;&amp; peerID.length() &gt;= 8) ? peerID.substring(0, 8) : &quot;UNKNOWN&quot;;</b>
+<b class="fc">&nbsp;        System.out.println(&quot;[RetryProcessor] Thread started for peer &quot; + peerShort);</b>
+&nbsp;
+<b class="pc">&nbsp;        while (active) {</b>
+&nbsp;            try {
+&nbsp;                // Collect bundles ready for retry
+<b class="fc">&nbsp;                List&lt;RetryBundle&gt; toRetry = new ArrayList&lt;&gt;();</b>
+<b class="fc">&nbsp;                List&lt;RetryBundle&gt; toRequeue = new ArrayList&lt;&gt;();</b>
+&nbsp;
+<b class="fc">&nbsp;                int queueSize = outController.connectXAPI.retryQueue.size();</b>
+&nbsp;
+&nbsp;                    // Process all bundles in retry queue
+&nbsp;                    RetryBundle polled;
+<b class="fc">&nbsp;                    while ((polled = outController.connectXAPI.retryQueue.poll()) != null) {</b>
+<b class="pc">&nbsp;                        if (polled.hasExceededMaxRetries()) {</b>
+&nbsp;                            // Drop after max retries
+<b class="nc">&nbsp;                            System.err.println(&quot;[RETRY-DROP] &quot; + polled.getEventType() + &quot; to &quot; +</b>
+<b class="nc">&nbsp;                                polled.getTargetAddress() + &quot; dropped after &quot; + polled.retryCount + &quot; retries&quot;);</b>
+<b class="nc">&nbsp;                            System.err.println(&quot;[RETRY-DROP]   First attempt: &quot; +</b>
+<b class="nc">&nbsp;                                ((System.currentTimeMillis() - polled.firstAttemptTime) / 1000) + &quot;s ago&quot;);</b>
+<b class="nc">&nbsp;                            System.err.println(&quot;[RETRY-DROP]   Last error: &quot; + polled.lastError);</b>
+<b class="fc">&nbsp;                        } else if (polled.shouldRetry()) {</b>
+&nbsp;                            // Ready for retry
+<b class="fc">&nbsp;                            toRetry.add(polled);</b>
+&nbsp;                        } else {
+&nbsp;                            // Not ready yet, requeue
+<b class="fc">&nbsp;                            toRequeue.add(polled);</b>
+&nbsp;                        }
+&nbsp;                    }
+&nbsp;
+&nbsp;                    // Requeue bundles not ready for retry
+<b class="fc">&nbsp;                    for (RetryBundle b : toRequeue) {</b>
+<b class="fc">&nbsp;                        outController.connectXAPI.retryQueue.add(b);</b>
+&nbsp;                    }
+&nbsp;
+&nbsp;                    // Log retry queue status periodically
+<b class="pc">&nbsp;                    if (NodeConfig.DEBUG &amp;&amp; queueSize &gt; 0) {</b>
+<b class="nc">&nbsp;                        long nextRetryIn = toRequeue.isEmpty() ? 0 :</b>
+<b class="nc">&nbsp;                            Math.max(0, toRequeue.get(0).nextRetryTime - System.currentTimeMillis()) / 1000;</b>
+<b class="nc">&nbsp;                        System.out.println(&quot;[RETRY-QUEUE] Size: &quot; + queueSize +</b>
+<b class="nc">&nbsp;                            &quot;, ready: &quot; + toRetry.size() +</b>
+<b class="nc">&nbsp;                            &quot;, waiting: &quot; + toRequeue.size() +</b>
+<b class="nc">&nbsp;                            (toRequeue.isEmpty() ? &quot;&quot; : &quot;, next in &quot; + nextRetryIn + &quot;s&quot;));</b>
+&nbsp;                    }
+&nbsp;
+&nbsp;                // Attempt retries outside of synchronized block
+<b class="fc">&nbsp;                for (RetryBundle bundle : toRetry) {</b>
+<b class="fc">&nbsp;                    String eventType = bundle.getEventType();</b>
+<b class="fc">&nbsp;                    String nodeAddr = bundle.getTargetAddress();</b>
+&nbsp;
+&nbsp;                    // Check if we should convert CXS → CXN fallback with E2E
+<b class="fc">&nbsp;                    if (bundle.shouldConvertToCXN()) {</b>
+<b class="fc">&nbsp;                        String targetPeerID = bundle.getTargetPeerID();</b>
+<b class="fc">&nbsp;                        String networkID = bundle.getNetworkID();</b>
+&nbsp;
+<b class="fc">&nbsp;                        System.out.println(&quot;[CXS→CXN-FALLBACK] &quot; + eventType + &quot; to peer &quot; +</b>
+<b class="pc">&nbsp;                            (targetPeerID != null &amp;&amp; targetPeerID.length() &gt;= 8 ? targetPeerID.substring(0, 8) : &quot;UNKNOWN&quot;) +</b>
+&nbsp;                            &quot; failed &quot; + bundle.retryCount + &quot; times, converting to CXN with E2E encryption&quot;);
+&nbsp;
+&nbsp;                        try {
+&nbsp;                            // Attempt node lookup to prime cert cache before E2E encrypt
+&nbsp;                            try {
+<b class="fc">&nbsp;                                outController.connectXAPI.nodeMesh.peerDirectory.lookup(targetPeerID, true, true);</b>
+&nbsp;                            } catch (Exception lookupEx) {
+<b class="nc">&nbsp;                                System.err.println(&quot;[CXS→CXN-LOOKUP] Could not resolve peer &quot; +</b>
+<b class="nc">&nbsp;                                    (targetPeerID != null &amp;&amp; targetPeerID.length() &gt;= 8 ? targetPeerID.substring(0, 8) : &quot;UNKNOWN&quot;) +</b>
+<b class="nc">&nbsp;                                    &quot;: &quot; + lookupEx.getMessage());</b>
+&nbsp;                                // Continue anyway - cert may already be cached or lookup partial
+&nbsp;                            }
+&nbsp;
+&nbsp;                            // Re-encrypt the event data with E2E encryption for the target peer
+<b class="fc">&nbsp;                            byte[] eventData = bundle.bundle.ne.d;</b>
+&nbsp;
+<b class="fc">&nbsp;                            dev.droppinganvil.v3.network.events.EventType et =</b>
+<b class="fc">&nbsp;                                dev.droppinganvil.v3.network.events.EventType.valueOf(bundle.bundle.ne.eT);</b>
+&nbsp;
+<b class="fc">&nbsp;                            outController.connectXAPI.buildEvent(et, eventData)</b>
+<b class="pc">&nbsp;                                .toNetwork(networkID != null ? networkID : &quot;CXNET&quot;)</b>
+<b class="fc">&nbsp;                                .addRecipient(targetPeerID)</b>
+<b class="fc">&nbsp;                                .encrypt()</b>
+<b class="fc">&nbsp;                                .queue();</b>
+&nbsp;
+<b class="fc">&nbsp;                            bundle.convertedToCXN = true;</b>
+<b class="fc">&nbsp;                            System.out.println(&quot;[CXS→CXN-SUCCESS] &quot; + eventType +</b>
+<b class="pc">&nbsp;                                &quot; converted to E2E-encrypted CXN broadcast for network &quot; + (networkID != null ? networkID : &quot;CXNET&quot;));</b>
+&nbsp;
+&nbsp;                            // Don&#39;t requeue - new event created via EventBuilder
+&nbsp;                            continue;
+&nbsp;
+&nbsp;                        } catch (Exception e) {
+&nbsp;                            // E2E is mandatory - do not fall back to plain CXS
+<b class="nc">&nbsp;                            System.err.println(&quot;[CXS→CXN-FAILED] E2E encrypt failed for &quot; + eventType +</b>
+<b class="nc">&nbsp;                                &quot; (cert unavailable?): &quot; + e.getMessage() + &quot; - will retry E2E&quot;);</b>
+<b class="nc">&nbsp;                            bundle.scheduleNextRetry(e.getMessage());</b>
+<b class="nc">&nbsp;                            outController.connectXAPI.retryQueue.add(bundle);</b>
+&nbsp;                            continue;
+&nbsp;                        }
+&nbsp;                    }
+&nbsp;
+<b class="fc">&nbsp;                    System.out.println(&quot;[RETRY-ATTEMPT] &quot; + eventType + &quot; to &quot; + nodeAddr +</b>
+&nbsp;                        &quot; (attempt &quot; + (bundle.retryCount + 1) + &quot;/&quot; + RetryBundle.MAX_RETRIES + &quot;)&quot;);
+&nbsp;
+&nbsp;                    try {
+<b class="fc">&nbsp;                        outController.transmitEvent(bundle.bundle);</b>
+&nbsp;                        // Success! Don&#39;t requeue
+<b class="fc">&nbsp;                        System.out.println(&quot;[RETRY-SUCCESS] &quot; + eventType + &quot; to &quot; + nodeAddr +</b>
+&nbsp;                            &quot; succeeded on retry &quot; + (bundle.retryCount + 1));
+&nbsp;                    } catch (Exception e) {
+&nbsp;                        // Failed again, schedule next retry
+<b class="fc">&nbsp;                        bundle.scheduleNextRetry(e.getMessage());</b>
+&nbsp;
+<b class="fc">&nbsp;                        outController.connectXAPI.retryQueue.add(bundle);</b>
+&nbsp;
+<b class="fc">&nbsp;                        long nextRetryDelay = (bundle.nextRetryTime - System.currentTimeMillis()) / 1000;</b>
+<b class="fc">&nbsp;                        System.err.println(&quot;[RETRY-FAILED] &quot; + eventType + &quot; to &quot; + nodeAddr +</b>
+<b class="fc">&nbsp;                            &quot; failed again: &quot; + e.getMessage());</b>
+<b class="fc">&nbsp;                        System.err.println(&quot;[RETRY-QUEUE] Retry &quot; + (bundle.retryCount) + &quot;/&quot; +</b>
+&nbsp;                            RetryBundle.MAX_RETRIES + &quot; in &quot; + nextRetryDelay + &quot;s&quot;);
+&nbsp;                    }
+&nbsp;                }
+&nbsp;
+<b class="fc">&nbsp;                Thread.sleep(CHECK_INTERVAL_MS);</b>
+&nbsp;            } catch (InterruptedException e) {
+<b class="nc">&nbsp;                System.err.println(&quot;[RetryProcessor] Interrupted: &quot; + e.getMessage());</b>
+&nbsp;                break;
+&nbsp;            } catch (Exception e) {
+<b class="nc">&nbsp;                System.err.println(&quot;[RetryProcessor] Unexpected error: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;                e.printStackTrace();</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        System.out.println(&quot;[RetryProcessor] Thread stopped for peer &quot; + peerShort);</b>
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

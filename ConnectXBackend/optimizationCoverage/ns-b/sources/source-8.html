@@ -1,0 +1,137 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > Scope</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network</a>
+</div>
+
+<h1>Coverage Summary for Class: Scope (dev.droppinganvil.v3.network)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">Scope</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (2/2)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (6/6)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2022. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network;
+&nbsp;
+<b class="fc">&nbsp;public enum Scope {</b>
+<b class="fc">&nbsp;    CX,</b>
+&nbsp;    /**
+&nbsp;     * ConnectX System (Device)
+&nbsp;     * This is used for most communication where network is irrelevant such as CXHELLO
+&nbsp;     * These messages will default with event builder to only being received by the one peer they were sent to, and not relayed (DEFAULT)
+&nbsp;     */
+<b class="fc">&nbsp;    CXS,</b>
+&nbsp;    /**
+&nbsp;     * ConnectX Network scope
+&nbsp;     * This is used for 90% of interactions through CX
+&nbsp;     * This is the only scope where blockchain recording can occur, the rational is that if peers individually got blockchain data there would be mass fragmentation
+&nbsp;     * This scope will default to sending event to ALL available peers, with the transmission method of success being used and then continue to next peer, this is different to how CX scope transmits to ALL peer addresses for ALL peers
+&nbsp;     */
+<b class="fc">&nbsp;    CXN,</b>
+&nbsp;    /**
+&nbsp;     * ConnectX Resource scope
+&nbsp;     * This is used by Remote Directory a resource management core for CX
+&nbsp;     */
+<b class="fc">&nbsp;    CXR,</b>
+&nbsp;    /**
+&nbsp;     * LAN is a scope for direct CXS messages in a lower level CX network comprised of &quot;local&quot; cx devices
+&nbsp;     * The idea here is that users could bind their 2 computers, phone...  together on a secure lan for personal networking
+&nbsp;     */
+<b class="fc">&nbsp;    LAN,</b>
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

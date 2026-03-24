@@ -1,0 +1,218 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > IPXLock</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.utils.obj</a>
+</div>
+
+<h1>Coverage Summary for Class: IPXLock (dev.droppinganvil.v3.utils.obj)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">IPXLock</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    7.7%
+  </span>
+  <span class="absValue">
+    (1/13)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/18)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    10.3%
+  </span>
+  <span class="absValue">
+    (3/29)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;package dev.droppinganvil.v3.utils.obj;
+&nbsp;
+&nbsp;public class IPXLock {
+&nbsp;    /**
+&nbsp;     * Used for application specific use case
+&nbsp;     */
+&nbsp;    public Object o;
+&nbsp;    /**
+&nbsp;     * Represents locked state of containing Object
+&nbsp;     * a1 should represent the ability to safely edit the container object
+&nbsp;     * a2 should represent the lock on this object and should represent the lock on this object, more specifically the timestamp
+&nbsp;     */
+<b class="fc">&nbsp;    private Dualean lock = new Dualean(false, false);</b>
+&nbsp;    /**
+&nbsp;     * Timestamp for edits to lock status
+&nbsp;     */
+&nbsp;    private Long timestamp;
+&nbsp;    /**
+&nbsp;     * Some form of identification for lock usages, should be null when a lock is not active
+&nbsp;     */
+&nbsp;    public String lockerID;
+&nbsp;
+<b class="fc">&nbsp;    public IPXLock() {</b>
+<b class="fc">&nbsp;        timestamp = System.nanoTime();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Lock container object
+&nbsp;     * @param lockerID A String representation of the process that locked the object Ex. EDIT_THREAD_1
+&nbsp;     * @throws LockedStateException
+&nbsp;     */
+&nbsp;    public void lock(String lockerID) throws LockedStateException, UnlockedStateException {
+<b class="nc">&nbsp;        verifyUnlocked();</b>
+<b class="nc">&nbsp;        this.lockerID = lockerID;</b>
+<b class="nc">&nbsp;        lock.a1 = true;</b>
+<b class="nc">&nbsp;        generateLockTimeStamp();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Unlock container object
+&nbsp;     * @param lockerID A String representation of the process that locked the object Ex. EDIT_THREAD_1
+&nbsp;     * @throws UnlockedStateException
+&nbsp;     * @throws LockOwnerException
+&nbsp;     */
+&nbsp;    public void unlock(String lockerID) throws UnlockedStateException, LockOwnerException {
+<b class="nc">&nbsp;        verifyFullLocked();</b>
+<b class="nc">&nbsp;        verifyOwner(lockerID);</b>
+<b class="nc">&nbsp;        generateUnlockTimeStamp(lockerID);</b>
+<b class="nc">&nbsp;        this.lockerID = null;</b>
+<b class="nc">&nbsp;        lock.a1 = false;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    private void generateLockTimeStamp() throws LockedStateException, UnlockedStateException {
+<b class="nc">&nbsp;        verifyLocked();</b>
+<b class="nc">&nbsp;        verifyTimeStampUnlocked();</b>
+<b class="nc">&nbsp;        lock.a2 = true;</b>
+<b class="nc">&nbsp;        timestamp = System.nanoTime();</b>
+&nbsp;    }
+&nbsp;    private void generateUnlockTimeStamp(String lockerID) throws UnlockedStateException, LockOwnerException {
+<b class="nc">&nbsp;        verifyFullLocked();</b>
+<b class="nc">&nbsp;        verifyOwner(lockerID);</b>
+<b class="nc">&nbsp;        lock.a2 = false;</b>
+<b class="nc">&nbsp;        timestamp = System.nanoTime();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;    private void verifyOwner(String providedLID) throws LockOwnerException {
+<b class="nc">&nbsp;        if (!lockerID.equals(providedLID)) throw new LockOwnerException();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public void verifyUnlocked() throws LockedStateException {
+<b class="nc">&nbsp;        if (lock.a1 || lock.a2) throw new LockedStateException();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public void verifyLocked() throws UnlockedStateException {
+<b class="nc">&nbsp;        if (!lock.a1) throw new UnlockedStateException();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public void verifyFullLocked() throws UnlockedStateException {
+<b class="nc">&nbsp;        verifyLocked();</b>
+<b class="nc">&nbsp;        verifyTimeStampLocked();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public void verifyTimeStampLocked() throws UnlockedStateException {
+<b class="nc">&nbsp;        if (!lock.a2) throw new UnlockedStateException();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public void verifyTimeStampUnlocked() throws LockedStateException {
+<b class="nc">&nbsp;        if (lock.a2) throw new LockedStateException();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public void verifyLockState() throws LockedStateException {
+<b class="nc">&nbsp;        if (lock.a2 &amp;&amp; !lock.a1) throw new LockedStateException();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public boolean canEdit() {
+<b class="nc">&nbsp;        return (lock.a1 || lock.a2);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-23 21:38</div>
+</div>
+</body>
+</html>

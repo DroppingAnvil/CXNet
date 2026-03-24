@@ -1,0 +1,215 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > SocketWatcher</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network.threads</a>
+</div>
+
+<h1>Coverage Summary for Class: SocketWatcher (dev.droppinganvil.v3.network.threads)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">SocketWatcher</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (3/3)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    36.7%
+  </span>
+  <span class="absValue">
+    (11/30)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    82.2%
+  </span>
+  <span class="absValue">
+    (37/45)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2021. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network.threads;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.io.IOThread;
+&nbsp;import dev.droppinganvil.v3.io.NetworkInputIOJob;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.InConnectionManager;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.NodeConfig;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.NodeMesh;
+&nbsp;
+&nbsp;import java.io.IOException;
+&nbsp;import java.net.Socket;
+&nbsp;
+&nbsp;public class SocketWatcher implements Runnable {
+<b class="fc">&nbsp;    public static boolean active = true;</b>
+&nbsp;    public ConnectX cx;
+&nbsp;    private NodeMesh nodeMesh;
+&nbsp;    private int localPort;
+&nbsp;
+<b class="fc">&nbsp;    public SocketWatcher(ConnectX cx, NodeMesh nodeMesh) {</b>
+<b class="fc">&nbsp;        this.cx = cx;</b>
+<b class="fc">&nbsp;        this.nodeMesh = nodeMesh;</b>
+&nbsp;        // Get local port from ServerSocket
+&nbsp;        try {
+<b class="fc">&nbsp;            this.localPort = nodeMesh.in.serverSocket.getLocalPort();</b>
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            this.localPort = -1;</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;    @Override
+&nbsp;    public void run() {
+<b class="pc">&nbsp;        while (active) {</b>
+&nbsp;            try {
+<b class="fc">&nbsp;                Socket s = nodeMesh.in.serverSocket.accept();</b>
+<b class="pc">&nbsp;                if (s != null) {</b>
+<b class="fc">&nbsp;                    long acceptTime = System.currentTimeMillis();</b>
+<b class="fc">&nbsp;                    String remoteAddr = s.getInetAddress().getHostAddress() + &quot;:&quot; + s.getPort();</b>
+<b class="pc">&nbsp;                    if (NodeConfig.DEBUG) System.out.println(&quot;[RX:&quot; + localPort + &quot;/&quot; + cx.getOwnID().substring(0,8) + &quot;] ACCEPT from &quot; + remoteAddr + &quot; (connected=&quot; + s.isConnected() + &quot;, closed=&quot; + s.isClosed() + &quot;)&quot;);</b>
+&nbsp;
+<b class="pc">&nbsp;                    if (!NodeMesh.blacklist.containsKey(s.getInetAddress().getHostAddress()) &amp; !NodeMesh.timeout.containsKey(s.getInetAddress().getHostAddress())) {</b>
+<b class="fc">&nbsp;                        java.io.InputStream rawStream = s.getInputStream();</b>
+<b class="fc">&nbsp;                        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();</b>
+&nbsp;
+<b class="fc">&nbsp;                        long setupTime = System.currentTimeMillis();</b>
+<b class="fc">&nbsp;                        int available = rawStream.available();</b>
+<b class="fc">&nbsp;                        String peerPrefix = &quot;[RX:&quot; + localPort + &quot;/&quot; + cx.getOwnID().substring(0,8) + &quot;]&quot;;</b>
+<b class="pc">&nbsp;                        if (NodeConfig.DEBUG) System.out.println(peerPrefix + &quot; Setup &quot; + (setupTime - acceptTime) + &quot;ms, available=&quot; + available + &quot; bytes&quot;);</b>
+&nbsp;
+<b class="fc">&nbsp;                        s.setSoTimeout(400); // 400ms timeout</b>
+<b class="fc">&nbsp;                        byte[] chunk = new byte[8192];</b>
+&nbsp;                        int bytesRead;
+&nbsp;                        try {
+<b class="fc">&nbsp;                            long readStart = System.currentTimeMillis();</b>
+<b class="fc">&nbsp;                            bytesRead = rawStream.read(chunk);</b>
+<b class="fc">&nbsp;                            long readDuration = System.currentTimeMillis() - readStart;</b>
+&nbsp;
+<b class="pc">&nbsp;                            if (bytesRead &gt; 0) {</b>
+<b class="pc">&nbsp;                                if (NodeConfig.DEBUG) System.out.println(peerPrefix + &quot; Read &quot; + bytesRead + &quot; bytes in &quot; + readDuration + &quot;ms&quot;);</b>
+<b class="fc">&nbsp;                                buffer.write(chunk, 0, bytesRead);</b>
+<b class="pc">&nbsp;                                while (rawStream.available() &gt; 0 &amp;&amp; (bytesRead = rawStream.read(chunk)) != -1) {</b>
+<b class="fc">&nbsp;                                    buffer.write(chunk, 0, bytesRead);</b>
+&nbsp;                                }
+<b class="nc">&nbsp;                            } else if (bytesRead == -1) {</b>
+<b class="nc">&nbsp;                                if (NodeConfig.DEBUG) System.out.println(peerPrefix + &quot; EOF after &quot; + readDuration + &quot;ms - sender closed&quot;);</b>
+&nbsp;                            } else {
+<b class="nc">&nbsp;                                if (NodeConfig.DEBUG)  System.out.println(peerPrefix + &quot; Zero bytes after &quot; + readDuration + &quot;ms&quot;);</b>
+&nbsp;                            }
+&nbsp;                        } catch (java.net.SocketTimeoutException e) {
+<b class="nc">&nbsp;                            if (NodeConfig.DEBUG) System.out.println(peerPrefix + &quot; TIMEOUT after 400ms - no data&quot;);</b>
+&nbsp;                        } catch (Exception e) {
+<b class="nc">&nbsp;                            if (NodeConfig.DEBUG) System.out.println(peerPrefix + &quot; ERROR: &quot; + e.getClass().getSimpleName() + &quot; - &quot; + e.getMessage());</b>
+&nbsp;                        }
+&nbsp;
+<b class="fc">&nbsp;                        byte[] data = buffer.toByteArray();</b>
+<b class="fc">&nbsp;                        long totalTime = System.currentTimeMillis() - acceptTime;</b>
+<b class="pc">&nbsp;                        if (NodeConfig.DEBUG) System.out.println(peerPrefix + &quot; TOTAL: &quot; + data.length + &quot; bytes in &quot; + totalTime + &quot;ms&quot;);</b>
+&nbsp;
+&nbsp;                        // Create InputStream from buffered data
+<b class="fc">&nbsp;                        java.io.ByteArrayInputStream bufferedStream = new java.io.ByteArrayInputStream(data);</b>
+<b class="fc">&nbsp;                        NetworkInputIOJob ni = new NetworkInputIOJob(bufferedStream, s);  // Pass buffered stream + Socket</b>
+<b class="fc">&nbsp;                        synchronized (cx.jobQueue) {</b>
+<b class="fc">&nbsp;                            cx.jobQueue.add(ni);</b>
+<b class="fc">&nbsp;                        }</b>
+&nbsp;                    } else {
+<b class="nc">&nbsp;                        System.out.println(&quot;[SocketWatcher] Connection blacklisted/timeout, closing&quot;);</b>
+&nbsp;                        s.close();
+&nbsp;                    }
+&nbsp;                }
+<b class="fc">&nbsp;                Thread.sleep(NodeConfig.ioSocketSleep);</b>
+&nbsp;            } catch (IOException | InterruptedException e) {
+<b class="nc">&nbsp;                e.printStackTrace();</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-23 21:38</div>
+</div>
+</body>
+</html>

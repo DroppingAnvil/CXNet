@@ -1,0 +1,187 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > InputBundle</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network</a>
+</div>
+
+<h1>Coverage Summary for Class: InputBundle (dev.droppinganvil.v3.network)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">InputBundle</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    40%
+  </span>
+  <span class="absValue">
+    (2/5)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    50%
+  </span>
+  <span class="absValue">
+    (2/4)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    69.2%
+  </span>
+  <span class="absValue">
+    (9/13)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2022. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkContainer;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkEvent;
+&nbsp;
+&nbsp;import java.io.ByteArrayInputStream;
+&nbsp;
+&nbsp;public class InputBundle {
+&nbsp;
+<b class="fc">&nbsp;    public InputBundle(NetworkEvent ne, NetworkContainer nc) {</b>
+<b class="fc">&nbsp;        this.ne = ne;</b>
+<b class="fc">&nbsp;        this.nc = nc;</b>
+&nbsp;        // Preserve the signed NetworkEvent bytes from nc.e for relaying
+<b class="pc">&nbsp;        this.signedEventBytes = (nc != null) ? nc.e : null;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public NetworkEvent ne;
+&nbsp;    public NetworkContainer nc;
+&nbsp;    /**
+&nbsp;     * Signed NetworkEvent bytes (nc.e) - preserved for relay
+&nbsp;     * Must NOT be re-signed during relay to maintain original sender&#39;s signature
+&nbsp;     */
+&nbsp;    public byte[] signedEventBytes;
+&nbsp;    /**
+&nbsp;     * New method to streamline NodeMesh operations, used by some functions, not fully implemented yet
+&nbsp;     */
+&nbsp;    public byte[] strippedEventBytes;
+&nbsp;    /**
+&nbsp;     * Internal event payload, if verified it will be stripped and placed here for deserialization
+&nbsp;     */
+&nbsp;    public byte[] verifiedObjectBytes;
+&nbsp;    /**
+&nbsp;     * Stripped and Deserialized Object if available
+&nbsp;     */
+&nbsp;    public Object object;
+&nbsp;
+&nbsp;
+&nbsp;    public void verifyCryptoLayers() {
+&nbsp;
+<b class="nc">&nbsp;    }</b>
+&nbsp;    public void verifyCryptoLayersE2E() {
+&nbsp;
+<b class="nc">&nbsp;    }</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Make InputBundle.object ready, as the class is per use case it cannot be abstracted that far and must be handled specially by handlers
+&nbsp;     * @param clazz Object class
+&nbsp;     * @param serializationMethod Serialization method ex cxJSON1
+&nbsp;     * @return success
+&nbsp;     */
+&nbsp;    public boolean readyObject(Class&lt;?&gt; clazz, String serializationMethod, ConnectX connectX) throws Exception {
+<b class="fc">&nbsp;        ByteArrayInputStream bais = new ByteArrayInputStream(verifiedObjectBytes);</b>
+<b class="fc">&nbsp;        Object o1 = connectX.deserialize(serializationMethod, bais, clazz);</b>
+<b class="pc">&nbsp;        if (o1 != null) {</b>
+<b class="fc">&nbsp;            object = o1;</b>
+<b class="fc">&nbsp;            return true;</b>
+&nbsp;        } else {
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    public boolean verify() {
+<b class="nc">&nbsp;        return false;</b>
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

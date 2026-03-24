@@ -1,0 +1,555 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > BlockchainPersistence</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network</a>
+</div>
+
+<h1>Coverage Summary for Class: BlockchainPersistence (dev.droppinganvil.v3.network)</h1>
+
+<table class="coverageStats">
+
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">BlockchainPersistence</td>
+<td class="coverageStat">
+  <span class="percent">
+    66.7%
+  </span>
+  <span class="absValue">
+    (8/12)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    47.5%
+  </span>
+  <span class="absValue">
+    (38/80)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    77.2%
+  </span>
+  <span class="absValue">
+    (88/114)
+  </span>
+</td>
+</tr>
+  <tr>
+    <td class="name">BlockchainPersistence$ChainMetadata</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (3/3)
+  </span>
+</td>
+  </tr>
+<tr>
+  <td class="name"><strong>Total</strong></td>
+<td class="coverageStat">
+  <span class="percent">
+    69.2%
+  </span>
+  <span class="absValue">
+    (9/13)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    47.5%
+  </span>
+  <span class="absValue">
+    (38/80)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    77.8%
+  </span>
+  <span class="absValue">
+    (91/117)
+  </span>
+</td>
+</tr>
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2025. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.edge.NetworkBlock;
+&nbsp;import dev.droppinganvil.v3.edge.NetworkRecord;
+&nbsp;
+&nbsp;import java.io.File;
+&nbsp;import java.io.FileReader;
+&nbsp;import java.io.FileWriter;
+&nbsp;import java.io.IOException;
+&nbsp;import java.nio.file.Files;
+&nbsp;import java.util.concurrent.ConcurrentHashMap;
+&nbsp;import java.util.concurrent.locks.ReentrantLock;
+&nbsp;
+&nbsp;/**
+&nbsp; * Blockchain Persistence Layer
+&nbsp; *
+&nbsp; * Efficient block-per-file architecture for scalable blockchain storage.
+&nbsp; *
+&nbsp; * Architecture:
+&nbsp; * - Chain metadata (NetworkRecord) stored as lightweight JSON (just pointers + config)
+&nbsp; * - Individual blocks stored as separate files for on-demand loading
+&nbsp; * - Blocks only loaded into memory when needed (lazy loading)
+&nbsp; * - Thread-safe with per-chain locks
+&nbsp; * - Supports up to 100 chains per network
+&nbsp; *
+&nbsp; * File Structure:
+&nbsp; * {cxRoot}/
+&nbsp; *   └── blockchain/
+&nbsp; *       └── {networkID}/
+&nbsp; *           ├── chain-1.json           (c1 metadata - lightweight)
+&nbsp; *           ├── chain-2.json           (c2 metadata - lightweight)
+&nbsp; *           ├── chain-3.json           (c3 metadata - lightweight)
+&nbsp; *           ├── ...
+&nbsp; *           ├── chain-100.json         (up to 100 chains)
+&nbsp; *           └── blocks/
+&nbsp; *               ├── chain-1/
+&nbsp; *               │   ├── block-0.json   (individual block files)
+&nbsp; *               │   ├── block-1.json
+&nbsp; *               │   └── block-2.json
+&nbsp; *               ├── chain-2/
+&nbsp; *               │   └── block-0.json
+&nbsp; *               └── chain-3/
+&nbsp; *                   ├── block-0.json
+&nbsp; *                   └── block-1.json
+&nbsp; *
+&nbsp; * Usage:
+&nbsp; * - Save new block: persistence.saveBlock(networkID, chainID, block)
+&nbsp; * - Save chain metadata: persistence.saveChainMetadata(chain)
+&nbsp; * - Load on startup: persistence.loadChain(networkID, chainID)
+&nbsp; * - Blocks loaded lazily from disk when accessed
+&nbsp; */
+&nbsp;public class BlockchainPersistence {
+&nbsp;
+&nbsp;    public static final int MAX_CHAINS = 100;
+&nbsp;
+&nbsp;    private final File cxRoot;
+&nbsp;
+&nbsp;    // Per-chain locks to prevent concurrent writes
+<b class="fc">&nbsp;    private final ReentrantLock[] chainLocks = new ReentrantLock[MAX_CHAINS + 1]; // Index 0-100</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Create persistence handler for a ConnectX instance
+&nbsp;     * @param cxRoot Root directory for this ConnectX instance
+&nbsp;     */
+<b class="fc">&nbsp;    public BlockchainPersistence(File cxRoot) {</b>
+<b class="fc">&nbsp;        this.cxRoot = cxRoot;</b>
+&nbsp;        // Initialize chain locks
+<b class="fc">&nbsp;        for (int i = 0; i &lt; chainLocks.length; i++) {</b>
+<b class="fc">&nbsp;            chainLocks[i] = new ReentrantLock();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Save a single block to disk
+&nbsp;     *
+&nbsp;     * @param networkID Network identifier
+&nbsp;     * @param chainID Chain identifier (1-100)
+&nbsp;     * @param block The block to save
+&nbsp;     * @throws Exception if serialization or I/O fails
+&nbsp;     */
+&nbsp;    public void saveBlock(String networkID, Long chainID, NetworkBlock block) throws Exception {
+<b class="pc">&nbsp;        if (networkID == null || chainID == null || block == null || block.block == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalArgumentException(&quot;networkID, chainID, and block must not be null&quot;);</b>
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        validateChainID(chainID);</b>
+&nbsp;
+<b class="fc">&nbsp;        chainLocks[chainID.intValue()].lock();</b>
+&nbsp;        try {
+&nbsp;            // Ensure blocks directory exists
+<b class="fc">&nbsp;            File blocksDir = getBlocksDir(networkID, chainID);</b>
+<b class="pc">&nbsp;            if (!blocksDir.exists()) {</b>
+<b class="nc">&nbsp;                blocksDir.mkdirs();</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Serialize block to JSON
+<b class="fc">&nbsp;            String json = ConnectX.serialize(&quot;cxJSON1&quot;, block);</b>
+&nbsp;
+&nbsp;            // Write to file
+<b class="fc">&nbsp;            File blockFile = new File(blocksDir, &quot;block-&quot; + block.block + &quot;.json&quot;);</b>
+<b class="fc">&nbsp;            try (FileWriter writer = new FileWriter(blockFile)) {</b>
+<b class="fc">&nbsp;                writer.write(json);</b>
+<b class="fc">&nbsp;                writer.flush();</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // System.out.println(&quot;[Blockchain Persistence] Saved block &quot; + block.block +
+&nbsp;            //                  &quot; for chain &quot; + chainID + &quot; (&quot; + block.networkEvents.size() + &quot; events)&quot;);
+&nbsp;
+&nbsp;        } finally {
+<b class="fc">&nbsp;            chainLocks[chainID.intValue()].unlock();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Load a single block from disk
+&nbsp;     *
+&nbsp;     * @param networkID Network identifier
+&nbsp;     * @param chainID Chain identifier (1-100)
+&nbsp;     * @param blockID Block identifier
+&nbsp;     * @return Loaded NetworkBlock, or null if file doesn&#39;t exist
+&nbsp;     * @throws Exception if deserialization or I/O fails
+&nbsp;     */
+&nbsp;    public NetworkBlock loadBlock(String networkID, Long chainID, Long blockID) throws Exception {
+<b class="pc">&nbsp;        if (networkID == null || chainID == null || blockID == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalArgumentException(&quot;networkID, chainID, and blockID must not be null&quot;);</b>
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        validateChainID(chainID);</b>
+&nbsp;
+<b class="fc">&nbsp;        File blockFile = new File(getBlocksDir(networkID, chainID), &quot;block-&quot; + blockID + &quot;.json&quot;);</b>
+<b class="pc">&nbsp;        if (!blockFile.exists()) {</b>
+<b class="nc">&nbsp;            return null;</b>
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        chainLocks[chainID.intValue()].lock();</b>
+&nbsp;        try {
+&nbsp;            // Read file content
+<b class="fc">&nbsp;            StringBuilder json = new StringBuilder();</b>
+<b class="fc">&nbsp;            try (FileReader reader = new FileReader(blockFile)) {</b>
+<b class="fc">&nbsp;                char[] buffer = new char[8192];</b>
+&nbsp;                int read;
+<b class="fc">&nbsp;                while ((read = reader.read(buffer)) != -1) {</b>
+<b class="fc">&nbsp;                    json.append(buffer, 0, read);</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;
+&nbsp;            // Deserialize from JSON
+<b class="fc">&nbsp;            return (NetworkBlock) ConnectX.deserialize(&quot;cxJSON1&quot;, json.toString(), NetworkBlock.class);</b>
+&nbsp;
+&nbsp;        } finally {
+<b class="fc">&nbsp;            chainLocks[chainID.intValue()].unlock();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Save chain metadata (lightweight - just pointers and config, no blocks)
+&nbsp;     *
+&nbsp;     * @param chain The chain to save
+&nbsp;     * @param networkID Network identifier (needed for file path)
+&nbsp;     * @throws Exception if serialization or I/O fails
+&nbsp;     */
+&nbsp;    public void saveChainMetadata(NetworkRecord chain, String networkID) throws Exception {
+<b class="pc">&nbsp;        if (chain == null || networkID == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalArgumentException(&quot;Chain and networkID must not be null&quot;);</b>
+&nbsp;        }
+&nbsp;
+<b class="pc">&nbsp;        if (chain.chainID == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalArgumentException(&quot;Chain must have a chainID&quot;);</b>
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        validateChainID(chain.chainID);</b>
+&nbsp;
+<b class="fc">&nbsp;        chainLocks[chain.chainID.intValue()].lock();</b>
+&nbsp;        try {
+&nbsp;            // Ensure blockchain directory exists
+<b class="fc">&nbsp;            File blockchainDir = new File(cxRoot, &quot;blockchain&quot; + File.separator + networkID);</b>
+<b class="pc">&nbsp;            if (!blockchainDir.exists()) {</b>
+<b class="nc">&nbsp;                blockchainDir.mkdirs();</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // Create a lightweight version of the chain for serialization
+&nbsp;            // We only serialize metadata, not the full blockMap (blocks are stored separately)
+<b class="fc">&nbsp;            ChainMetadata metadata = new ChainMetadata();</b>
+<b class="fc">&nbsp;            metadata.networkID = chain.networkID;</b>
+<b class="fc">&nbsp;            metadata.chainID = chain.chainID;</b>
+<b class="fc">&nbsp;            metadata.blockLength = chain.blockLength;</b>
+<b class="fc">&nbsp;            metadata.lock = chain.lock;</b>
+<b class="pc">&nbsp;            metadata.currentBlockID = (chain.current != null) ? chain.current.block : null;</b>
+<b class="fc">&nbsp;            metadata.blockCount = chain.blockMap.size();</b>
+&nbsp;
+&nbsp;            // Serialize metadata to JSON
+<b class="fc">&nbsp;            String json = ConnectX.serialize(&quot;cxJSON1&quot;, metadata);</b>
+&nbsp;
+&nbsp;            // Write to file
+<b class="fc">&nbsp;            File chainFile = new File(blockchainDir, &quot;chain-&quot; + chain.chainID + &quot;.json&quot;);</b>
+<b class="fc">&nbsp;            try (FileWriter writer = new FileWriter(chainFile)) {</b>
+<b class="fc">&nbsp;                writer.write(json);</b>
+<b class="fc">&nbsp;                writer.flush();</b>
+&nbsp;            }
+&nbsp;
+<b class="fc">&nbsp;            System.out.println(&quot;[Blockchain Persistence] Saved chain &quot; + chain.chainID + &quot; metadata for network &quot; +</b>
+&nbsp;                             networkID + &quot; (&quot; + metadata.blockCount + &quot; blocks)&quot;);
+&nbsp;
+&nbsp;        } finally {
+<b class="fc">&nbsp;            chainLocks[chain.chainID.intValue()].unlock();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Load chain metadata and restore block pointers
+&nbsp;     *
+&nbsp;     * @param networkID Network identifier
+&nbsp;     * @param chainID Chain identifier (1-100)
+&nbsp;     * @param loadAllBlocks If true, load all blocks into memory; if false, load on-demand
+&nbsp;     * @return Loaded NetworkRecord with blocks loaded or ready for lazy loading
+&nbsp;     * @throws Exception if deserialization or I/O fails
+&nbsp;     */
+&nbsp;    public NetworkRecord loadChain(String networkID, Long chainID, boolean loadAllBlocks) throws Exception {
+<b class="pc">&nbsp;        if (networkID == null || chainID == null) {</b>
+<b class="nc">&nbsp;            throw new IllegalArgumentException(&quot;networkID and chainID must not be null&quot;);</b>
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        validateChainID(chainID);</b>
+&nbsp;
+<b class="fc">&nbsp;        File chainFile = new File(cxRoot, &quot;blockchain&quot; + File.separator + networkID + File.separator + &quot;chain-&quot; + chainID + &quot;.json&quot;);</b>
+<b class="pc">&nbsp;        if (!chainFile.exists()) {</b>
+<b class="nc">&nbsp;            System.out.println(&quot;[Blockchain Persistence] No saved chain metadata found: &quot; + chainFile.getPath());</b>
+<b class="nc">&nbsp;            return null;</b>
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        chainLocks[chainID.intValue()].lock();</b>
+&nbsp;        try {
+&nbsp;            // Read metadata file
+<b class="fc">&nbsp;            StringBuilder json = new StringBuilder();</b>
+<b class="fc">&nbsp;            try (FileReader reader = new FileReader(chainFile)) {</b>
+<b class="fc">&nbsp;                char[] buffer = new char[8192];</b>
+&nbsp;                int read;
+<b class="fc">&nbsp;                while ((read = reader.read(buffer)) != -1) {</b>
+<b class="fc">&nbsp;                    json.append(buffer, 0, read);</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;
+&nbsp;            // Deserialize metadata
+<b class="fc">&nbsp;            ChainMetadata metadata = (ChainMetadata) ConnectX.deserialize(&quot;cxJSON1&quot;, json.toString(), ChainMetadata.class);</b>
+&nbsp;
+&nbsp;            // Create NetworkRecord from metadata
+<b class="fc">&nbsp;            NetworkRecord chain = new NetworkRecord(metadata.networkID, metadata.chainID);</b>
+<b class="fc">&nbsp;            chain.blockLength = metadata.blockLength;</b>
+<b class="fc">&nbsp;            chain.lock = metadata.lock;</b>
+<b class="fc">&nbsp;            chain.blockMap = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;
+<b class="fc">&nbsp;            if (loadAllBlocks) {</b>
+&nbsp;                // Load all blocks into memory
+<b class="fc">&nbsp;                File blocksDir = getBlocksDir(networkID, chainID);</b>
+<b class="pc">&nbsp;                if (blocksDir.exists()) {</b>
+<b class="pc">&nbsp;                    File[] blockFiles = blocksDir.listFiles((dir, name) -&gt; name.startsWith(&quot;block-&quot;) &amp;&amp; name.endsWith(&quot;.json&quot;));</b>
+<b class="pc">&nbsp;                    if (blockFiles != null) {</b>
+<b class="fc">&nbsp;                        for (File blockFile : blockFiles) {</b>
+&nbsp;                            // Extract block ID from filename: &quot;block-X.json&quot;
+<b class="fc">&nbsp;                            String filename = blockFile.getName();</b>
+<b class="fc">&nbsp;                            Long blockID = Long.parseLong(filename.substring(6, filename.length() - 5));</b>
+&nbsp;
+<b class="fc">&nbsp;                            NetworkBlock block = loadBlock(networkID, chainID, blockID);</b>
+<b class="pc">&nbsp;                            if (block != null) {</b>
+<b class="fc">&nbsp;                                chain.blockMap.put(blockID, block);</b>
+&nbsp;                            }
+&nbsp;                        }
+&nbsp;                    }
+&nbsp;                }
+&nbsp;            } else {
+&nbsp;                // Lazy loading - just populate blockMap with references
+&nbsp;                // Blocks will be loaded from disk when accessed
+&nbsp;                // For now, we&#39;ll at least load the current block
+<b class="pc">&nbsp;                if (metadata.currentBlockID != null) {</b>
+<b class="fc">&nbsp;                    NetworkBlock currentBlock = loadBlock(networkID, chainID, metadata.currentBlockID);</b>
+<b class="pc">&nbsp;                    if (currentBlock != null) {</b>
+<b class="fc">&nbsp;                        chain.blockMap.put(metadata.currentBlockID, currentBlock);</b>
+&nbsp;                    }
+&nbsp;                }
+&nbsp;            }
+&nbsp;
+&nbsp;            // Restore current block pointer
+<b class="pc">&nbsp;            if (metadata.currentBlockID != null &amp;&amp; chain.blockMap.containsKey(metadata.currentBlockID)) {</b>
+<b class="fc">&nbsp;                chain.current = chain.blockMap.get(metadata.currentBlockID);</b>
+&nbsp;            }
+&nbsp;
+<b class="fc">&nbsp;            System.out.println(&quot;[Blockchain Persistence] Loaded chain &quot; + chainID + &quot; for network &quot; +</b>
+<b class="fc">&nbsp;                             networkID + &quot; (&quot; + chain.blockMap.size() + &quot;/&quot; + metadata.blockCount + &quot; blocks in memory)&quot;);</b>
+&nbsp;
+<b class="fc">&nbsp;            return chain;</b>
+&nbsp;
+&nbsp;        } finally {
+<b class="fc">&nbsp;            chainLocks[chainID.intValue()].unlock();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Save all blocks for a specific chain
+&nbsp;     *
+&nbsp;     * @param chain The chain to save
+&nbsp;     * @param networkID Network identifier
+&nbsp;     * @throws Exception if any save operation fails
+&nbsp;     */
+&nbsp;    public void saveAllBlocks(NetworkRecord chain, String networkID) throws Exception {
+<b class="nc">&nbsp;        if (chain == null || chain.blockMap == null) {</b>
+&nbsp;            return;
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        for (NetworkBlock block : chain.blockMap.values()) {</b>
+<b class="nc">&nbsp;            saveBlock(networkID, chain.chainID, block);</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Delete all blockchain data for a network
+&nbsp;     *
+&nbsp;     * @param networkID Network identifier
+&nbsp;     * @throws IOException if deletion fails
+&nbsp;     */
+&nbsp;    public void deleteNetwork(String networkID) throws IOException {
+<b class="nc">&nbsp;        File networkDir = new File(cxRoot, &quot;blockchain&quot; + File.separator + networkID);</b>
+<b class="nc">&nbsp;        deleteRecursively(networkDir);</b>
+<b class="nc">&nbsp;        System.out.println(&quot;[Blockchain Persistence] Deleted blockchain data for network &quot; + networkID);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Check if blockchain data exists for a network
+&nbsp;     *
+&nbsp;     * @param networkID Network identifier
+&nbsp;     * @return true if any chain data exists
+&nbsp;     */
+&nbsp;    public boolean exists(String networkID) {
+<b class="fc">&nbsp;        File networkDir = new File(cxRoot, &quot;blockchain&quot; + File.separator + networkID);</b>
+<b class="pc">&nbsp;        return networkDir.exists() &amp;&amp; networkDir.isDirectory();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Check if a specific chain exists
+&nbsp;     *
+&nbsp;     * @param networkID Network identifier
+&nbsp;     * @param chainID Chain identifier
+&nbsp;     * @return true if chain metadata file exists
+&nbsp;     */
+&nbsp;    public boolean chainExists(String networkID, Long chainID) {
+<b class="nc">&nbsp;        File chainFile = new File(cxRoot, &quot;blockchain&quot; + File.separator + networkID + File.separator + &quot;chain-&quot; + chainID + &quot;.json&quot;);</b>
+<b class="nc">&nbsp;        return chainFile.exists();</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Get the blocks directory for a specific chain
+&nbsp;     */
+&nbsp;    private File getBlocksDir(String networkID, Long chainID) {
+<b class="fc">&nbsp;        return new File(cxRoot, &quot;blockchain&quot; + File.separator + networkID +</b>
+&nbsp;                       File.separator + &quot;blocks&quot; + File.separator + &quot;chain-&quot; + chainID);
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Validate chain ID is within acceptable range
+&nbsp;     */
+&nbsp;    private void validateChainID(Long chainID) {
+<b class="pc">&nbsp;        if (chainID &lt; 1 || chainID &gt; MAX_CHAINS) {</b>
+<b class="nc">&nbsp;            throw new IllegalArgumentException(&quot;chainID must be between 1 and &quot; + MAX_CHAINS);</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Recursively delete directory and all contents
+&nbsp;     */
+&nbsp;    private void deleteRecursively(File file) throws IOException {
+<b class="nc">&nbsp;        if (file.exists()) {</b>
+<b class="nc">&nbsp;            if (file.isDirectory()) {</b>
+<b class="nc">&nbsp;                File[] files = file.listFiles();</b>
+<b class="nc">&nbsp;                if (files != null) {</b>
+<b class="nc">&nbsp;                    for (File child : files) {</b>
+<b class="nc">&nbsp;                        deleteRecursively(child);</b>
+&nbsp;                    }
+&nbsp;                }
+&nbsp;            }
+<b class="nc">&nbsp;            Files.delete(file.toPath());</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Lightweight chain metadata for efficient serialization
+&nbsp;     * (Full blocks are stored separately)
+&nbsp;     */
+&nbsp;    public static class ChainMetadata {
+&nbsp;        public String networkID;
+&nbsp;        public Long chainID;
+<b class="fc">&nbsp;        public Integer blockLength = 100;</b>
+<b class="fc">&nbsp;        public boolean lock = false;</b>
+&nbsp;        public Long currentBlockID;  // Pointer to current block (not the block itself)
+&nbsp;        public int blockCount;        // Total number of blocks
+&nbsp;
+&nbsp;        // Default constructor for Jackson
+<b class="fc">&nbsp;        public ChainMetadata() {</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

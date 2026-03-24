@@ -1,0 +1,257 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > CryptProvider</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.crypt.core</a>
+</div>
+
+<h1>Coverage Summary for Class: CryptProvider (dev.droppinganvil.v3.crypt.core)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">CryptProvider</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    5%
+  </span>
+  <span class="absValue">
+    (1/20)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/20)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    15.4%
+  </span>
+  <span class="absValue">
+    (6/39)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;package dev.droppinganvil.v3.crypt.core;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.crypt.core.exceptions.CryptInternalVerificationException;
+&nbsp;import dev.droppinganvil.v3.crypt.core.exceptions.DecryptionFailureException;
+&nbsp;import dev.droppinganvil.v3.crypt.core.exceptions.EncryptionFailureException;
+&nbsp;import dev.droppinganvil.v3.crypt.core.exceptions.TempDirectorySolidified;
+&nbsp;import dev.droppinganvil.v3.utils.IPXFileUtils;
+&nbsp;import dev.droppinganvil.v3.utils.obj.BaseStatus;
+&nbsp;
+&nbsp;import java.io.*;
+&nbsp;import java.util.HashSet;
+&nbsp;
+&nbsp;public abstract class CryptProvider {
+<b class="fc">&nbsp;    private HashSet&lt;String&gt; eraseQueue = new HashSet&lt;&gt;();</b>
+&nbsp;    private File tempdir;
+&nbsp;    public BaseStatus status;
+<b class="fc">&nbsp;    public boolean ready = false;</b>
+&nbsp;    public ConnectX connectX;
+&nbsp;
+<b class="fc">&nbsp;    public CryptProvider(String serviceName, String serviceCategory, ConnectX connectX) {</b>
+<b class="fc">&nbsp;        status = new BaseStatus(serviceName, serviceCategory);</b>
+<b class="fc">&nbsp;        status.setVMPair();</b>
+<b class="fc">&nbsp;        this.connectX = connectX;</b>
+&nbsp;    }
+&nbsp;    public String getPublicKey() {
+<b class="nc">&nbsp;        return null;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * @param is Signed input
+&nbsp;     * @param os Output stripped of all encryption meta
+&nbsp;     * @param cxID The cxID to lookup the public key for verification
+&nbsp;     * @return Verification status (True being successful)
+&nbsp;     */
+&nbsp;    public boolean verifyAndStrip(InputStream is, OutputStream os, String cxID) throws DecryptionFailureException {
+<b class="nc">&nbsp;        return false;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Verify and strip signature using a public key directly
+&nbsp;     * @param is Signed input
+&nbsp;     * @param os Output stripped of all encryption meta
+&nbsp;     * @param publicKeyBase64 Base64-encoded PGP public key
+&nbsp;     * @return Verification status (True being successful)
+&nbsp;     */
+&nbsp;    public boolean verifyAndStripWithKey(InputStream is, OutputStream os, String publicKeyBase64) throws DecryptionFailureException {
+<b class="nc">&nbsp;        return false;</b>
+&nbsp;    }
+&nbsp;    /**
+&nbsp;     * Strip signature WITHOUT verification
+&nbsp;     * Used for NewNode events where we need to peek at the event type before we have the sender&#39;s public key
+&nbsp;     * SECURITY WARNING: This does NOT verify the signature - caller MUST verify after using this method
+&nbsp;     * @param is Signed input
+&nbsp;     * @param os Output stripped of signature
+&nbsp;     */
+&nbsp;    public void stripSignature(InputStream is, OutputStream os) throws DecryptionFailureException {
+&nbsp;        // Default implementation - subclasses must override
+<b class="nc">&nbsp;    }</b>
+&nbsp;
+&nbsp;    public void encrypt(InputStream is, OutputStream os, String cxID) throws EncryptionFailureException {
+&nbsp;
+<b class="nc">&nbsp;    }</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Encrypt data for multiple recipients (E2E encryption)
+&nbsp;     * @param is Input stream with plaintext data
+&nbsp;     * @param os Output stream for encrypted data
+&nbsp;     * @param recipientCxIDs List of recipient cxIDs to encrypt for
+&nbsp;     * @throws EncryptionFailureException if encryption fails
+&nbsp;     */
+&nbsp;    public void encrypt(InputStream is, OutputStream os, java.util.List&lt;String&gt; recipientCxIDs) throws EncryptionFailureException {
+&nbsp;
+<b class="nc">&nbsp;    }</b>
+&nbsp;    public void sign(InputStream is, OutputStream os) throws EncryptionFailureException {
+&nbsp;
+<b class="nc">&nbsp;    }</b>
+&nbsp;    public void encryptCopyAndDeleteFile(File in, File outDir, String cxID) throws IOException, EncryptionFailureException {
+<b class="nc">&nbsp;        if (!in.exists() || IPXFileUtils.checkBasicIORights(in)) throw new IOException();</b>
+<b class="nc">&nbsp;            String name = in.getName();</b>
+<b class="nc">&nbsp;            File destination = new File(outDir, name);</b>
+<b class="nc">&nbsp;            if (destination.exists() &amp;&amp; IPXFileUtils.checkBasicIORights(destination)) {</b>
+<b class="nc">&nbsp;                if (!destination.delete()) throw new IOException();</b>
+&nbsp;            }
+<b class="nc">&nbsp;            FileInputStream input = new FileInputStream(in);</b>
+<b class="nc">&nbsp;            FileOutputStream encryptedOutput = new FileOutputStream(destination);</b>
+<b class="nc">&nbsp;            encrypt(input, encryptedOutput, cxID);</b>
+<b class="nc">&nbsp;            if (!in.delete()) throw new IOException();</b>
+&nbsp;    }
+&nbsp;    public Object decrypt(InputStream is, OutputStream os, String cxID, boolean tryImport) throws DecryptionFailureException {
+<b class="nc">&nbsp;        return null;</b>
+&nbsp;    }
+&nbsp;    public Object decrypt(InputStream is, OutputStream os) throws DecryptionFailureException {
+<b class="nc">&nbsp;        return null;</b>
+&nbsp;    }
+&nbsp;    public Boolean verify(String data, String cxID) throws DecryptionFailureException {
+<b class="nc">&nbsp;        return false;</b>
+&nbsp;    }
+&nbsp;    private File createTemp(String s) {
+<b class="nc">&nbsp;        return null;</b>
+&nbsp;    }
+&nbsp;    private void doFileStructureCheck() throws CryptInternalVerificationException, IOException {
+&nbsp;        try {
+<b class="nc">&nbsp;            if (tempdir == null) throw new NullPointerException();</b>
+<b class="nc">&nbsp;            if (!IPXFileUtils.checkIORights(tempdir)) {</b>
+<b class="nc">&nbsp;                throw new CryptInternalVerificationException();</b>
+&nbsp;            }
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            if (e instanceof CryptInternalVerificationException) throw e;</b>
+<b class="nc">&nbsp;            CryptInternalVerificationException cive = new CryptInternalVerificationException();</b>
+<b class="nc">&nbsp;            cive.initCause(e);</b>
+&nbsp;            throw cive;
+&nbsp;        }
+&nbsp;    }
+&nbsp;    public void setTempDir(File dir) throws TempDirectorySolidified {
+<b class="nc">&nbsp;        if (this.tempdir != null) throw new TempDirectorySolidified();</b>
+<b class="nc">&nbsp;        tempdir = dir;</b>
+&nbsp;    }
+&nbsp;    public void setup(String cxID, String s, File dir) throws Exception {
+&nbsp;
+<b class="nc">&nbsp;    }</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Set epoch (NMI) mode for this crypto provider.
+&nbsp;     * When true, this node&#39;s own key is used as the network master key.
+&nbsp;     * Subclasses should override this if they support epoch mode.
+&nbsp;     */
+&nbsp;    public void setEpochMode(boolean epochMode) {
+&nbsp;        // Default no-op; override in implementations that support epoch mode
+<b class="nc">&nbsp;    }</b>
+<b class="nc">&nbsp;    public boolean cacheCert(String cxID, boolean tryImport, boolean sync, ConnectX connectX) {return false;}</b>
+&nbsp;    public void shutdown() {
+&nbsp;
+<b class="nc">&nbsp;    }</b>
+&nbsp;
+&nbsp;
+&nbsp;    public void doSelfTest() {
+&nbsp;
+<b class="nc">&nbsp;    }</b>
+&nbsp;
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

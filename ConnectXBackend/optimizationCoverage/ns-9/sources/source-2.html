@@ -1,0 +1,276 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > IOThread</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.io</a>
+</div>
+
+<h1>Coverage Summary for Class: IOThread (dev.droppinganvil.v3.io)</h1>
+
+<table class="coverageStats">
+
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">IOThread</td>
+<td class="coverageStat">
+  <span class="percent">
+    50%
+  </span>
+  <span class="absValue">
+    (4/8)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    23.1%
+  </span>
+  <span class="absValue">
+    (6/26)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    40%
+  </span>
+  <span class="absValue">
+    (22/55)
+  </span>
+</td>
+</tr>
+  <tr>
+    <td class="name">IOThread$1</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+  </tr>
+<tr>
+  <td class="name"><strong>Total</strong></td>
+<td class="coverageStat">
+  <span class="percent">
+    55.6%
+  </span>
+  <span class="absValue">
+    (5/9)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    23.1%
+  </span>
+  <span class="absValue">
+    (6/26)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    41.1%
+  </span>
+  <span class="absValue">
+    (23/56)
+  </span>
+</td>
+</tr>
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;package dev.droppinganvil.v3.io;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.analytics.AnalyticData;
+&nbsp;import dev.droppinganvil.v3.analytics.Analytics;
+&nbsp;import dev.droppinganvil.v3.crypt.core.exceptions.DecryptionFailureException;
+&nbsp;import dev.droppinganvil.v3.network.InputBundle;
+&nbsp;import dev.droppinganvil.v3.network.UnauthorizedNetworkConnectivityException;
+&nbsp;import dev.droppinganvil.v3.network.events.EventType;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkContainer;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.NodeConfig;
+&nbsp;import dev.droppinganvil.v3.network.nodemesh.NodeMesh;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkEvent;
+&nbsp;import dev.droppinganvil.v3.utils.obj.BaseStatus;
+&nbsp;
+&nbsp;import java.io.*;
+&nbsp;import java.net.Socket;
+&nbsp;
+<b class="fc">&nbsp;public class IOThread implements Runnable {</b>
+<b class="fc">&nbsp;    public boolean run = false;</b>
+&nbsp;    public Long sleep;
+&nbsp;    public BaseStatus status;
+&nbsp;    public ConnectX cx;
+&nbsp;    private NodeMesh nodeMesh;
+&nbsp;
+<b class="fc">&nbsp;    public IOThread(Long sleep, ConnectX cx, NodeMesh nodeMesh) {</b>
+<b class="fc">&nbsp;        this.cx = cx;</b>
+<b class="fc">&nbsp;        this.nodeMesh = nodeMesh;</b>
+<b class="pc">&nbsp;        assert sleep != null;</b>
+<b class="fc">&nbsp;        this.sleep = sleep;</b>
+&nbsp;    }
+&nbsp;
+<b class="nc">&nbsp;    public IOThread(Long sleep, BaseStatus bs, ConnectX cx, NodeMesh nodeMesh) {</b>
+<b class="nc">&nbsp;        this.cx = cx;</b>
+<b class="nc">&nbsp;        this.nodeMesh = nodeMesh;</b>
+<b class="nc">&nbsp;        assert sleep != null;</b>
+<b class="nc">&nbsp;        this.sleep = sleep;</b>
+<b class="nc">&nbsp;        status = bs;</b>
+&nbsp;    }
+&nbsp;    @Override
+&nbsp;    public void run() {
+<b class="pc">&nbsp;        while (run) {</b>
+&nbsp;            IOJob ioJob;
+<b class="fc">&nbsp;            synchronized (cx.jobQueue) {</b>
+<b class="fc">&nbsp;                ioJob = cx.jobQueue.poll();</b>
+<b class="fc">&nbsp;            }</b>
+<b class="fc">&nbsp;            if (ioJob != null) {</b>
+&nbsp;                try {
+<b class="fc">&nbsp;                    processJob(ioJob, true);</b>
+&nbsp;                } catch (Exception e) {
+<b class="nc">&nbsp;                    e.printStackTrace();</b>
+<b class="nc">&nbsp;                    ioJob.success = false;</b>
+<b class="nc">&nbsp;                    ioJob.doAfter(false);</b>
+&nbsp;                }
+<b class="fc">&nbsp;                ioJob.success = true;</b>
+<b class="fc">&nbsp;                ioJob.doAfter(true);</b>
+&nbsp;            } else {
+&nbsp;                try {
+<b class="fc">&nbsp;                    Thread.sleep(sleep);</b>
+&nbsp;                } catch (InterruptedException e) {
+<b class="nc">&nbsp;                    e.printStackTrace();</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;        }
+&nbsp;    }
+&nbsp;    public static ByteArrayOutputStream reverse(InputStream is, Boolean closeAfter) throws IOException {
+&nbsp;        //TODO
+<b class="nc">&nbsp;        ByteArrayOutputStream baos = new ByteArrayOutputStream();</b>
+<b class="nc">&nbsp;        byte[] buffer = new byte[NodeConfig.ioReverseByteBuffer];</b>
+<b class="nc">&nbsp;        while(is.read(buffer) &gt; -1) {</b>
+<b class="nc">&nbsp;            baos.write(buffer);</b>
+&nbsp;        }
+<b class="nc">&nbsp;        if (closeAfter) is.close();</b>
+<b class="nc">&nbsp;        return baos;</b>
+&nbsp;    }
+&nbsp;    public static void write(InputStream is, OutputStream os, Boolean closeAfter) throws IOException {
+&nbsp;        //TODO
+<b class="nc">&nbsp;        byte[] buffer = new byte[NodeConfig.ioWriteByteBuffer];</b>
+<b class="nc">&nbsp;        while(is.read(buffer) &gt; -1) {</b>
+<b class="nc">&nbsp;            os.write(buffer);</b>
+&nbsp;        }
+<b class="nc">&nbsp;        if (closeAfter) {</b>
+&nbsp;            is.close();
+&nbsp;            os.close();
+&nbsp;        }
+&nbsp;    }
+&nbsp;    public void signObject(IOJob ioJob) throws Exception {
+<b class="nc">&nbsp;        if (ioJob.is == null) {</b>
+<b class="nc">&nbsp;            OutputStream oss = new ByteArrayOutputStream();</b>
+<b class="nc">&nbsp;            cx.encryptionProvider.sign(null, oss);</b>
+<b class="nc">&nbsp;            ConnectX.serialize(String.valueOf(ioJob.o1), ioJob.o, oss);</b>
+&nbsp;        } else {
+&nbsp;
+&nbsp;        }
+&nbsp;    }
+&nbsp;    public boolean processJob(IOJob ioJob, boolean root) throws IOException {
+&nbsp;        try {
+<b class="pc">&nbsp;            switch (ioJob.jt) {</b>
+&nbsp;                case WRITE:
+<b class="nc">&nbsp;                    write(ioJob.is, ioJob.os, ioJob.closeAfter);</b>
+&nbsp;                    break;
+&nbsp;                case REVERSE:
+<b class="nc">&nbsp;                    reverse(ioJob.is, ioJob.closeAfter);</b>
+&nbsp;                    break;
+&nbsp;                case NETWORK_READ:
+<b class="fc">&nbsp;                    NetworkInputIOJob ioj = (NetworkInputIOJob) ioJob;</b>
+<b class="fc">&nbsp;                    nodeMesh.processNetworkInput(ioJob.is, ioj.s);</b>
+&nbsp;                    break;
+&nbsp;                case SIGN_OBJECT:
+&nbsp;            }
+<b class="pc">&nbsp;            if (ioJob.next != null) {</b>
+<b class="nc">&nbsp;                processJob(ioJob.next, false);</b>
+&nbsp;            }
+<b class="pc">&nbsp;            if (!root) {</b>
+<b class="nc">&nbsp;                ioJob.success = true;</b>
+<b class="nc">&nbsp;                ioJob.doAfter(true);</b>
+&nbsp;            }
+<b class="fc">&nbsp;            return true;</b>
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            e.printStackTrace();</b>
+<b class="nc">&nbsp;            ioJob.success = false;</b>
+<b class="nc">&nbsp;            ioJob.doAfter(false);</b>
+<b class="nc">&nbsp;            return false;</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

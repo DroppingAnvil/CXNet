@@ -1,0 +1,209 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > CXPath</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network</a>
+</div>
+
+<h1>Coverage Summary for Class: CXPath (dev.droppinganvil.v3.network)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">CXPath</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (5/5)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    50%
+  </span>
+  <span class="absValue">
+    (3/6)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    78.6%
+  </span>
+  <span class="absValue">
+    (11/14)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2022. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network;
+&nbsp;
+&nbsp;import java.net.Socket;
+&nbsp;
+<b class="fc">&nbsp;public class CXPath {</b>
+&nbsp;    /**
+&nbsp;     * Scope for transmission, usually CXN
+&nbsp;     * CANNOT be null
+&nbsp;     */
+&nbsp;    public String scope;
+&nbsp;    /**
+&nbsp;     * Bridge to be used if available for network interaction
+&nbsp;     * Will be null when directly using CX Protocol with Sockets
+&nbsp;     */
+&nbsp;    public String bridge;
+&nbsp;    /**
+&nbsp;     * The path the bridge provider will receive on use
+&nbsp;     * Ex. HTTPS://cx.AnvilDevelopment.us/CX
+&nbsp;     * SHOULD be null unless this request is using bridge
+&nbsp;     */
+&nbsp;    public String bridgeArg;
+&nbsp;    /**
+&nbsp;     * Network for transmission
+&nbsp;     * Extremely case to case, most events will have network set
+&nbsp;     * Some CXS or lower level messages will not include network information
+&nbsp;     * ALL future request should include network
+&nbsp;     * CXNET is for cross-network communication
+&nbsp;     */
+&nbsp;    public String network;
+&nbsp;    /**
+&nbsp;     * Address for direct socket CX connections
+&nbsp;     * Can be null, Nodes can just use bridges for firewall/security
+&nbsp;     */
+&nbsp;    public String address;
+&nbsp;    /**
+&nbsp;     * Device ConnectX ID
+&nbsp;     * CANNOT BE NULL
+&nbsp;     * Every request without a ConnectX ID WILL fail
+&nbsp;     */
+&nbsp;    public String cxID;
+&nbsp;    /**
+&nbsp;     * Origin CXID, should match NetworkContainer.oD, this is persisted for storing events on disk without networking wrappers.
+&nbsp;     */
+&nbsp;    public String oCXID;
+&nbsp;    /**
+&nbsp;     * Version of resource, REMOTE DIRECTORY not implemented
+&nbsp;     */
+&nbsp;    public Integer version;
+&nbsp;    /**
+&nbsp;     * Resource ID on chain, REMOTE DIRECTORY not implemented
+&nbsp;     */
+&nbsp;    public String resourceID;
+&nbsp;    /**
+&nbsp;     * Blockchain ID for recording events, view blockchain permissions
+&nbsp;     */
+&nbsp;    public Long chainID;
+&nbsp;
+&nbsp;
+&nbsp;    public Integer pt;
+&nbsp;    public String sAR;
+&nbsp;
+&nbsp;    public Scope getScope() {
+<b class="fc">&nbsp;        return Scope.valueOf(scope);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public static CXPath getPathFromString(String address) {
+<b class="fc">&nbsp;        CXPath path = new CXPath();</b>
+<b class="fc">&nbsp;        path.address = address;</b>
+<b class="pc">&nbsp;        if (isBridge(path)) {</b>
+<b class="nc">&nbsp;            String[] parts = address.split(&quot;:&quot;, 2);</b>
+<b class="nc">&nbsp;            path.bridge = parts[0];</b>
+<b class="nc">&nbsp;            path.bridgeArg = parts[1];</b>
+&nbsp;        } else {
+<b class="fc">&nbsp;            String[] sar = path.address.split(&quot;:&quot;);</b>
+<b class="fc">&nbsp;            path.sAR = sar[0];</b>
+<b class="fc">&nbsp;            path.pt = Integer.parseInt(sar[1]);</b>
+&nbsp;        }
+<b class="fc">&nbsp;        return path;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public static Boolean isBridge(CXPath cxPath) {
+<b class="pc">&nbsp;        return (cxPath.address.contains(&quot;:&quot;) &amp;&amp; !cxPath.address.matches(&quot;^\\d+\\.\\d+\\.\\d+\\.\\d+:.*&quot;));</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public static Boolean isSocket(CXPath cxPath) {
+<b class="pc">&nbsp;        return (cxPath.sAR != null);</b>
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

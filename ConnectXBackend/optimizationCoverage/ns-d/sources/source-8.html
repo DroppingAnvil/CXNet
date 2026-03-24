@@ -1,0 +1,489 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > OutConnectionController</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network.nodemesh</a>
+</div>
+
+<h1>Coverage Summary for Class: OutConnectionController (dev.droppinganvil.v3.network.nodemesh)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">OutConnectionController</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (3/3)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    48.3%
+  </span>
+  <span class="absValue">
+    (86/178)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    72.8%
+  </span>
+  <span class="absValue">
+    (123/169)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;package dev.droppinganvil.v3.network.nodemesh;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.network.CXNetwork;
+&nbsp;import dev.droppinganvil.v3.network.CXPath;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkContainer;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkEvent;
+&nbsp;
+&nbsp;import java.net.Socket;
+&nbsp;
+<b class="fc">&nbsp;public class OutConnectionController {</b>
+&nbsp;    public ConnectX connectXAPI;
+&nbsp;
+<b class="fc">&nbsp;    public OutConnectionController(ConnectX api) {</b>
+<b class="fc">&nbsp;        connectXAPI = api;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public void transmitEvent(OutputBundle out) throws Exception {
+&nbsp;        //TODO streams
+<b class="fc">&nbsp;        NetworkContainer nc = out.nc;</b>
+&nbsp;        byte[] cryptEvent;
+&nbsp;
+&nbsp;        // Debug: Log routing info
+<b class="pc">&nbsp;        if (out.ne != null &amp;&amp; out.ne.eT != null &amp;&amp; out.ne.eT.contains(&quot;HELLO&quot;)) {</b>
+<b class="fc">&nbsp;            System.out.println(&quot;[TX-DEBUG] Event=&quot; + out.ne.eT + &quot;, ne.p=&quot; + (out.ne.p != null ? out.ne.p.scope : &quot;null&quot;) +</b>
+<b class="pc">&nbsp;                &quot;, out.n=&quot; + (out.n != null ? out.n.addr : &quot;null&quot;));</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // IMPORTANT: Always set transmitter ID before signing NetworkContainer
+&nbsp;        // This is required even when relaying (out.prev != null) so recipients can verify the signature
+<b class="fc">&nbsp;        nc.iD = connectXAPI.getOwnID();</b>
+<b class="pc">&nbsp;        if (NodeConfig.revealVersion) nc.v = NodeConfig.cxV;</b>
+&nbsp;
+<b class="fc">&nbsp;        cryptEvent = out.prev;</b>
+<b class="pc">&nbsp;        if (cryptEvent == null) {</b>
+&nbsp;            // New message (not a relay): Set original sender ID and generate event ID
+<b class="fc">&nbsp;            nc.oD = connectXAPI.getOwnID();  // We are the original sender</b>
+&nbsp;
+&nbsp;            // ALWAYS generate unique event ID for security
+&nbsp;            // Event IDs are MANDATORY for duplicate detection and replay prevention
+<b class="pc">&nbsp;            if (out.ne.iD == null || out.ne.iD.isEmpty()) {</b>
+<b class="fc">&nbsp;                out.ne.iD = java.util.UUID.randomUUID().toString();</b>
+&nbsp;            }
+&nbsp;
+<b class="pc">&nbsp;            if (nc.s) {</b>
+&nbsp;                //E2E Event Layer
+<b class="nc">&nbsp;                assert out.n != null;</b>
+&nbsp;                //TODO
+&nbsp;            } else {
+&nbsp;                // Sign the NetworkEvent (inner layer) with our signature
+&nbsp;                try {
+<b class="fc">&nbsp;                    cryptEvent = connectXAPI.signObject(out.ne, NetworkEvent.class, nc.se).toByteArray();</b>
+&nbsp;                } catch (Exception sigEx) {
+<b class="nc">&nbsp;                    System.err.println(&quot;[OutController] SIGN FAILED for &quot; + out.ne.eT + &quot;: &quot; + sigEx);</b>
+<b class="nc">&nbsp;                    sigEx.printStackTrace();</b>
+&nbsp;                    //throw sigEx;
+&nbsp;                }
+&nbsp;            }
+&nbsp;        }
+&nbsp;        // If out.prev != null, we&#39;re relaying - use the preserved signed event bytes
+&nbsp;        // This maintains the original sender&#39;s signature on the NetworkEvent
+&nbsp;        // Note: oD should already be set in the relay container, but if not set it from the event
+<b class="fc">&nbsp;        nc.e = cryptEvent;</b>
+&nbsp;
+&nbsp;        // Record to blockchain if this is a new CXN event (not relay, not CXS)
+&nbsp;        // Use the same signed blob being transmitted to ensure blockchain consistency
+<b class="pc">&nbsp;        if (out.prev == null &amp;&amp; out.ne.p != null &amp;&amp; out.ne.p.scope != null &amp;&amp;</b>
+<b class="pc">&nbsp;            out.ne.p.scope.equalsIgnoreCase(&quot;CXN&quot;) &amp;&amp; out.ne.p.chainID != null &amp;&amp; out.ne.r) {</b>
+&nbsp;            try {
+<b class="nc">&nbsp;                boolean recorded = connectXAPI.Event(out.ne, connectXAPI.getOwnID(), cryptEvent);</b>
+<b class="nc">&nbsp;                if (recorded) {</b>
+<b class="nc">&nbsp;                    System.out.println(&quot;[Blockchain] Recorded event &quot; + out.ne.eT + &quot; to chain &quot; + out.ne.p.chainID);</b>
+&nbsp;                } else {
+<b class="nc">&nbsp;                    System.err.println(&quot;[Blockchain] Event() returned false for &quot; + out.ne.eT);</b>
+&nbsp;                }
+&nbsp;            } catch (Exception e) {
+<b class="nc">&nbsp;                System.err.println(&quot;[Blockchain] Failed to record event during transmission: &quot; + e.getMessage());</b>
+<b class="nc">&nbsp;                e.printStackTrace();</b>
+&nbsp;            }
+&nbsp;        } else {
+&nbsp;            // Debug: Why didn&#39;t we record?
+<b class="pc">&nbsp;            if (out.ne.eT != null &amp;&amp; out.ne.eT.equals(&quot;MESSAGE&quot;)) {</b>
+<b class="pc">&nbsp;                System.out.println(&quot;[Blockchain-Debug] MESSAGE not recorded: prev=&quot; + (out.prev == null) +</b>
+&nbsp;                    &quot;, hasPath=&quot; + (out.ne.p != null) +
+&nbsp;                    &quot;, hasScope=&quot; + (out.ne.p != null &amp;&amp; out.ne.p.scope != null) +
+<b class="pc">&nbsp;                    &quot;, scope=&quot; + (out.ne.p != null ? out.ne.p.scope : &quot;null&quot;) +</b>
+&nbsp;                    &quot;, hasChainID=&quot; + (out.ne.p != null &amp;&amp; out.ne.p.chainID != null) +
+<b class="pc">&nbsp;                    &quot;, chainID=&quot; + (out.ne.p != null ? out.ne.p.chainID : &quot;null&quot;) +</b>
+&nbsp;                        &quot;record=&quot; + out.ne.r
+&nbsp;                );
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+&nbsp;        // Initialize TransmitPref if not set (defaults to peerBroad = true)
+<b class="fc">&nbsp;        if (nc.tP == null) {</b>
+<b class="fc">&nbsp;            nc.tP = new TransmitPref();</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Sign the NetworkContainer (outer layer) with our signature as the transmitter
+<b class="fc">&nbsp;        byte[] cryptNetworkContainer = connectXAPI.signObject(nc, NetworkContainer.class, nc.se).toByteArray();</b>
+<b class="pc">&nbsp;        if (out.ne.p != null &amp;&amp; out.ne.p.scope != null) {</b>
+<b class="fc">&nbsp;            if (out.ne.p.scope.equalsIgnoreCase(&quot;CXS&quot;)) {</b>
+&nbsp;                // Drop immediately if the target is ourselves - no loopback routing
+<b class="pc">&nbsp;                if (out.ne.p.cxID != null &amp;&amp; out.ne.p.cxID.equals(connectXAPI.getOwnID())) {</b>
+<b class="nc">&nbsp;                    System.err.println(&quot;[OutController] Dropping event &quot; + out.ne.eT + &quot; - target cxID is self&quot;);</b>
+&nbsp;                    return;
+&nbsp;                }
+&nbsp;
+&nbsp;                // Single peer transmission using CXPath.cxID
+&nbsp;                // MULTI-PATH ROUTING: Try ALL available routes for redundancy
+<b class="fc">&nbsp;                boolean sentViaAnyRoute = false;</b>
+<b class="fc">&nbsp;                StringBuilder routesUsed = new StringBuilder();</b>
+&nbsp;
+&nbsp;                Node n;
+<b class="pc">&nbsp;                if (connectXAPI.nodeMesh.peerDirectory.lan.containsKey(out.ne.p.cxID)) {</b>
+<b class="nc">&nbsp;                    n = connectXAPI.nodeMesh.peerDirectory.lan.get(out.ne.p.cxID);</b>
+&nbsp;                } else {
+<b class="fc">&nbsp;                    n = connectXAPI.nodeMesh.peerDirectory.lookup(out.ne.p.cxID, true, true);</b>
+&nbsp;                }
+&nbsp;
+&nbsp;                // Use getAllAddresses() for priority-ordered multi-source lookup (LAN-Direct prioritized)
+<b class="fc">&nbsp;                java.util.List&lt;String&gt; addresses = connectXAPI.nodeMesh.peerDirectory.getAllAddresses(out.ne.p.cxID, connectXAPI);</b>
+<b class="fc">&nbsp;                StringBuilder failedRoutes = new StringBuilder();</b>
+<b class="fc">&nbsp;                int routeAttempts = 0;</b>
+&nbsp;
+<b class="fc">&nbsp;                for (String address : addresses) {</b>
+<b class="fc">&nbsp;                    routeAttempts++;</b>
+&nbsp;                    try {
+<b class="pc">&nbsp;                        if (address.contains(&quot;:&quot;) &amp;&amp; !address.matches(&quot;^\\d+\\.\\d+\\.\\d+\\.\\d+:.*&quot;)) {</b>
+&nbsp;                            // This is a bridge address like &quot;cxHTTP1:https://...&quot;
+<b class="fc">&nbsp;                            String[] parts = address.split(&quot;:&quot;, 2);</b>
+<b class="fc">&nbsp;                            String bridgeProtocol = parts[0];</b>
+<b class="fc">&nbsp;                            String bridgeEndpoint = parts[1];</b>
+&nbsp;
+<b class="fc">&nbsp;                            System.out.println(&quot;[ROUTE-TRY &quot; + routeAttempts + &quot;/&quot; + addresses.size() + &quot;] &quot; +</b>
+<b class="fc">&nbsp;                                out.ne.p.cxID.substring(0, 8) + &quot; via Bridge: &quot; + bridgeProtocol);</b>
+&nbsp;
+<b class="fc">&nbsp;                            dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =</b>
+<b class="fc">&nbsp;                                connectXAPI.getBridgeProvider(bridgeProtocol);</b>
+<b class="pc">&nbsp;                            if (bridge != null) {</b>
+<b class="fc">&nbsp;                                dev.droppinganvil.v3.network.CXPath bridgePath = new dev.droppinganvil.v3.network.CXPath();</b>
+<b class="fc">&nbsp;                                bridgePath.bridgeArg = bridgeEndpoint;</b>
+<b class="fc">&nbsp;                                bridge.transmitEvent(bridgePath, cryptNetworkContainer);</b>
+<b class="fc">&nbsp;                                sentViaAnyRoute = true;</b>
+<b class="fc">&nbsp;                                routesUsed.append(bridgeProtocol).append(&quot;+&quot;);</b>
+<b class="fc">&nbsp;                                System.out.println(&quot;[ROUTE-SUCCESS] &quot; + out.ne.p.cxID.substring(0, 8) +</b>
+&nbsp;                                    &quot; via &quot; + bridgeProtocol);
+&nbsp;                                break; // Success - stop trying
+&nbsp;                            } else {
+<b class="nc">&nbsp;                                failedRoutes.append(bridgeProtocol).append(&quot;(no-provider),&quot;);</b>
+&nbsp;                            }
+&nbsp;                        } else {
+&nbsp;                            // Direct/LAN address (IP:port)
+<b class="fc">&nbsp;                            System.out.println(&quot;[ROUTE-TRY &quot; + routeAttempts + &quot;/&quot; + addresses.size() + &quot;] &quot; +</b>
+<b class="fc">&nbsp;                                out.ne.p.cxID.substring(0, 8) + &quot; via LAN-Direct: &quot; + address);</b>
+&nbsp;
+<b class="fc">&nbsp;                            String[] addr = address.split(&quot;:&quot;);</b>
+<b class="fc">&nbsp;                            Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));</b>
+<b class="fc">&nbsp;                            s.getOutputStream().write(cryptNetworkContainer);</b>
+&nbsp;                            s.close();
+<b class="fc">&nbsp;                            sentViaAnyRoute = true;</b>
+<b class="fc">&nbsp;                            routesUsed.append(&quot;LAN-Direct+&quot;);</b>
+<b class="fc">&nbsp;                            System.out.println(&quot;[ROUTE-SUCCESS] &quot; + out.ne.p.cxID.substring(0, 8) +</b>
+&nbsp;                                &quot; via LAN-Direct: &quot; + address);
+&nbsp;
+&nbsp;                            // Deprioritize any failed routes that came before this successful one
+<b class="pc">&nbsp;                            if (routeAttempts &gt; 1 &amp;&amp; connectXAPI.dataContainer != null) {</b>
+<b class="nc">&nbsp;                                connectXAPI.dataContainer.deprioritizeFailedRoute(out.ne.p.cxID, address, routeAttempts - 1);</b>
+&nbsp;                            }
+&nbsp;
+&nbsp;                            break; // Success - stop trying
+&nbsp;                        }
+&nbsp;                    } catch (Exception e) {
+&nbsp;                        // This route failed - log and try next one
+<b class="pc">&nbsp;                        String routeDesc = address.contains(&quot;://&quot;) ? address.split(&quot;:&quot;)[0] : address;</b>
+<b class="fc">&nbsp;                        failedRoutes.append(routeDesc).append(&quot;(&quot;).append(e.getMessage()).append(&quot;),&quot;);</b>
+<b class="fc">&nbsp;                        System.out.println(&quot;[ROUTE-FAIL] &quot; + out.ne.p.cxID.substring(0, 8) +</b>
+<b class="fc">&nbsp;                            &quot; via &quot; + routeDesc + &quot;: &quot; + e.getMessage());</b>
+&nbsp;                        continue;
+&nbsp;                    }
+&nbsp;                }
+&nbsp;
+&nbsp;                // Log all failed routes if transmission failed completely
+<b class="pc">&nbsp;                if (!sentViaAnyRoute &amp;&amp; failedRoutes.length() &gt; 0) {</b>
+<b class="fc">&nbsp;                    System.out.println(&quot;[ROUTE-ALL-FAILED] &quot; + out.ne.p.cxID.substring(0, 8) +</b>
+&nbsp;                        &quot; - Tried &quot; + routeAttempts + &quot; routes: &quot; + failedRoutes);
+&nbsp;                }
+&nbsp;
+&nbsp;                // Fallback: Try CXPath bridge from event path if getAllAddresses didn&#39;t work
+<b class="pc">&nbsp;                if (!sentViaAnyRoute &amp;&amp; out.ne.p.bridge != null &amp;&amp; out.ne.p.bridgeArg != null) {</b>
+&nbsp;                    try {
+<b class="fc">&nbsp;                        dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =</b>
+<b class="fc">&nbsp;                            connectXAPI.getBridgeProvider(out.ne.p.bridge);</b>
+<b class="pc">&nbsp;                        if (bridge != null) {</b>
+<b class="fc">&nbsp;                            bridge.transmitEvent(out.ne.p, cryptNetworkContainer);</b>
+<b class="fc">&nbsp;                            sentViaAnyRoute = true;</b>
+<b class="fc">&nbsp;                            routesUsed.append(out.ne.p.bridge).append(&quot;-Path+&quot;);</b>
+&nbsp;                        }
+&nbsp;                    } catch (Exception e) {
+&nbsp;                        // Route failed
+&nbsp;                    }
+&nbsp;                }
+&nbsp;
+<b class="fc">&nbsp;                if (!sentViaAnyRoute) {</b>
+<b class="fc">&nbsp;                    throw new Exception(&quot;Cannot reach node &quot; + out.ne.p.cxID + &quot; - all routes failed&quot;);</b>
+&nbsp;                }
+&nbsp;
+&nbsp;                // Remove trailing &quot;+&quot;
+<b class="pc">&nbsp;                if (routesUsed.length() &gt; 0) {</b>
+<b class="fc">&nbsp;                    routesUsed.setLength(routesUsed.length() - 1);</b>
+&nbsp;                }
+<b class="pc">&nbsp;                String cxidDisplay = (out.ne.p.cxID != null &amp;&amp; out.ne.p.cxID.length() &gt;= 8) ? out.ne.p.cxID.substring(0, 8) : (out.ne.p.cxID != null ? out.ne.p.cxID : &quot;NULL&quot;);</b>
+<b class="fc">&nbsp;                System.out.println(&quot;[Multi-Path] Sent to &quot; + cxidDisplay + &quot; via: &quot; + routesUsed);</b>
+&nbsp;            }
+<b class="fc">&nbsp;            if (out.ne.p.scope.equalsIgnoreCase(&quot;CXN&quot;)) {</b>
+&nbsp;                // CXN scope: Network transmission with TransmitPref support
+<b class="fc">&nbsp;                CXNetwork cxn = connectXAPI.getNetwork(out.ne.p.network);</b>
+&nbsp;
+<b class="pc">&nbsp;                if (nc.tP != null &amp;&amp; nc.tP.directOnly &amp;&amp; cxn != null) {</b>
+&nbsp;                    // directOnly: Direct backend transmission for speed (no relay)
+&nbsp;                    // Use case: Fast point-to-point when backend is known to be online
+<b class="nc">&nbsp;                    for (String s : cxn.configuration.backendSet) {</b>
+&nbsp;                        try {
+<b class="nc">&nbsp;                            Node n = connectXAPI.nodeMesh.peerDirectory.lookup(s, true, true);</b>
+<b class="nc">&nbsp;                            if (n != null &amp;&amp; n.addr != null) {</b>
+<b class="nc">&nbsp;                                String[] addr = n.addr.split(&quot;:&quot;);</b>
+<b class="nc">&nbsp;                                Socket so = new Socket(addr[0], Integer.parseInt(addr[1]));</b>
+<b class="nc">&nbsp;                                so.getOutputStream().write(cryptNetworkContainer);</b>
+&nbsp;                                so.close();
+&nbsp;                            }
+&nbsp;                        } catch (Exception e) {
+&nbsp;                            // Backend unavailable, continue
+&nbsp;                            continue;
+&nbsp;                        }
+&nbsp;                    }
+&nbsp;                } else {
+&nbsp;                    // Standard/peerProxy/peerBroad: P2P mesh transmission
+&nbsp;                    // Send to all available peers, relay logic handles:
+&nbsp;                    // - Backend priority (fireEvent)
+&nbsp;                    // - Blockchain recording (peerProxy)
+&nbsp;                    // - Global distribution (peerBroad)
+&nbsp;                    // IMPORTANT: Always try ALL peers even if some are unreachable
+&nbsp;                    // Other nodes might have different paths to unreachable peers
+<b class="fc">&nbsp;                    int totalPeers = 0;</b>
+<b class="fc">&nbsp;                    int successfulPeers = 0;</b>
+<b class="fc">&nbsp;                    int failedPeers = 0;</b>
+&nbsp;
+<b class="fc">&nbsp;                    for (Node n : connectXAPI.nodeMesh.peerDirectory.hv.values()) {</b>
+&nbsp;                        // Don&#39;t send to ourselves
+<b class="pc">&nbsp;                        if (n.cxID != null &amp;&amp; !n.cxID.equals(connectXAPI.getOwnID())) {</b>
+<b class="fc">&nbsp;                            totalPeers++;</b>
+&nbsp;                            // MULTI-PATH ROUTING: Use getAllAddresses() to check all sources
+<b class="fc">&nbsp;                            java.util.List&lt;String&gt; addresses = connectXAPI.nodeMesh.peerDirectory.getAllAddresses(n.cxID, connectXAPI);</b>
+<b class="pc">&nbsp;                            if (addresses.contains(connectXAPI.getSelf().addr)) {continue;}</b>
+<b class="fc">&nbsp;                            StringBuilder routes = new StringBuilder();</b>
+<b class="fc">&nbsp;                            boolean sentToThisPeer = false;</b>
+&nbsp;
+<b class="fc">&nbsp;                            int routeAttempts = 0;</b>
+<b class="pc">&nbsp;                            for (String address : addresses) {</b>
+<b class="fc">&nbsp;                                routeAttempts++;</b>
+&nbsp;                                try {
+&nbsp;                                    // Check if this is a bridge address (contains protocol prefix)
+<b class="pc">&nbsp;                                    if (address.contains(&quot;:&quot;) &amp;&amp; !address.matches(&quot;^\\d+\\.\\d+\\.\\d+\\.\\d+:.*&quot;)) {</b>
+&nbsp;                                        // Bridge address like &quot;cxHTTP1:https://...&quot;
+<b class="nc">&nbsp;                                        String[] parts = address.split(&quot;:&quot;, 2);</b>
+<b class="nc">&nbsp;                                        String bridgeProtocol = parts[0];</b>
+<b class="nc">&nbsp;                                        String bridgeEndpoint = parts[1];</b>
+&nbsp;
+<b class="nc">&nbsp;                                        dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =</b>
+<b class="nc">&nbsp;                                            connectXAPI.getBridgeProvider(bridgeProtocol);</b>
+<b class="nc">&nbsp;                                        if (bridge != null) {</b>
+<b class="nc">&nbsp;                                            dev.droppinganvil.v3.network.CXPath peerPath = new dev.droppinganvil.v3.network.CXPath();</b>
+<b class="nc">&nbsp;                                            peerPath.bridgeArg = bridgeEndpoint;</b>
+<b class="nc">&nbsp;                                            bridge.transmitEvent(peerPath, cryptNetworkContainer);</b>
+<b class="nc">&nbsp;                                            routes.append(bridgeProtocol);</b>
+<b class="nc">&nbsp;                                            sentToThisPeer = true;</b>
+&nbsp;                                            break;  // Successfully sent, no need to try other routes
+&nbsp;                                        }
+&nbsp;                                    } else {
+&nbsp;                                        // Direct/LAN address (IP:port)
+<b class="fc">&nbsp;                                        String[] addr = address.split(&quot;:&quot;);</b>
+<b class="fc">&nbsp;                                        Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));</b>
+<b class="fc">&nbsp;                                        s.getOutputStream().write(cryptNetworkContainer);</b>
+&nbsp;                                        s.close();
+<b class="fc">&nbsp;                                        routes.append(&quot;LAN-Direct&quot;);</b>
+<b class="fc">&nbsp;                                        sentToThisPeer = true;</b>
+&nbsp;
+&nbsp;                                        // Deprioritize any failed routes that came before this successful one
+<b class="pc">&nbsp;                                        if (routeAttempts &gt; 1 &amp;&amp; connectXAPI.dataContainer != null) {</b>
+<b class="nc">&nbsp;                                            connectXAPI.dataContainer.deprioritizeFailedRoute(n.cxID, address, routeAttempts - 1);</b>
+&nbsp;                                        }
+&nbsp;
+&nbsp;                                        break;  // Successfully sent, no need to try other routes
+&nbsp;                                    }
+&nbsp;                                } catch (Exception e) {
+&nbsp;                                    // This route failed, continue trying other routes for this peer
+&nbsp;                                    // DON&#39;T stop - try all addresses before giving up
+&nbsp;                                }
+&nbsp;                            }
+&nbsp;
+&nbsp;                            // Log results for this peer
+<b class="pc">&nbsp;                            if (sentToThisPeer) {</b>
+<b class="fc">&nbsp;                                System.out.println(&quot;[Multi-Path CXN] ✓ &quot; + n.cxID.substring(0, 8) + &quot; via: &quot; + routes);</b>
+<b class="fc">&nbsp;                                successfulPeers++;</b>
+&nbsp;                            } else {
+&nbsp;                                // ALL routes failed for this peer - log warning but CONTINUE to next peer
+<b class="nc">&nbsp;                                System.out.println(&quot;[Multi-Path CXN] ✗ &quot; + n.cxID.substring(0, 8) + &quot; UNREACHABLE (tried &quot; + addresses.size() + &quot; routes)&quot;);</b>
+<b class="nc">&nbsp;                                failedPeers++;</b>
+&nbsp;                            }
+&nbsp;                        }
+&nbsp;                    }
+&nbsp;
+&nbsp;                    // Summary logging for CXN broadcast
+<b class="pc">&nbsp;                    if (totalPeers &gt; 0) {</b>
+<b class="pc">&nbsp;                        String eventType = (out.ne != null &amp;&amp; out.ne.eT != null) ? out.ne.eT : &quot;UNKNOWN&quot;;</b>
+<b class="pc">&nbsp;                        String eventId = (out.ne != null &amp;&amp; out.ne.iD != null) ? out.ne.iD.substring(0, 8) : &quot;UNKNOWN&quot;;</b>
+<b class="fc">&nbsp;                        System.out.println(&quot;[CXN Broadcast] &quot; + eventType + &quot; (&quot; + eventId + &quot;...) sent to &quot; +</b>
+&nbsp;                            successfulPeers + &quot;/&quot; + totalPeers + &quot; peers (&quot; + failedPeers + &quot; unreachable)&quot;);
+&nbsp;                    }
+&nbsp;                }
+&nbsp;            }
+<b class="pc">&nbsp;        } else if (out.n != null &amp;&amp; out.n.addr != null &amp;&amp; !out.n.addr.isEmpty()) {</b>
+&nbsp;            // Special case: Direct transmission to address (for CXHELLO discovery)
+&nbsp;            // Used when we have a target address but no peer ID yet
+&nbsp;
+&nbsp;            /// MULTI-BRIDGE SUPPORT using new CXPath features
+<b class="fc">&nbsp;        CXPath cxPath = CXPath.getPathFromString(out.n.addr);</b>
+<b class="pc">&nbsp;        if (CXPath.isSocket(cxPath)) {</b>
+&nbsp;            try {
+<b class="fc">&nbsp;                System.out.println(&quot;[OutController] Attempting direct transmission to &quot; + out.n.addr + &quot; (&quot; + cryptNetworkContainer.length + &quot; bytes)&quot;);</b>
+<b class="fc">&nbsp;                String[] addr = out.n.addr.split(&quot;:&quot;);</b>
+<b class="fc">&nbsp;                Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));</b>
+<b class="fc">&nbsp;                java.io.OutputStream os = s.getOutputStream();</b>
+<b class="fc">&nbsp;                os.write(cryptNetworkContainer);</b>
+<b class="fc">&nbsp;                os.flush();</b>
+&nbsp;                // Wait for receiver to read data before closing (receiver timeout is 400ms)
+<b class="fc">&nbsp;                Thread.sleep(500);</b>
+&nbsp;                s.close();
+<b class="fc">&nbsp;                System.out.println(&quot;[OutController] Direct transmission SUCCESS to &quot; + out.n.addr);</b>
+&nbsp;            } catch (Exception e) {
+&nbsp;                // Failed to send (normal for discovery - host may not be ConnectX peer)
+<b class="fc">&nbsp;                System.out.println(&quot;[OutController] Direct transmission FAILED to &quot; + out.n.addr + &quot;: &quot; + e.getMessage());</b>
+&nbsp;            }
+&nbsp;        } else {
+&nbsp;            //TODO Duplicate code, consider centralizing method
+<b class="nc">&nbsp;            if (CXPath.isBridge(cxPath)) {</b>
+<b class="nc">&nbsp;                dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =</b>
+<b class="nc">&nbsp;                        connectXAPI.getBridgeProvider(cxPath.bridge);</b>
+<b class="nc">&nbsp;                if (bridge != null) {</b>
+&nbsp;                    //TODO mem waste, fix duplicate, adverting risk
+<b class="nc">&nbsp;                    dev.droppinganvil.v3.network.CXPath bridgePath = new dev.droppinganvil.v3.network.CXPath();</b>
+<b class="nc">&nbsp;                    bridgePath.bridgeArg = cxPath.bridgeArg;</b>
+<b class="nc">&nbsp;                    bridge.transmitEvent(bridgePath, cryptNetworkContainer);</b>
+<b class="nc">&nbsp;                    System.out.println(&quot;[NodeMesh] Direct bridge &quot; + cxPath.address +</b>
+&nbsp;                            &quot; via &quot; + cxPath.bridge);
+&nbsp;                } else {
+<b class="nc">&nbsp;                    System.out.println(&quot;[OutController] Could not transmit event bridge direct. Event type: &quot; + out.ne.eT);</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;        }
+&nbsp;        } else {
+&nbsp;            // No routing info - log for debugging
+<b class="nc">&nbsp;            if (out.ne != null &amp;&amp; out.ne.eT != null &amp;&amp; (out.ne.eT.equals(&quot;CXHELLO&quot;) || out.ne.eT.equals(&quot;CXHELLO_RESPONSE&quot;))) {</b>
+<b class="nc">&nbsp;                System.out.println(&quot;[OutController] WARNING: No routing for &quot; + out.ne.eT +</b>
+<b class="nc">&nbsp;                    &quot; - Permission: &quot; + (out.ne.p != null ? out.ne.p.scope : &quot;null&quot;) +</b>
+<b class="nc">&nbsp;                    &quot;, Node: &quot; + (out.n != null &amp;&amp; out.n.addr != null ? out.n.addr : &quot;null&quot;));</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+&nbsp;
+&nbsp;    }
+&nbsp;
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

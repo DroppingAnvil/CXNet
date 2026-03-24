@@ -1,0 +1,336 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > StatePersistenceTest</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.test</a>
+</div>
+
+<h1>Coverage Summary for Class: StatePersistenceTest (dev.droppinganvil.v3.test)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">StatePersistenceTest</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/3)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/12)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    0%
+  </span>
+  <span class="absValue">
+    (0/138)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;package dev.droppinganvil.v3.test;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.network.CXNetwork;
+&nbsp;import dev.droppinganvil.v3.network.events.EventType;
+&nbsp;import dev.droppinganvil.v3.network.events.NetworkEvent;
+&nbsp;
+&nbsp;import java.io.File;
+&nbsp;import java.util.HashMap;
+&nbsp;import java.util.Map;
+&nbsp;
+&nbsp;/**
+&nbsp; * State Persistence and Blockchain Replay Test
+&nbsp; *
+&nbsp; * Tests the full persistence cycle:
+&nbsp; * 1. Record state-modifying events (REGISTER_NODE, BLOCK_NODE, UNBLOCK_NODE)
+&nbsp; * 2. Persist blockchain to disk
+&nbsp; * 3. Restart node (simulate crash/restart)
+&nbsp; * 4. Load blockchain from disk
+&nbsp; * 5. Replay events to rebuild state
+&nbsp; * 6. Verify state matches (registeredNodes, blockedNodes, permissions)
+&nbsp; */
+<b class="nc">&nbsp;public class StatePersistenceTest {</b>
+&nbsp;
+&nbsp;    public static void main(String[] args) {
+&nbsp;        try {
+<b class="nc">&nbsp;            System.out.println(&quot;=================================================================&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;  STATE PERSISTENCE &amp; BLOCKCHAIN REPLAY TEST&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;=================================================================\n&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            File testDir = new File(&quot;ConnectX-StateTest&quot;);</b>
+<b class="nc">&nbsp;            if (testDir.exists()) {</b>
+<b class="nc">&nbsp;                System.out.println(&quot;Cleaning up old test directory...&quot;);</b>
+<b class="nc">&nbsp;                deleteDirectory(testDir);</b>
+&nbsp;            }
+<b class="nc">&nbsp;            testDir.mkdirs();</b>
+&nbsp;
+&nbsp;            // PHASE 1: Create network and record state-modifying events
+<b class="nc">&nbsp;            System.out.println(&quot;PHASE 1: Recording State-Modifying Events&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;-----------------------------------------------------------------&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            System.out.println(&quot;Creating ConnectX instance (Node 1)...&quot;);</b>
+<b class="nc">&nbsp;            ConnectX cx1 = new ConnectX(testDir.getAbsolutePath(), 49190, null, &quot;state-test-1&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            System.out.println(&quot;Creating STATE_TEST network with whitelist mode...&quot;);</b>
+<b class="nc">&nbsp;            CXNetwork network = cx1.createNetwork(&quot;STATE_TEST&quot;);</b>
+<b class="nc">&nbsp;            network.configuration.whitelistMode = true;</b>
+<b class="nc">&nbsp;            String ownerID = cx1.getOwnID();</b>
+&nbsp;
+&nbsp;            // Record events to c1 (Admin) chain
+<b class="nc">&nbsp;            System.out.println(&quot;\nRecording admin events to c1 chain:&quot;);</b>
+&nbsp;
+&nbsp;            // 1. REGISTER_NODE event
+<b class="nc">&nbsp;            System.out.println(&quot;  1. REGISTER_NODE for test-node-123...&quot;);</b>
+<b class="nc">&nbsp;            NetworkEvent registerEvent = new NetworkEvent();</b>
+<b class="nc">&nbsp;            registerEvent.eT = EventType.REGISTER_NODE.name();</b>
+<b class="nc">&nbsp;            registerEvent.iD = java.util.UUID.randomUUID().toString();</b>
+<b class="nc">&nbsp;            registerEvent.executeOnSync = true;</b>
+<b class="nc">&nbsp;            registerEvent.p = new dev.droppinganvil.v3.network.CXPath();</b>
+<b class="nc">&nbsp;            registerEvent.p.network = &quot;STATE_TEST&quot;;</b>
+<b class="nc">&nbsp;            registerEvent.p.scope = &quot;CXS&quot;;</b>
+&nbsp;
+<b class="nc">&nbsp;            Map&lt;String, Object&gt; registerPayload = new HashMap&lt;&gt;();</b>
+<b class="nc">&nbsp;            registerPayload.put(&quot;network&quot;, &quot;STATE_TEST&quot;);</b>
+<b class="nc">&nbsp;            registerPayload.put(&quot;nodeID&quot;, &quot;test-node-123&quot;);</b>
+<b class="nc">&nbsp;            registerPayload.put(&quot;token&quot;, &quot;test-token-456&quot;);</b>
+<b class="nc">&nbsp;            registerEvent.d = ConnectX.serialize(&quot;cxJSON1&quot;, registerPayload).getBytes(&quot;UTF-8&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            boolean reg1 = cx1.Event(registerEvent, ownerID);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;     Recorded: &quot; + reg1);</b>
+&nbsp;
+&nbsp;            // 2. REGISTER_NODE event for another node
+<b class="nc">&nbsp;            System.out.println(&quot;  2. REGISTER_NODE for test-node-789...&quot;);</b>
+<b class="nc">&nbsp;            NetworkEvent registerEvent2 = new NetworkEvent();</b>
+<b class="nc">&nbsp;            registerEvent2.eT = EventType.REGISTER_NODE.name();</b>
+<b class="nc">&nbsp;            registerEvent2.iD = java.util.UUID.randomUUID().toString();</b>
+<b class="nc">&nbsp;            registerEvent2.executeOnSync = true;</b>
+<b class="nc">&nbsp;            registerEvent2.p = new dev.droppinganvil.v3.network.CXPath();</b>
+<b class="nc">&nbsp;            registerEvent2.p.network = &quot;STATE_TEST&quot;;</b>
+<b class="nc">&nbsp;            registerEvent2.p.scope = &quot;CXS&quot;;</b>
+&nbsp;
+<b class="nc">&nbsp;            Map&lt;String, Object&gt; registerPayload2 = new HashMap&lt;&gt;();</b>
+<b class="nc">&nbsp;            registerPayload2.put(&quot;network&quot;, &quot;STATE_TEST&quot;);</b>
+<b class="nc">&nbsp;            registerPayload2.put(&quot;nodeID&quot;, &quot;test-node-789&quot;);</b>
+<b class="nc">&nbsp;            registerPayload2.put(&quot;token&quot;, &quot;test-token-999&quot;);</b>
+<b class="nc">&nbsp;            registerEvent2.d = ConnectX.serialize(&quot;cxJSON1&quot;, registerPayload2).getBytes(&quot;UTF-8&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            boolean reg2 = cx1.Event(registerEvent2, ownerID);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;     Recorded: &quot; + reg2);</b>
+&nbsp;
+&nbsp;            // 3. BLOCK_NODE event
+<b class="nc">&nbsp;            System.out.println(&quot;  3. BLOCK_NODE for bad-node-456...&quot;);</b>
+<b class="nc">&nbsp;            NetworkEvent blockEvent = new NetworkEvent();</b>
+<b class="nc">&nbsp;            blockEvent.eT = EventType.BLOCK_NODE.name();</b>
+<b class="nc">&nbsp;            blockEvent.iD = java.util.UUID.randomUUID().toString();</b>
+<b class="nc">&nbsp;            blockEvent.executeOnSync = true;</b>
+<b class="nc">&nbsp;            blockEvent.p = new dev.droppinganvil.v3.network.CXPath();</b>
+<b class="nc">&nbsp;            blockEvent.p.network = &quot;STATE_TEST&quot;;</b>
+<b class="nc">&nbsp;            blockEvent.p.scope = &quot;CXS&quot;;</b>
+&nbsp;
+<b class="nc">&nbsp;            Map&lt;String, Object&gt; blockPayload = new HashMap&lt;&gt;();</b>
+<b class="nc">&nbsp;            blockPayload.put(&quot;network&quot;, &quot;STATE_TEST&quot;);</b>
+<b class="nc">&nbsp;            blockPayload.put(&quot;nodeID&quot;, &quot;bad-node-456&quot;);</b>
+<b class="nc">&nbsp;            blockEvent.d = ConnectX.serialize(&quot;cxJSON1&quot;, blockPayload).getBytes(&quot;UTF-8&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            boolean blocked = cx1.Event(blockEvent, ownerID);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;     Recorded: &quot; + blocked);</b>
+&nbsp;
+&nbsp;            // 4. UNBLOCK_NODE event
+<b class="nc">&nbsp;            System.out.println(&quot;  4. UNBLOCK_NODE for prev-bad-node-789...&quot;);</b>
+<b class="nc">&nbsp;            NetworkEvent unblockEvent = new NetworkEvent();</b>
+<b class="nc">&nbsp;            unblockEvent.eT = EventType.UNBLOCK_NODE.name();</b>
+<b class="nc">&nbsp;            unblockEvent.iD = java.util.UUID.randomUUID().toString();</b>
+<b class="nc">&nbsp;            unblockEvent.executeOnSync = true;</b>
+<b class="nc">&nbsp;            unblockEvent.p = new dev.droppinganvil.v3.network.CXPath();</b>
+<b class="nc">&nbsp;            unblockEvent.p.network = &quot;STATE_TEST&quot;;</b>
+<b class="nc">&nbsp;            unblockEvent.p.scope = &quot;CXS&quot;;</b>
+&nbsp;
+<b class="nc">&nbsp;            Map&lt;String, Object&gt; unblockPayload = new HashMap&lt;&gt;();</b>
+<b class="nc">&nbsp;            unblockPayload.put(&quot;network&quot;, &quot;STATE_TEST&quot;);</b>
+<b class="nc">&nbsp;            unblockPayload.put(&quot;nodeID&quot;, &quot;prev-bad-node-789&quot;);</b>
+<b class="nc">&nbsp;            unblockEvent.d = ConnectX.serialize(&quot;cxJSON1&quot;, unblockPayload).getBytes(&quot;UTF-8&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            boolean unblocked = cx1.Event(unblockEvent, ownerID);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;     Recorded: &quot; + unblocked);</b>
+&nbsp;
+&nbsp;            // Check in-memory state
+<b class="nc">&nbsp;            System.out.println(&quot;\nIn-memory blockchain state:&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;  c1 (Admin) events: &quot; + network.c1.current.networkEvents.size());</b>
+<b class="nc">&nbsp;            System.out.println(&quot;  c2 (Resources) events: &quot; + network.c2.current.networkEvents.size());</b>
+<b class="nc">&nbsp;            System.out.println(&quot;  c3 (Events) events: &quot; + network.c3.current.networkEvents.size());</b>
+&nbsp;
+&nbsp;            // PHASE 2: Persist to disk
+<b class="nc">&nbsp;            System.out.println(&quot;\nPHASE 2: Persisting Blockchain to Disk&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;-----------------------------------------------------------------&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            cx1.forceBlockchainSave(&quot;STATE_TEST&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;✓ Blockchain saved to disk&quot;);</b>
+&nbsp;
+&nbsp;            // Verify files
+<b class="nc">&nbsp;            File c1Block = new File(testDir, &quot;blockchain/STATE_TEST/blocks/chain-1/block-0.json&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;  c1 block-0.json: &quot; + c1Block.exists() + &quot; (&quot; + c1Block.length() + &quot; bytes)&quot;);</b>
+&nbsp;
+&nbsp;            // PHASE 3: Simulate node restart
+<b class="nc">&nbsp;            System.out.println(&quot;\nPHASE 3: Simulating Node Restart&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;-----------------------------------------------------------------&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            System.out.println(&quot;Shutting down Node 1...&quot;);</b>
+<b class="nc">&nbsp;            cx1 = null;</b>
+<b class="nc">&nbsp;            network = null;</b>
+<b class="nc">&nbsp;            System.gc();</b>
+<b class="nc">&nbsp;            Thread.sleep(2000);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;✓ Node 1 shutdown complete&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            System.out.println(&quot;\nStarting Node 2 (restart simulation)...&quot;);</b>
+<b class="nc">&nbsp;            ConnectX cx2 = new ConnectX(testDir.getAbsolutePath(), 49191, null, &quot;state-test-2&quot;);</b>
+&nbsp;
+&nbsp;            // PHASE 4: Load blockchain and verify replay
+<b class="nc">&nbsp;            System.out.println(&quot;\nPHASE 4: Loading Blockchain from Disk&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;-----------------------------------------------------------------&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            System.out.println(&quot;Checking for STATE_TEST blockchain on disk...&quot;);</b>
+<b class="nc">&nbsp;            ConnectX.BlockchainStats stats = cx2.getBlockchainStats(&quot;STATE_TEST&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            if (stats != null &amp;&amp; stats.exists) {</b>
+<b class="nc">&nbsp;                System.out.println(&quot;✓ Blockchain found!&quot;);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;  &quot; + stats);</b>
+&nbsp;
+<b class="nc">&nbsp;                System.out.println(&quot;\nNOTE: Blockchain replay would happen during network bootstrap&quot;);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;      or via BLOCK_REQUEST/BLOCK_RESPONSE sync protocol.&quot;);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;      Events with executeOnSync=true are replayed to rebuild state:&quot;);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;      - REGISTER_NODE → Adds to registeredNodes set&quot;);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;      - BLOCK_NODE → Adds to blockedNodes map&quot;);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;      - UNBLOCK_NODE → Removes from blockedNodes map&quot;);</b>
+&nbsp;
+&nbsp;            } else {
+<b class="nc">&nbsp;                System.out.println(&quot;✗ Blockchain not found on disk!&quot;);</b>
+<b class="nc">&nbsp;                System.out.println(&quot;  This may require manual network import/join&quot;);</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // PHASE 5: Summary
+<b class="nc">&nbsp;            System.out.println(&quot;\n=================================================================&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;  TEST SUMMARY&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;=================================================================&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;✓ Created network with whitelist mode&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;✓ Recorded 4 state-modifying events:&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;    - 2x REGISTER_NODE (test-node-123, test-node-789)&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;    - 1x BLOCK_NODE (bad-node-456)&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;    - 1x UNBLOCK_NODE (prev-bad-node-789)&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;✓ All events recorded to c1 (Admin) chain&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;✓ Blockchain persisted to disk&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;✓ Node restarted successfully&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;✓ Blockchain files found on disk after restart&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;            System.out.println(&quot;\nNext steps for full replay implementation:&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;1. Implement automatic blockchain load on network join&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;2. Process c1 events to rebuild registeredNodes/blockedNodes&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;3. Process c2 events to rebuild resource catalog&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;4. Process c3 events as needed (most are ephemeral)&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;5. Verify state consistency across restarts&quot;);</b>
+<b class="nc">&nbsp;            System.out.println(&quot;\n=================================================================\n&quot;);</b>
+&nbsp;
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;\nTest failed with error:&quot;);</b>
+<b class="nc">&nbsp;            e.printStackTrace();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    private static void deleteDirectory(File dir) {
+<b class="nc">&nbsp;        if (dir.isDirectory()) {</b>
+<b class="nc">&nbsp;            File[] files = dir.listFiles();</b>
+<b class="nc">&nbsp;            if (files != null) {</b>
+<b class="nc">&nbsp;                for (File file : files) {</b>
+<b class="nc">&nbsp;                    deleteDirectory(file);</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;        }
+<b class="nc">&nbsp;        dir.delete();</b>
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

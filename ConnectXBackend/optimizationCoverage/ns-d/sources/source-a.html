@@ -1,0 +1,473 @@
+
+
+
+<!DOCTYPE html>
+<html id="htmlId">
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> 
+  <title>Coverage Report > PeerDirectory</title>
+  <style type="text/css">
+    @import "../../css/coverage.css";
+    @import "../../css/idea.min.css";
+  </style>
+  <script type="text/javascript" src="../../js/highlight.min.js"></script>
+  <script type="text/javascript" src="../../js/highlightjs-line-numbers.min.js"></script>
+</head>
+
+<body>
+<div class="content">
+<div class="breadCrumbs">
+Current scope:     <a href="../../index.html">all classes</a>
+    <span class="separator">|</span>
+    <a href="../index.html">dev.droppinganvil.v3.network.nodemesh</a>
+</div>
+
+<h1>Coverage Summary for Class: PeerDirectory (dev.droppinganvil.v3.network.nodemesh)</h1>
+
+<table class="coverageStats">
+<tr>
+  <th class="name">Class</th>
+<th class="coverageStat 
+">
+  Class, %
+</th>
+<th class="coverageStat 
+">
+  Method, %
+</th>
+<th class="coverageStat 
+">
+  Branch, %
+</th>
+<th class="coverageStat 
+">
+  Line, %
+</th>
+</tr>
+<tr>
+  <td class="name">PeerDirectory</td>
+<td class="coverageStat">
+  <span class="percent">
+    100%
+  </span>
+  <span class="absValue">
+    (1/1)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    54.5%
+  </span>
+  <span class="absValue">
+    (6/11)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    45.6%
+  </span>
+  <span class="absValue">
+    (52/114)
+  </span>
+</td>
+<td class="coverageStat">
+  <span class="percent">
+    63%
+  </span>
+  <span class="absValue">
+    (85/135)
+  </span>
+</td>
+</tr>
+
+</table>
+
+<br/>
+<br/>
+
+
+<pre>
+<code class="sourceCode" id="sourceCode">&nbsp;/*
+&nbsp; * Copyright (c) 2022. Christopher Willett
+&nbsp; * All Rights Reserved
+&nbsp; */
+&nbsp;
+&nbsp;package dev.droppinganvil.v3.network.nodemesh;
+&nbsp;
+&nbsp;import dev.droppinganvil.v3.ConnectX;
+&nbsp;import dev.droppinganvil.v3.analytics.AnalyticData;
+&nbsp;import dev.droppinganvil.v3.analytics.Analytics;
+&nbsp;import dev.droppinganvil.v3.exceptions.UnsafeKeywordException;
+&nbsp;import us.anvildevelopment.util.tools.database.annotations.MemoryOnly;
+&nbsp;
+&nbsp;import java.io.File;
+&nbsp;import java.io.Serializable;
+&nbsp;import java.util.ArrayList;
+&nbsp;import java.util.Set;
+&nbsp;import java.util.concurrent.ConcurrentHashMap;
+&nbsp;
+&nbsp;public class PeerDirectory implements Serializable {
+<b class="fc">&nbsp;    public ConcurrentHashMap&lt;String,Node&gt; peerCache = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;    /**
+&nbsp;     * For tracking nodes we have connected to directly over the internet, in the future this might be changed to a set of cxIDs
+&nbsp;     */
+<b class="fc">&nbsp;    public ConcurrentHashMap&lt;String,Node&gt; seen = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;    /**
+&nbsp;     * More resource friendly way to store seen peers, by reference.
+&nbsp;     * Thread-safe: backed by ConcurrentHashMap for O(1) contains/add under concurrent IOThreads.
+&nbsp;     * //TODO Optimize older uses of seen map
+&nbsp;     */
+<b class="fc">&nbsp;    public Set&lt;String&gt; seenCXIDs = ConcurrentHashMap.newKeySet();</b>
+<b class="fc">&nbsp;    public ConcurrentHashMap&lt;String, Node&gt; lan = new ConcurrentHashMap&lt;&gt;();</b>
+<b class="fc">&nbsp;    public ConcurrentHashMap&lt;String,Node&gt; hv = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;    public File peers;
+<b class="fc">&nbsp;    @MemoryOnly</b>
+&nbsp;    public ConnectX connectX = null;
+&nbsp;
+<b class="fc">&nbsp;    public PeerDirectory(ConnectX cx) {</b>
+<b class="pc">&nbsp;        if (connectX == null) {</b>
+<b class="fc">&nbsp;            connectX = cx;</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;    //TODO
+&nbsp;    //Writing node lookup and create account implementation, next up create peer finding event
+&nbsp;    public Node lookup(String cxID, boolean tryImport, boolean sync) throws UnsafeKeywordException {
+<b class="fc">&nbsp;        return lookup(cxID, tryImport, sync, connectX.cxRoot, connectX);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public Node lookup(String cxID, boolean tryImport, boolean sync, File cxRoot, ConnectX cx) throws UnsafeKeywordException {
+<b class="fc">&nbsp;        ConnectX.checkSafety(cxID);</b>
+&nbsp;        try {
+<b class="fc">&nbsp;            if (hv.containsKey(cxID)) return hv.get(cxID);</b>
+&nbsp;        } catch (Exception e) {
+&nbsp;            //
+&nbsp;        }
+&nbsp;        try {
+<b class="fc">&nbsp;            if (seen.containsKey(cxID)) return seen.get(cxID);</b>
+&nbsp;        } catch (Exception exception) {}
+&nbsp;        try {
+<b class="pc">&nbsp;            if (peerCache.containsKey(cxID)) return peerCache.get(cxID);</b>
+&nbsp;        } catch (Exception e) {
+&nbsp;//            throw new RuntimeException(e);
+&nbsp;        }
+<b class="fc">&nbsp;            char s = cxID.charAt(0);</b>
+&nbsp;            // Use instance-specific directory if cxRoot provided, otherwise fall back to static peers
+<b class="pc">&nbsp;            File peerDir = (cxRoot != null) ? new File(cxRoot, &quot;nodemesh&quot;) : peers;</b>
+&nbsp;            // Legacy: Set static peers if needed (for backward compatibility)
+<b class="pc">&nbsp;            if (peers == null &amp;&amp; cxRoot != null) peers = new File(cxRoot, &quot;nodemesh&quot;);</b>
+<b class="pc">&nbsp;            if (peerDir == null) return null;</b>
+<b class="fc">&nbsp;            File peerGroup = new File(peerDir, String.valueOf(s));</b>
+<b class="pc">&nbsp;            if (peerGroup.exists()) {</b>
+<b class="fc">&nbsp;                File peer = new File(peerGroup, cxID+&quot;.cxi&quot;);</b>
+<b class="pc">&nbsp;                if (peer.exists()) {</b>
+&nbsp;                    //if (sync) {
+&nbsp;                        try {
+<b class="fc">&nbsp;                            Node node = null;</b>
+<b class="pc">&nbsp;                            if (cx != null) {</b>
+<b class="fc">&nbsp;                                node = (Node) cx.getSignedObjectNoVerify(peer.toURL().openStream(), Node.class, &quot;cxJSON1&quot;);</b>
+<b class="pc">&nbsp;                                if (node != null) {</b>
+<b class="fc">&nbsp;                                    peerCache.put(cxID, node);</b>
+<b class="fc">&nbsp;                                    seen.put(cxID, node);</b>
+<b class="fc">&nbsp;                                    cx.encryptionProvider.cacheCert(cxID, false, false, connectX);</b>
+<b class="fc">&nbsp;                                    return node;</b>
+&nbsp;                                }
+&nbsp;                            }
+&nbsp;                        } catch (Exception e) {
+<b class="nc">&nbsp;                            e.printStackTrace();</b>
+&nbsp;                        }
+&nbsp;                   // } else {
+&nbsp;                        //TODO async
+&nbsp;                  //  }
+&nbsp;                }
+<b class="nc">&nbsp;            } else if (tryImport &amp; sync) {</b>
+&nbsp;                //TODO implement peer import
+&nbsp;            }
+<b class="nc">&nbsp;        return null;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public void addNode(Node n) {
+<b class="pc">&nbsp;        if (Node.validate(n)) {</b>
+&nbsp;            // Lazy initialization - ensure maps are initialized before use
+<b class="pc">&nbsp;            if (seen == null) seen = new ConcurrentHashMap&lt;&gt;();</b>
+<b class="pc">&nbsp;            if (hv == null) hv = new ConcurrentHashMap&lt;&gt;();</b>
+<b class="pc">&nbsp;            if (lan == null) lan = new ConcurrentHashMap&lt;&gt;();</b>
+<b class="pc">&nbsp;            if (peerCache == null) peerCache = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;
+&nbsp;            // SECURITY: UUID Collision/Spoofing Protection
+&nbsp;            // If we already have a node with this cxID, verify the public key matches
+<b class="fc">&nbsp;            Node existing = null;</b>
+&nbsp;
+&nbsp;            // Check all peer directories for existing node with same cxID
+<b class="fc">&nbsp;            if (hv.containsKey(n.cxID)) {</b>
+<b class="fc">&nbsp;                existing = hv.get(n.cxID);</b>
+<b class="fc">&nbsp;            } else if (seen.containsKey(n.cxID)) {</b>
+<b class="fc">&nbsp;                existing = seen.get(n.cxID);</b>
+<b class="pc">&nbsp;            } else if (peerCache.containsKey(n.cxID)) {</b>
+<b class="nc">&nbsp;                existing = peerCache.get(n.cxID);</b>
+&nbsp;            }
+&nbsp;
+&nbsp;            // If node with this cxID exists, verify public key matches
+<b class="fc">&nbsp;            if (existing != null &amp;&amp; existing.publicKey != null &amp;&amp; n.publicKey != null) {</b>
+<b class="pc">&nbsp;                if (!existing.publicKey.equals(n.publicKey)) {</b>
+&nbsp;                    // SECURITY VIOLATION: Same cxID but different public key = spoofing attempt
+<b class="nc">&nbsp;                    Analytics.addData(AnalyticData.Tear, &quot;UUID spoofing attempt - cxID:&quot; + n.cxID +</b>
+<b class="nc">&nbsp;                        &quot; existing_key:&quot; + existing.publicKey.substring(0, Math.min(50, existing.publicKey.length())) +</b>
+<b class="nc">&nbsp;                        &quot; attacker_key:&quot; + n.publicKey.substring(0, Math.min(50, n.publicKey.length())));</b>
+&nbsp;
+&nbsp;                    // Drop the spoofed node - do not add to any directory
+&nbsp;                    // Connection will be terminated by caller
+<b class="nc">&nbsp;                    throw new SecurityException(&quot;UUID spoofing: cxID &quot; + n.cxID + &quot; exists with different public key&quot;);</b>
+&nbsp;                }
+&nbsp;                // Keys match - this is the same node, update the entry
+&nbsp;            }
+&nbsp;
+&nbsp;            // Add to high-value peer directory for routing
+&nbsp;            // Peers added via addNode() (from seeds, REGISTER_NODE, etc) are considered hv peers
+<b class="fc">&nbsp;            hv.put(n.cxID, n);</b>
+&nbsp;
+&nbsp;            // Also track in seen for last-seen timestamp tracking
+<b class="fc">&nbsp;            seen.put(n.cxID, n);</b>
+&nbsp;        } else {
+<b class="nc">&nbsp;            throw new IllegalStateException();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    // Cache of signed node blobs for relaying without re-signing
+<b class="fc">&nbsp;    public ConcurrentHashMap&lt;String, byte[]&gt; signedNodeCache = new ConcurrentHashMap&lt;&gt;();</b>
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Add node with signed blob for persistence (uses peers directory - legacy)
+&nbsp;     * @deprecated Use addNode(Node n, byte[] signed, File cxRoot) for instance-specific persistence
+&nbsp;     */
+&nbsp;    public void addNode(Node n, byte[] signed) {
+<b class="nc">&nbsp;        addNode(n, signed, null);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Add node with signed blob for persistence to instance-specific directory
+&nbsp;     * @param n The node to add
+&nbsp;     * @param signed The signed node blob for persistence
+&nbsp;     * @param cxRoot The instance-specific root directory (e.g., ConnectX-Peer1)
+&nbsp;     */
+&nbsp;    public void addNode(Node n, byte[] signed, File cxRoot) {
+<b class="pc">&nbsp;        if (Node.validate(n)) {</b>
+&nbsp;            // Add to in-memory directories (same as regular addNode)
+<b class="fc">&nbsp;            addNode(n);</b>
+&nbsp;
+&nbsp;            // Cache the signed blob for relaying
+<b class="pc">&nbsp;            if (signed != null) {</b>
+<b class="fc">&nbsp;                signedNodeCache.put(n.cxID, signed);</b>
+&nbsp;
+&nbsp;                // Persist to disk (instance-specific: {cxRoot}/nodemesh/{first_char}/{cxID}.cxi)
+&nbsp;                try {
+&nbsp;                    File peerDir;
+<b class="pc">&nbsp;                    if (cxRoot != null) {</b>
+&nbsp;                        // Instance-specific directory
+<b class="fc">&nbsp;                        peerDir = new File(cxRoot, &quot;nodemesh&quot;);</b>
+&nbsp;                    } else {
+&nbsp;                        // Fallback to static peers directory (legacy behavior)
+<b class="nc">&nbsp;                        peerDir = peers;</b>
+&nbsp;                    }
+&nbsp;
+<b class="pc">&nbsp;                    if (peerDir != null) {</b>
+<b class="fc">&nbsp;                        char firstChar = n.cxID.charAt(0);</b>
+<b class="fc">&nbsp;                        File peerGroup = new File(peerDir, String.valueOf(firstChar));</b>
+<b class="pc">&nbsp;                        if (!peerGroup.exists()) {</b>
+<b class="nc">&nbsp;                            peerGroup.mkdirs();</b>
+&nbsp;                        }
+&nbsp;
+<b class="fc">&nbsp;                        File peerFile = new File(peerGroup, n.cxID + &quot;.cxi&quot;);</b>
+<b class="fc">&nbsp;                        java.io.FileOutputStream fos = new java.io.FileOutputStream(peerFile);</b>
+<b class="fc">&nbsp;                        fos.write(signed);</b>
+<b class="fc">&nbsp;                        fos.flush();</b>
+&nbsp;                        fos.close();
+&nbsp;
+<b class="fc">&nbsp;                        System.out.println(&quot;[PeerDirectory] Persisted signed node: &quot; + n.cxID.substring(0, 8) +</b>
+<b class="fc">&nbsp;                            &quot; to &quot; + peerFile.getAbsolutePath() + &quot; (&quot; + signed.length + &quot; bytes)&quot;);</b>
+&nbsp;                    }
+&nbsp;                } catch (Exception e) {
+<b class="nc">&nbsp;                    System.err.println(&quot;[PeerDirectory] Failed to persist node &quot; + n.cxID + &quot;: &quot; + e.getMessage());</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;        } else {
+<b class="nc">&nbsp;            throw new IllegalStateException();</b>
+&nbsp;        }
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Get signed node blob from cache or disk
+&nbsp;     * Returns the original signed bytes for relaying without re-signing
+&nbsp;     * @param cxID The node ID to get signed blob for
+&nbsp;     * @return Signed node bytes, or null if not available
+&nbsp;     */
+&nbsp;    public byte[] getSignedNode(String cxID) {
+&nbsp;        // Check memory cache first
+<b class="nc">&nbsp;        if (signedNodeCache != null &amp;&amp; signedNodeCache.containsKey(cxID)) {</b>
+<b class="nc">&nbsp;            return signedNodeCache.get(cxID);</b>
+&nbsp;        }
+&nbsp;
+&nbsp;        // Try loading from disk
+<b class="nc">&nbsp;        if (peers != null) {</b>
+&nbsp;            try {
+<b class="nc">&nbsp;                char firstChar = cxID.charAt(0);</b>
+<b class="nc">&nbsp;                File peerGroup = new File(peers, String.valueOf(firstChar));</b>
+<b class="nc">&nbsp;                File peerFile = new File(peerGroup, cxID + &quot;.cxi&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;                if (peerFile.exists()) {</b>
+<b class="nc">&nbsp;                    java.io.FileInputStream fis = new java.io.FileInputStream(peerFile);</b>
+<b class="nc">&nbsp;                    byte[] signedBytes = fis.readAllBytes();</b>
+&nbsp;                    fis.close();
+&nbsp;
+&nbsp;                    // Cache for future use
+<b class="nc">&nbsp;                    if (signedNodeCache == null) signedNodeCache = new ConcurrentHashMap&lt;&gt;();</b>
+<b class="nc">&nbsp;                    signedNodeCache.put(cxID, signedBytes);</b>
+&nbsp;
+<b class="nc">&nbsp;                    return signedBytes;</b>
+&nbsp;                }
+&nbsp;            } catch (Exception e) {
+<b class="nc">&nbsp;                System.err.println(&quot;[PeerDirectory] Failed to load signed node &quot; + cxID + &quot;: &quot; + e.getMessage());</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        return null;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Remove a node from all peer directories (memory only - legacy)
+&nbsp;     * @deprecated Use removeNode(String cxID, File cxRoot) to also remove from filesystem
+&nbsp;     * @param cxID The node ID to remove
+&nbsp;     */
+&nbsp;    public void removeNode(String cxID) {
+<b class="nc">&nbsp;        removeNode(cxID, null);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Remove a node from all peer directories (memory AND filesystem)
+&nbsp;     * Used for rollback when NewNode/CXHELLO signature verification fails
+&nbsp;     * @param cxID The node ID to remove
+&nbsp;     * @param cxRoot The instance-specific root directory (e.g., ConnectX-Peer1)
+&nbsp;     */
+&nbsp;    public void removeNode(String cxID, File cxRoot) {
+<b class="nc">&nbsp;        if (cxID == null) return;</b>
+&nbsp;
+&nbsp;        // Remove from all peer directories
+<b class="nc">&nbsp;        if (hv != null) hv.remove(cxID);</b>
+<b class="nc">&nbsp;        if (seen != null) seen.remove(cxID);</b>
+<b class="nc">&nbsp;        if (lan != null) lan.remove(cxID);</b>
+<b class="nc">&nbsp;        if (peerCache != null) peerCache.remove(cxID);</b>
+<b class="nc">&nbsp;        if (signedNodeCache != null) signedNodeCache.remove(cxID);</b>
+&nbsp;
+&nbsp;        // Remove from filesystem
+&nbsp;        try {
+&nbsp;            File peerDir;
+<b class="nc">&nbsp;            if (cxRoot != null) {</b>
+&nbsp;                // Instance-specific directory
+<b class="nc">&nbsp;                peerDir = new File(cxRoot, &quot;nodemesh&quot;);</b>
+&nbsp;            } else {
+&nbsp;                // Fallback to static peers directory (legacy behavior)
+<b class="nc">&nbsp;                peerDir = peers;</b>
+&nbsp;            }
+&nbsp;
+<b class="nc">&nbsp;            if (peerDir != null) {</b>
+<b class="nc">&nbsp;                char firstChar = cxID.charAt(0);</b>
+<b class="nc">&nbsp;                File peerGroup = new File(peerDir, String.valueOf(firstChar));</b>
+<b class="nc">&nbsp;                File peerFile = new File(peerGroup, cxID + &quot;.cxi&quot;);</b>
+&nbsp;
+<b class="nc">&nbsp;                if (peerFile.exists()) {</b>
+<b class="nc">&nbsp;                    boolean deleted = peerFile.delete();</b>
+<b class="nc">&nbsp;                    if (deleted) {</b>
+<b class="nc">&nbsp;                        System.out.println(&quot;[PeerDirectory] Removed node from filesystem: &quot; + cxID + &quot; at &quot; + peerFile.getAbsolutePath());</b>
+&nbsp;                    } else {
+<b class="nc">&nbsp;                        System.err.println(&quot;[PeerDirectory] Failed to delete file: &quot; + peerFile.getAbsolutePath());</b>
+&nbsp;                    }
+&nbsp;                }
+&nbsp;            }
+&nbsp;        } catch (Exception e) {
+<b class="nc">&nbsp;            System.err.println(&quot;[PeerDirectory] Error removing node from filesystem: &quot; + cxID + &quot; - &quot; + e.getMessage());</b>
+&nbsp;        }
+&nbsp;
+<b class="nc">&nbsp;        System.out.println(&quot;[PeerDirectory] Removed node from memory: &quot; + cxID);</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    public boolean stableConnection() {
+<b class="nc">&nbsp;        return true;</b>
+&nbsp;    }
+&nbsp;
+&nbsp;    /**
+&nbsp;     * Get all known addresses for a peer from all available sources:
+&nbsp;     * - Node addresses from PeerDirectory (hv, seen, lan, peerCache)
+&nbsp;     * - CXHELLO discovered addresses from DataContainer
+&nbsp;     * - Bridge addresses
+&nbsp;     *
+&nbsp;     * Returns addresses in priority order (direct/LAN first, then bridges)
+&nbsp;     *
+&nbsp;     * @param cxID The peer ID to look up
+&nbsp;     * @param connectX ConnectX instance (for DataContainer access)
+&nbsp;     * @return List of all known addresses for this peer, empty list if none found
+&nbsp;     */
+&nbsp;    public java.util.List&lt;String&gt; getAllAddresses(String cxID, ConnectX connectX) {
+<b class="fc">&nbsp;        java.util.List&lt;String&gt; addresses = new java.util.ArrayList&lt;&gt;();</b>
+<b class="fc">&nbsp;        java.util.Set&lt;String&gt; seen = new java.util.HashSet&lt;&gt;(); // Track duplicates</b>
+&nbsp;
+<b class="pc">&nbsp;        if (cxID == null) return addresses;</b>
+&nbsp;
+&nbsp;        // PRIORITY 1: CXHELLO discovered LAN addresses (highest priority for P2P)
+<b class="pc">&nbsp;        if (connectX != null &amp;&amp; connectX.dataContainer != null) {</b>
+<b class="fc">&nbsp;            java.util.List&lt;String&gt; lanAddresses = connectX.dataContainer.getLocalPeerAddresses(cxID);</b>
+<b class="fc">&nbsp;            System.out.println(&quot;[getAllAddresses] Peer &quot; + cxID.substring(0, 8) + &quot;: Found &quot; + lanAddresses.size() + &quot; LAN addresses in DataContainer&quot;);</b>
+<b class="fc">&nbsp;            for (String addr : lanAddresses) {</b>
+<b class="pc">&nbsp;                if (addr != null &amp;&amp; !addr.isEmpty() &amp;&amp; !seen.contains(addr)) {</b>
+<b class="fc">&nbsp;                    addresses.add(addr);</b>
+<b class="fc">&nbsp;                    seen.add(addr);</b>
+<b class="fc">&nbsp;                    System.out.println(&quot;[getAllAddresses]   - LAN: &quot; + addr);</b>
+&nbsp;                }
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+&nbsp;        // PRIORITY 2: Check all PeerDirectory maps for Node.addr
+<b class="fc">&nbsp;        Node[] nodesToCheck = new Node[] {</b>
+<b class="fc">&nbsp;            lan.get(cxID),      // LAN discovered nodes</b>
+<b class="fc">&nbsp;            hv.get(cxID),       // High-value peers (seeds, registered)</b>
+<b class="fc">&nbsp;            this.seen.get(cxID),     // Recently seen peers</b>
+<b class="fc">&nbsp;            peerCache.get(cxID) // Cached peer info</b>
+&nbsp;        };
+&nbsp;
+<b class="fc">&nbsp;        for (Node node : nodesToCheck) {</b>
+<b class="pc">&nbsp;            if (node != null &amp;&amp; node.addr != null &amp;&amp; !node.addr.isEmpty() &amp;&amp; !seen.contains(node.addr)) {</b>
+<b class="fc">&nbsp;                addresses.add(node.addr);</b>
+<b class="fc">&nbsp;                seen.add(node.addr);</b>
+<b class="fc">&nbsp;                System.out.println(&quot;[getAllAddresses]   - Node: &quot; + node.addr);</b>
+&nbsp;            }
+&nbsp;        }
+&nbsp;
+<b class="fc">&nbsp;        System.out.println(&quot;[getAllAddresses] Total addresses for &quot; + cxID.substring(0, 8) + &quot;: &quot; + addresses.size());</b>
+<b class="fc">&nbsp;        return addresses;</b>
+&nbsp;    }
+&nbsp;}
+</code>
+</pre>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var msie = false, msie9 = false;
+    /*@cc_on
+      msie = true;
+      @if (@_jscript_version >= 9)
+        msie9 = true;
+      @end
+    @*/
+
+    if (!msie || msie && msie9) {
+      hljs.highlightAll()
+      hljs.initLineNumbersOnLoad();
+    }
+})();
+</script>
+
+<div class="footer">
+    
+    <div style="float:right;">generated on 2026-03-24 03:07</div>
+</div>
+</body>
+</html>

@@ -7,7 +7,10 @@ import dev.droppinganvil.v3.crypt.core.exceptions.EncryptionFailureException;
 import dev.droppinganvil.v3.network.nodemesh.Node;
 import dev.droppinganvil.v3.network.nodemesh.NodeConfig;
 import dev.droppinganvil.v3.network.nodemesh.PeerDirectory;
+import org.bouncycastle.bcpg.BCPGOutputStream;
+import org.bouncycastle.bcpg.HashAlgorithmTags;
 import org.bouncycastle.openpgp.*;
+import org.bouncycastle.openpgp.operator.bc.BcPGPContentSignerBuilder;
 import org.bouncycastle.util.io.Streams;
 import org.pgpainless.PGPainless;
 import org.pgpainless.algorithm.DocumentSignatureType;
@@ -122,6 +125,7 @@ public class PainlessCryptProvider extends CryptProvider {
                                     .addRecipient(certCache.get(cxID))
                                     .addRecipient(publicKey),
                             new SigningOptions()
+                                    .overrideHashAlgorithm(HashAlgorithm.SHA512)
                                     .addInlineSignature(protector, secretKey, DocumentSignatureType.CANONICAL_TEXT_DOCUMENT)
                             ).setAsciiArmor(false)
                     );
@@ -172,6 +176,7 @@ public class PainlessCryptProvider extends CryptProvider {
                     .withOptions(ProducerOptions.signAndEncrypt(
                             encryptionOptions,
                             new SigningOptions()
+                                    .overrideHashAlgorithm(HashAlgorithm.SHA512)
                                     .addInlineSignature(protector, secretKey, DocumentSignatureType.CANONICAL_TEXT_DOCUMENT)
                             ).setAsciiArmor(false)
                     );
@@ -206,17 +211,33 @@ public class PainlessCryptProvider extends CryptProvider {
                 System.out.println("Primary User ID (again): " + info.getPrimaryUserId());
                 //System.out.println("Preferred Hash Algorithms: " + info.getPreferredHashAlgorithms());
             }
-            //TODO IMPLEMENT BETTER, we are using this override to fix bootstrapping issues
-            EncryptionStream encryptor = PGPainless.encryptAndOrSign()
-                    .onOutputStream(os)
-                    .withOptions(ProducerOptions.sign(new SigningOptions()
-                                    .overrideHashAlgorithm(HashAlgorithm.SHA512)
-                                    .addInlineSignature(protector, secretKey, DocumentSignatureType.CANONICAL_TEXT_DOCUMENT)
-                            ).setAsciiArmor(false)
-                    );
-            // CRITICAL: Must pipe data and close stream to finalize signature
-            Streams.pipeAll(is, encryptor);
-            encryptor.close();
+            // Use BouncyCastle directly - PGPainless SigningOptions.addInlineSignature calls
+            // KeyRingInfo.getPreferredHashAlgorithms which throws on keys whose signing subkey
+            // has no direct-key self-signature (standard Ed25519 keys from modernKeyRing).
+            // Raw BouncyCastle inline sign produces the same OpenPGP format PGPainless can verify.
+            PGPSecretKey sigKey = null;
+            for (java.util.Iterator it = secretKey.getSecretKeys(); it.hasNext(); ) {
+                PGPSecretKey sk = (PGPSecretKey) it.next();
+                if (sk.isSigningKey()) { sigKey = sk; break; }
+            }
+            if (sigKey == null) throw new EncryptionFailureException("No signing key found in key ring");
+            PGPPrivateKey privKey = sigKey.extractPrivateKey(protector.getDecryptor(sigKey.getKeyID()));
+            PGPSignatureGenerator sGen = new PGPSignatureGenerator(
+                new BcPGPContentSignerBuilder(sigKey.getPublicKey().getAlgorithm(), HashAlgorithmTags.SHA512));
+            sGen.init(PGPSignature.BINARY_DOCUMENT, privKey);
+            BCPGOutputStream bcpgOut = new BCPGOutputStream(os);
+            sGen.generateOnePassVersion(false).encode(bcpgOut);
+            PGPLiteralDataGenerator litGen = new PGPLiteralDataGenerator();
+            OutputStream litOut = litGen.open(bcpgOut, PGPLiteralData.BINARY, "", new java.util.Date(), new byte[4096]);
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = is.read(buf)) > 0) {
+                litOut.write(buf, 0, n);
+                sGen.update(buf, 0, n);
+            }
+            litGen.close();
+            sGen.generate().encode(bcpgOut);
+            bcpgOut.finish();
         } catch (Exception e) {
             EncryptionFailureException efe = new EncryptionFailureException();
             efe.initCause(e);
@@ -355,7 +376,7 @@ public class PainlessCryptProvider extends CryptProvider {
                                 )
                         );
                 if (cert != null) {
-                    certCache.put(cxID, cert);
+                    certCache.putIfAbsent(cxID, cert);
                     return true;
                 }
             }

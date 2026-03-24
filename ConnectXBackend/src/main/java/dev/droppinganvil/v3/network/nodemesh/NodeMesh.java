@@ -170,6 +170,16 @@ public class NodeMesh {
 
             ConnectX.checkSafety(unverifiedContainer.iD);
 
+            // Self-rejection: drop any message claiming to be from our own cxID
+            if (connectX.getOwnID().equals(unverifiedContainer.iD)) {
+                if (socket != null) {
+                    if (socket.getRemoteSocketAddress() != null)
+                        ownAddresses.add(socket.getRemoteSocketAddress().toString());
+                    socket.close();
+                }
+                return;
+            }
+
             if (!ConnectX.isProviderPresent(unverifiedContainer.se)) {
                 if (socket != null) socket.close();
                 Analytics.addData(AnalyticData.Tear, "Unsupported serialization method " + unverifiedContainer.se);
@@ -388,6 +398,13 @@ public class NodeMesh {
                                 throw new DecryptionFailureException();
                             }
 
+                            // SECURITY: Reject if node's public key matches our own (self or key theft)
+                            String ownPubKey = connectX.encryptionProvider.getPublicKey();
+                            if (ownPubKey != null && ownPubKey.equals(newNode.publicKey)) {
+                                System.err.println("[NodeMesh] Rejecting node with same public key as self: " + newNode.cxID.substring(0, 8));
+                                throw new DecryptionFailureException();
+                            }
+
                             // Import the node with signed blob for CXHELLO persistence
                             if (signedNodeBlobForPersistence != null) {
                                 peerDirectory.addNode(newNode, signedNodeBlobForPersistence, connectX.cxRoot);
@@ -450,7 +467,6 @@ public class NodeMesh {
                     // Use the already parsed event
                     ne = parsedEvent;
                     networkEvent = strippedEventJson;
-                    System.out.print("Reached event data, data is never used and will be cleaned up by GC shortly");
                     inFlightImports.remove(nc.iD);
 
                 } else {
@@ -697,16 +713,12 @@ public class NodeMesh {
             e.printStackTrace();
         }
 
-        synchronized (connectX.eventQueue) {
-            /// New InputBundle features handling
-            connectX.eventQueue.add(ib);
-        }
+        connectX.eventQueue.add(ib);
     }
 
     public void processEvent() throws IOException, DecryptionFailureException {
-        synchronized (connectX.eventQueue) {
-            InputBundle ib = connectX.eventQueue.poll();
-            if (ib == null) return; // Queue is empty
+        InputBundle ib = connectX.eventQueue.poll();
+        if (ib == null) return; // Queue is empty
 
             // Storage for decrypted event data (preserves original ib.ne.d)
             byte[] eventData;
@@ -714,25 +726,28 @@ public class NodeMesh {
             // Decrypt E2E encrypted events
             boolean e2eDecryptionFailed = false;
             if (ib.ne.e2e) {
-                try {
-                    System.out.println("[E2E] Decrypting E2E encrypted event");
-                    ByteArrayInputStream encryptedInput = new ByteArrayInputStream(ib.ne.d);
-                    ByteArrayOutputStream decryptedOutput = new ByteArrayOutputStream();
-
-                    // Decrypt the event data
-                    connectX.encryptionProvider.decrypt(encryptedInput, decryptedOutput);
-                    encryptedInput.close();
-
-                    // Store decrypted data (original ib.ne.d remains encrypted)
-                    eventData = decryptedOutput.toByteArray();
-                    decryptedOutput.close();
-
-                    System.out.println("[E2E] Successfully decrypted E2E event data");
-                } catch (Exception e) {
-                    System.err.println("[E2E] Failed to decrypt E2E event (not intended for us): " + e.getMessage());
-                    // E2E message not for us - skip application layer but STILL RELAY to other peers
-                    e2eDecryptionFailed = true;
-                    eventData = ib.ne.d; // Keep encrypted data for relay
+                if (ib.verifiedObjectBytes != null && ib.verifiedObjectBytes.length > 0) {
+                    // IOThread already decrypted and verified this in processNetworkInput
+                    eventData = ib.verifiedObjectBytes;
+                    System.out.println("[E2E] Received encrypted " + ib.ne.eT
+                        + " from " + (ib.nc != null ? ib.nc.iD : "unknown")
+                        + " (" + eventData.length + " bytes decrypted by IOThread)");
+                } else {
+                    try {
+                        System.out.println("[E2E] Decrypting " + ib.ne.eT
+                            + " from " + (ib.nc != null ? ib.nc.iD : "unknown"));
+                        ByteArrayInputStream encryptedInput = new ByteArrayInputStream(ib.ne.d);
+                        ByteArrayOutputStream decryptedOutput = new ByteArrayOutputStream();
+                        connectX.encryptionProvider.decrypt(encryptedInput, decryptedOutput);
+                        encryptedInput.close();
+                        eventData = decryptedOutput.toByteArray();
+                        decryptedOutput.close();
+                        System.out.println("[E2E] Decrypted " + ib.ne.eT + " (" + eventData.length + " bytes)");
+                    } catch (Exception e) {
+                        System.err.println("[E2E] Failed to decrypt " + ib.ne.eT + " (not intended for us): " + e.getMessage());
+                        e2eDecryptionFailed = true;
+                        eventData = ib.ne.d;
+                    }
                 }
             } else {
                 // No E2E encryption, use original data
@@ -769,18 +784,22 @@ public class NodeMesh {
                 //VERIFY INTERNAL DATA PAYLOAD
                 // SECURITY: Use oCXID (origin sender) for signature verification, NOT cxID (destination)
                 // This prevents spoofing attacks where attacker sets cxID to victim's ID
-                ByteArrayInputStream signedInput = new ByteArrayInputStream(ib.ne.d);
-                ByteArrayOutputStream strippedOutput = new ByteArrayOutputStream();
                 if (!ib.ne.e2e) {
-                    if (!connectX.encryptionProvider.verifyAndStrip(signedInput, strippedOutput, ib.ne.p.oCXID)) {
-                        Analytics.addData(AnalyticData.SecurityEvent, "Security failure, event payload data verification unsuccessful: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
-                        System.out.println("Security failure, event payload data verification unsuccessful: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
-                        return;
+                    if (ib.verifiedObjectBytes != null && ib.verifiedObjectBytes.length > 0) {
+                        // IOThread already verified and stripped this payload in processNetworkInput
+                        eventData = ib.verifiedObjectBytes;
+                        ib.strippedEventBytes = eventData;
+                    } else {
+                        ByteArrayInputStream signedInput = new ByteArrayInputStream(ib.ne.d);
+                        ByteArrayOutputStream strippedOutput = new ByteArrayOutputStream();
+                        if (!connectX.encryptionProvider.verifyAndStrip(signedInput, strippedOutput, ib.ne.p.oCXID)) {
+                            Analytics.addData(AnalyticData.SecurityEvent, "Security failure, event payload data verification unsuccessful: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                            System.out.println("Security failure, event payload data verification unsuccessful: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                            return;
+                        }
+                        eventData = strippedOutput.toByteArray();
+                        ib.strippedEventBytes = eventData;
                     }
-                    // Update eventData with stripped payload (signature removed)
-                    eventData = strippedOutput.toByteArray();
-                    // Store stripped bytes in InputBundle for fireEvent() to use
-                    ib.strippedEventBytes = eventData;
                 }
             }
 
@@ -838,87 +857,48 @@ public class NodeMesh {
                             break;
 
                         case CXHELLO:
-                            //if (!(ib.ne.p.getScope().equals(Scope.CXS) | ib.ne.p.getScope().equals(Scope.LAN))) {
-                             //   System.out.println("[NodeMesh] ERROR: CXHELLO received in incorrect scope, Only CXS or LAN is allowed");
-                            //    return;
-                            //}
-                            // CXHELLO sends signed Node blob - import it with persistence
+                            // Node already verified and imported by processNetworkInput - look up and respond
                             System.out.println("[" + connectX.getOwnID() + "] CXHELLO request received from " + ib.nc.iD);
+                            if (ib.nc.iD.equals(connectX.getOwnID())) {
+                                System.err.println("[CXHELLO] Dropping CXHELLO from self in processEvent");
+                                return;
+                            }
+                            Node requesterNode = peerDirectory.lookup(ib.nc.iD, true, true);
+                            if (requesterNode != null) {
+                                System.out.println("[CXHELLO] Peer discovered from " + ib.nc.iD.substring(0, 8));
 
-                            /// Deserialize CXHello payload - we have already done this earlier in the code path, use new InputBundle features
+                                // Sign our Node for .cxi persistence on receiver
+                                String ourNodeJson = ConnectX.serialize("cxJSON1", connectX.getSelf());
+                                ByteArrayInputStream nodeInput = new ByteArrayInputStream(ourNodeJson.getBytes("UTF-8"));
+                                ByteArrayOutputStream signedOutput = new ByteArrayOutputStream();
+                                connectX.encryptionProvider.sign(nodeInput, signedOutput);
+                                nodeInput.close();
+                                byte[] ourSignedBlob = signedOutput.toByteArray();
+                                signedOutput.close();
 
-                     //       String cxhelloPayloadJson = new String(eventData, "UTF-8");
-                      //      dev.droppinganvil.v3.network.events.CXHello cxhelloData =
-                      //          (dev.droppinganvil.v3.network.events.CXHello) ConnectX.deserialize("cxJSON1", cxhelloPayloadJson,
-                      //              dev.droppinganvil.v3.network.events.CXHello.class);
-                            CXHello cxhelloData = (CXHello) ib.object;
-                            // Get signed Node blob from payload
-                            byte[] cxhelloSignedBlob = cxhelloData.signedNode;
+                                int listeningPort = (in.serverSocket != null) ? in.serverSocket.getLocalPort() : 0;
 
-                            if (cxhelloSignedBlob != null) {
-                                // Verify and deserialize the signed Node blob (using sender's ID from container)
-                                ByteArrayInputStream signedInput = new ByteArrayInputStream(cxhelloSignedBlob);
-                                ByteArrayOutputStream verifiedOutput = new ByteArrayOutputStream();
-                                boolean verified = connectX.encryptionProvider.verifyAndStrip(signedInput, verifiedOutput, ib.nc.iD);
-                                signedInput.close();
-
-                                if (verified) {
-                                    String nodeJson = verifiedOutput.toString("UTF-8");
-                                    Node cxhelloNode = (Node) ConnectX.deserialize("cxJSON1", nodeJson, Node.class);
-                                    verifiedOutput.close();
-
-                                    // Add node WITH signed blob for .cxi persistence
-                                    Node existingCxhelloNode = peerDirectory.lookup(cxhelloNode.cxID, true, true, connectX.cxRoot, connectX);
-                                    if (existingCxhelloNode == null) {
-                                        peerDirectory.addNode(cxhelloNode, cxhelloSignedBlob, connectX.cxRoot);
-                                        System.out.println("[CXHELLO] Imported and PERSISTED new node: " + cxhelloNode.cxID.substring(0, 8));
-                                    } else {
-                                        connectX.encryptionProvider.cacheCert(existingCxhelloNode.cxID, true, false, connectX);
-                                        System.out.println("[CXHELLO] Updated existing node: " + existingCxhelloNode.cxID.substring(0, 8));
+                                String ourAddress = null;
+                                if (in.serverSocket != null && listeningPort > 0) {
+                                    String localIP = LANScanner.getLocalIP();
+                                    if (localIP != null) {
+                                        ourAddress = localIP + ":" + listeningPort;
                                     }
-
-                                    // Now lookup the node for response routing
-                                    Node requesterNode = peerDirectory.lookup(ib.nc.iD, true, true);
-                                    if (requesterNode != null) {
-                                        System.out.println("[CXHELLO] Peer discovered from " + ib.nc.iD.substring(0, 8));
-
-                                        // Sign our Node for .cxi persistence on receiver
-                                        String ourNodeJson = ConnectX.serialize("cxJSON1", connectX.getSelf());
-                                        ByteArrayInputStream nodeInput = new ByteArrayInputStream(ourNodeJson.getBytes("UTF-8"));
-                                        ByteArrayOutputStream signedOutput = new ByteArrayOutputStream();
-                                        connectX.encryptionProvider.sign(nodeInput, signedOutput);
-                                        nodeInput.close();
-                                        byte[] ourSignedBlob = signedOutput.toByteArray();
-                                        signedOutput.close();
-
-                                        // Send CXHELLO_RESPONSE with our peerID, port, address, and signed Node blob using CXHello class
-                                        int listeningPort = (in.serverSocket != null) ? in.serverSocket.getLocalPort() : 0;
-
-                                        // Get public/local address of our receiving socket
-                                        String ourAddress = null;
-                                        if (in.serverSocket != null && listeningPort > 0) {
-                                            String localIP = LANScanner.getLocalIP();
-                                            if (localIP != null) {
-                                                ourAddress = localIP + ":" + listeningPort;
-                                            }
-                                        }
-
-                                        CXHello responsePayload =
-                                            new CXHello(connectX.getOwnID(), listeningPort, ourSignedBlob, ourAddress);
-
-                                        String responsePayloadJson = ConnectX.serialize("cxJSON1", responsePayload);
-
-                                        // Send response using EventBuilder pattern
-                                        connectX.buildEvent(EventType.CXHELLO_RESPONSE, responsePayloadJson.getBytes("UTF-8"))
-                                            .toPeer(ib.nc.iD)
-                                            .signData()
-                                            .queue();
-
-                                        System.out.println("[CXHELLO] Queued CXHELLO_RESPONSE to " + ib.nc.iD.substring(0, 8));
-                                    }
-                                } else {
-                                    System.err.println("[CXHELLO] Node signature verification FAILED for " + ib.nc.iD.substring(0, 8));
                                 }
+
+                                CXHello responsePayload =
+                                    new CXHello(connectX.getOwnID(), listeningPort, ourSignedBlob, ourAddress);
+
+                                String responsePayloadJson = ConnectX.serialize("cxJSON1", responsePayload);
+
+                                connectX.buildEvent(EventType.CXHELLO_RESPONSE, responsePayloadJson.getBytes("UTF-8"))
+                                    .toPeer(ib.nc.iD)
+                                    .signData()
+                                    .queue();
+
+                                System.out.println("[CXHELLO] Queued CXHELLO_RESPONSE to " + ib.nc.iD.substring(0, 8));
+                            } else {
+                                System.err.println("[CXHELLO] Node not found after import for " + ib.nc.iD.substring(0, 8));
                             }
                             return; // Don't continue to fireEvent
 
@@ -1039,7 +1019,6 @@ public class NodeMesh {
                     }
                 }
             }
-        }
     }
 
     /**
@@ -1309,10 +1288,22 @@ public class NodeMesh {
                                     }
                                     System.out.println("[PeerFinding] Imported " + imported + " new peers");
                                 }
+                                //TODO Security eval
                                 if (pf.peers != null && pf.peers.size() <= 20) {
-                                    //TODO security eval
-                                    connectX.dataContainer.waitingAddresses.addAll(pf.peers);
-                                    System.out.println("[PeerFinding] Imported addresses for connections from " + ne.p.oCXID);
+                                    int added = 0;
+                                    for (String peerAddr : pf.peers) {
+                                        if (!connectX.isValidPeerAddress(peerAddr)) {
+                                            System.err.println("[PeerFinding] Rejected invalid address: " + peerAddr);
+                                            continue;
+                                        }
+                                        if (connectX.isSelfAddress(peerAddr)) {
+                                            System.out.println("[PeerFinding] Skipped own address: " + peerAddr);
+                                            continue;
+                                        }
+                                        connectX.dataContainer.waitingAddresses.add(peerAddr);
+                                        added++;
+                                    }
+                                    System.out.println("[PeerFinding] Imported " + added + "/" + pf.peers.size() + " addresses from " + ne.p.oCXID);
                                 }
 
                             }
@@ -2447,9 +2438,13 @@ public class NodeMesh {
                 System.out.println("[SEED CONSENSUS] ✓ This peer can now forward EPOCH seed to others!");
             }
 
-            // Add peers to directory
+            // Add peers to directory (skip self by cxID or public key)
             int peersAdded = 0;
             for (Node peer : seed.hvPeers) {
+                if (connectX.isSelfNode(peer)) {
+                    System.out.println("[SEED CONSENSUS] Skipped self in hvPeers: " + peer.cxID);
+                    continue;
+                }
                 try {
                     peerDirectory.addNode(peer);
                     peersAdded++;

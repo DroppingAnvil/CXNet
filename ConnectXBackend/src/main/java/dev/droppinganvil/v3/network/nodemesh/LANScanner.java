@@ -206,6 +206,21 @@ public class LANScanner {
      * Sends Node as SIGNED BLOB to enable .cxi persistence on receiver
      */
     private void sendCXHELLO(String targetIP, int targetPort) {
+        // Skip if target resolves to our own listening socket
+        // Match on IP + port: same IP and same P2P port = us
+        if (connectX.nodeMesh != null && connectX.nodeMesh.in != null
+                && connectX.nodeMesh.in.serverSocket != null) {
+            int ownPort = connectX.nodeMesh.in.serverSocket.getLocalPort();
+            if (targetPort == ownPort) {
+                String localIP = getLocalIP();
+                if (targetIP.equals(localIP) || targetIP.equals("127.0.0.1")) {
+                    if (NodeConfig.DEBUG)
+                        System.out.println("[LAN Scanner] Skipping own P2P address " + targetIP + ":" + targetPort);
+                    return;
+                }
+            }
+        }
+
         try {
             // Sign our Node object for .cxi persistence on receiver
             String nodeJson = ConnectX.serialize("cxJSON1", connectX.getSelf());

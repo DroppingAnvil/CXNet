@@ -90,9 +90,7 @@ public class OutputProcessor implements Runnable {
                             new dev.droppinganvil.v3.network.nodemesh.RetryBundle(bundle);
                         retryBundle.scheduleNextRetry(e.getMessage());
 
-                        synchronized (outController.connectXAPI.retryQueue) {
-                            outController.connectXAPI.retryQueue.add(retryBundle);
-                        }
+                        outController.connectXAPI.retryQueue.add(retryBundle);
 
                         System.err.println("[OUT-ERROR] " + eventType + " to " + nodeAddr + " failed: " + e.getMessage());
                         System.err.println("[RETRY-QUEUE] Added to retry queue (retry 1/" +

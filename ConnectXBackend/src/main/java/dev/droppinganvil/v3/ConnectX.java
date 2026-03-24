@@ -24,6 +24,7 @@ import dev.droppinganvil.v3.network.events.NetworkContainer;
 import dev.droppinganvil.v3.network.events.NetworkEvent;
 import dev.droppinganvil.v3.network.nodemesh.Node;
 import dev.droppinganvil.v3.network.nodemesh.NodeConfig;
+import dev.droppinganvil.v3.network.nodemesh.LANScanner;
 import dev.droppinganvil.v3.network.nodemesh.NodeMesh;
 import dev.droppinganvil.v3.network.nodemesh.OutputBundle;
 import dev.droppinganvil.v3.network.nodemesh.PeerDirectory;
@@ -316,9 +317,7 @@ public class ConnectX {
                 " to peer " + getOwnID().substring(0, 8) +
                 ", queue size before: " + outputQueue.size());
         }
-        synchronized (outputQueue) {
-            outputQueue.add(bundle);
-        }
+        outputQueue.add(bundle);
         if (bundle != null && bundle.ne != null && bundle.ne.eT != null && bundle.ne.eT.contains("HELLO")) {
             System.out.println("[queueEvent-DEBUG] Queue size after: " + outputQueue.size());
         }
@@ -356,8 +355,102 @@ public class ConnectX {
     }
 
     /**
-     * Fluent builder for creating and queuing NetworkEvents
-     * Provides comprehensive methods for configuring all aspects of event routing and transmission
+     * Fluent builder for creating and queuing NetworkEvents over the CX protocol.
+     *
+     * <p>Create an instance with {@link ConnectX#buildEvent(EventType, byte[])}. Chain the
+     * configuration methods you need, then call {@link #queue()} to submit.</p>
+     *
+     * <h2>Routing scopes</h2>
+     * <ul>
+     *   <li><b>CXS</b> - Single-peer delivery. Use {@link #toPeer(String)} or {@link #toPeer(Node)}.
+     *       The event is delivered only to that one node.</li>
+     *   <li><b>CXN</b> - Network broadcast. Use {@link #toNetwork(String, Long)}.
+     *       The event is fanned out to every peer in the named network.</li>
+     * </ul>
+     *
+     * <h2>Signing vs encryption</h2>
+     * <ul>
+     *   <li>{@link #signData()} - Signs {@code event.d} with the sender's key so the receiver can
+     *       verify authenticity. Required for most CXS events that are not E2E-encrypted.
+     *       The signed blob replaces {@code event.d}.</li>
+     *   <li>{@link #addRecipient(String)} + {@link #encrypt()} - End-to-end encrypts {@code event.d}
+     *       for the listed recipients. Sets {@code event.e2e = true}. Call
+     *       {@code addRecipient} before {@code encrypt}, and call {@code encrypt} before
+     *       {@code toPeer} / {@code queue}. <strong>Do not also call {@code signData()} when
+     *       using E2E</strong> - the encryption layer handles authentication.</li>
+     * </ul>
+     *
+     * <h2>Common patterns</h2>
+     *
+     * <p><b>1. Plain signed message to a peer (most common for protocol events)</b></p>
+     * <pre>{@code
+     * connectX.buildEvent(EventType.MESSAGE, "hello".getBytes("UTF-8"))
+     *     .toPeer("00000000-0000-0000-0000-000000000001")
+     *     .signData()
+     *     .queue();
+     * }</pre>
+     *
+     * <p><b>2. End-to-end encrypted message to a peer</b></p>
+     * <pre>{@code
+     * String recipientID = "00000000-0000-0000-0000-000000000001";
+     * connectX.buildEvent(EventType.MESSAGE, "secret".getBytes("UTF-8"))
+     *     .addRecipient(recipientID)   // who can decrypt
+     *     .encrypt()                   // encrypt BEFORE routing/queue
+     *     .toPeer(recipientID)         // where to deliver
+     *     .queue();
+     * }</pre>
+     *
+     * <p><b>3. Network broadcast (CXN) recorded to the event chain</b></p>
+     * <pre>{@code
+     * // network.networkDictionary.c3 is the events chain ID
+     * connectX.buildEvent(EventType.REGISTER_NODE,
+     *         ConnectX.serialize("cxJSON1", myNodeRegistration).getBytes("UTF-8"))
+     *     .toNetwork("MYNET", network.networkDictionary.c3)
+     *     .withRecordFlag(true)
+     *     .queue();
+     * }</pre>
+     *
+     * <p><b>4. Signed network management event to a specific peer</b></p>
+     * <pre>{@code
+     * NodeModeration mod = new NodeModeration("CXNET", targetNodeID, "reason");
+     * connectX.buildEvent(EventType.BLOCK_NODE,
+     *         ConnectX.serialize("cxJSON1", mod).getBytes("UTF-8"))
+     *     .toPeer("00000000-0000-0000-0000-000000000001")
+     *     .signData()
+     *     .queue();
+     * }</pre>
+     *
+     * <p><b>5. Routing via a bridge (e.g. HTTP reverse proxy)</b></p>
+     * <pre>{@code
+     * connectX.buildEvent(EventType.MESSAGE, data)
+     *     .toPeer("00000000-0000-0000-0000-000000000001")
+     *     .viaBridge("cxHTTP1", "https://cx7.anvildevelopment.us/cx")
+     *     .signData()
+     *     .queue();
+     * }</pre>
+     *
+     * <h2>Common mistakes</h2>
+     * <ul>
+     *   <li><strong>Called {@code addRecipient()} but forgot {@code encrypt()}</strong> - the data
+     *       is sent in the clear and a WARNING is printed. Always follow
+     *       {@code addRecipient} with {@code encrypt}.</li>
+     *   <li><strong>Called {@code encrypt()} without any {@code addRecipient()}</strong> - throws
+     *       immediately. Add at least one recipient first.</li>
+     *   <li><strong>Called {@code signData()} on an E2E message</strong> - unnecessary and can
+     *       break decryption. Use one or the other.</li>
+     *   <li><strong>Called {@code toNetwork(String)} without a chainID</strong> - the overload
+     *       that omits chainID is deprecated; prefer
+     *       {@link #toNetwork(String, Long)} to specify which chain records the event.</li>
+     * </ul>
+     *
+     * <h2>Recommended call order</h2>
+     * <ol>
+     *   <li>Optional: {@code addRecipient()} (one or more)</li>
+     *   <li>Optional: {@code encrypt()} (E2E path) <em>or</em> {@code signData()} (signed path)</li>
+     *   <li>{@code toPeer()} or {@code toNetwork()} (sets routing scope)</li>
+     *   <li>Optional: {@code viaBridge()}, {@code withRecordFlag()}, etc.</li>
+     *   <li>{@code queue()} (terminal - submits the event)</li>
+     * </ol>
      */
     public static class EventBuilder {
         private final ConnectX connectX;
@@ -770,6 +863,12 @@ public class ConnectX {
          * This is the terminal operation that actually queues the event
          */
         public void queue() {
+            // Warn if addRecipient() was called but encrypt() was never invoked - data will be sent in clear
+            if (!encryptionRecipients.isEmpty() && !event.e2e) {
+                System.err.println("[EventBuilder] WARNING: addRecipient() called but encrypt() was never invoked for "
+                    + event.eT + " - call .encrypt() before .queue() for E2E encryption");
+            }
+
             // Set origin CXID to sender's actual ID for signature verification
             if (this.path.oCXID == null && connectX.self != null) {
                 this.path.oCXID = connectX.self.cxID;
@@ -844,6 +943,42 @@ public class ConnectX {
 
     public void setSelf(Node selfNode) {
         self = selfNode;
+        // Purge self from peer directory in case stale data was loaded before identity was set
+        if (selfNode != null && nodeMesh != null) {
+            purgeFromPeerDirectory(nodeMesh.peerDirectory);
+        }
+    }
+
+    /**
+     * Returns true if the given node represents this node itself.
+     * Checks both cxID and public key so a stale entry with a different ID
+     * but our key is also caught.
+     */
+    public boolean isSelfNode(dev.droppinganvil.v3.network.nodemesh.Node node) {
+        if (node == null) return false;
+        if (node.cxID != null && node.cxID.equals(getOwnID())) return true;
+        if (node.publicKey != null) {
+            String ownKey = encryptionProvider != null ? encryptionProvider.getPublicKey() : null;
+            if (ownKey != null && ownKey.equals(node.publicKey)) return true;
+        }
+        return false;
+    }
+
+    /** Remove all self entries from all peer directory maps. Checks both cxID and public key. */
+    private void purgeFromPeerDirectory(dev.droppinganvil.v3.network.nodemesh.PeerDirectory pd) {
+        if (pd == null) return;
+        purgeSelfFromMap(pd.hv);
+        purgeSelfFromMap(pd.seen);
+        purgeSelfFromMap(pd.lan);
+        purgeSelfFromMap(pd.peerCache);
+    }
+
+    private void purgeSelfFromMap(java.util.concurrent.ConcurrentHashMap<String, Node> map) {
+        if (map == null) return;
+        java.util.Iterator<java.util.Map.Entry<String, Node>> it = map.entrySet().iterator();
+        while (it.hasNext()) {
+            if (isSelfNode(it.next().getValue())) it.remove();
+        }
     }
 
     public Node getSelf() {
@@ -858,6 +993,10 @@ public class ConnectX {
      */
     public void registerHVPeer(Node node) {
         if (nodeMesh == null || node == null || node.cxID == null) return;
+        if (isSelfNode(node)) {
+            System.err.println("[registerHVPeer] Rejected attempt to register self as HV peer");
+            return;
+        }
         if (nodeMesh.peerDirectory.hv == null) {
             nodeMesh.peerDirectory.hv = new java.util.concurrent.ConcurrentHashMap<>();
         }
@@ -1088,8 +1227,12 @@ public class ConnectX {
             }
         }
 
-        // Add hv peers to directory
+        // Add hv peers to directory (skip self by cxID or public key)
         for (dev.droppinganvil.v3.network.nodemesh.Node peer : seed.hvPeers) {
+            if (isSelfNode(peer)) {
+                System.out.println("[Seed] Skipped self in hvPeers: " + peer.cxID);
+                continue;
+            }
             nodeMesh.peerDirectory.addNode(peer);
             System.out.println("[Seed] Added peer: " + peer.cxID);
         }
@@ -1360,7 +1503,7 @@ public class ConnectX {
                             /// Send CXHELLO's to addresses waiting
                         System.out.println("[ConnectX] Sending CXHELLO to " + dataContainer.waitingAddresses.size() + " addresses");
                         for (String s : dataContainer.waitingAddresses) {
-                            if (!nodeMesh.ownAddresses.contains(s)) {
+                            if (isValidPeerAddress(s) && !isSelfAddress(s)) {
                                 //TODO Store static self node blob locally, no need to generate it each time for ALL events
                                 String nodeJson = ConnectX.serialize("cxJSON1", getSelf());
                                 java.io.ByteArrayInputStream nodeInput = new java.io.ByteArrayInputStream(nodeJson.getBytes("UTF-8"));
@@ -1407,7 +1550,7 @@ public class ConnectX {
                                 queueEvent(bundle);
                                 System.out.println("[ConnectX] Queued CXHELLO to " + s);
                             } else {
-                                System.out.println("[ConnectX] Rejected self CXHELLO target address");
+                                System.out.println("[ConnectX] Skipped CXHELLO target (self or invalid): " + s);
                             }
                         }
                         //Clear after
@@ -2538,6 +2681,91 @@ public class ConnectX {
         writer.write(json);
         writer.flush();
         writer.close();
+    }
+
+    /**
+     * Returns true if the address string is well-formed and safe to route to.
+     *
+     * Bridge addresses ("protocol:url") are validated by the registered BridgeProvider
+     * for that protocol — each bridge owns its own spec.
+     * Plain IP:port addresses are validated inline (valid port 1-65535, non-empty host).
+     * Null, empty, or addresses that match no registered bridge and are not valid IP:port
+     * are rejected.
+     */
+    public boolean isValidPeerAddress(String addr) {
+        if (addr == null || addr.isEmpty() || addr.length() > 256) return false;
+
+        // Bridge address: contains "://" after the protocol prefix
+        if (addr.contains("://")) {
+            int firstColon = addr.indexOf(':');
+            if (firstColon <= 0) return false;
+            String protocol = addr.substring(0, firstColon);
+            BridgeProvider provider = bridgeProviders.get(protocol);
+            if (provider == null) return false; // Unknown bridge protocol
+            return provider.isValidAddress(addr);
+        }
+
+        // Plain IP:port
+        int lastColon = addr.lastIndexOf(':');
+        if (lastColon <= 0) return false;
+        String host = addr.substring(0, lastColon);
+        if (host.isEmpty()) return false;
+        try {
+            int port = Integer.parseInt(addr.substring(lastColon + 1));
+            return port >= 1 && port <= 65535;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Returns true if the given address string refers to this node's own endpoint.
+     * Handles three formats:
+     *   - Socket toString format:  /127.0.0.1:9001  (from ownAddresses)
+     *   - Plain IP:port:           127.0.0.1:9001   (from waitingAddresses / PeerFinding)
+     *   - Bridge address:          cxHTTP1:https://.../cx
+     *
+     * Checks in order:
+     *   1. Direct match against self.addr
+     *   2. Normalized match against all entries in nodeMesh.ownAddresses
+     *   3. Port-based match: port == listeningPort and IP is own local or loopback
+     */
+    public boolean isSelfAddress(String addr) {
+        if (addr == null || addr.isEmpty()) return false;
+
+        // Normalize: strip leading slash from socket-toString format
+        String normalized = addr.startsWith("/") ? addr.substring(1) : addr;
+
+        // 1. Direct match against advertised self address
+        if (self != null && self.addr != null && normalized.equals(self.addr)) return true;
+
+        // 2. Normalized match against all accumulated own addresses
+        if (nodeMesh != null) {
+            for (String own : nodeMesh.ownAddresses) {
+                if (own == null) continue;
+                String ownNorm = own.startsWith("/") ? own.substring(1) : own;
+                if (normalized.equals(ownNorm)) return true;
+            }
+        }
+
+        // 3. Port-based check for plain IP:port addresses (no protocol scheme)
+        if (listeningPort > 0 && normalized.contains(":") && !normalized.contains("://")) {
+            try {
+                int lastColon = normalized.lastIndexOf(':');
+                int port = Integer.parseInt(normalized.substring(lastColon + 1));
+                if (port == listeningPort) {
+                    String ip = normalized.substring(0, lastColon);
+                    String localIP = LANScanner.getLocalIP();
+                    if ("127.0.0.1".equals(ip) || "localhost".equals(ip)
+                            || "0.0.0.0".equals(ip)
+                            || (localIP != null && localIP.equals(ip))) {
+                        return true;
+                    }
+                }
+            } catch (NumberFormatException ignored) {}
+        }
+
+        return false;
     }
 
     public void updateHTTPBridgePort(Integer port) throws Exception {

@@ -140,6 +140,15 @@ This is meaningfully different from frameworks that bolt encryption onto an exis
 
 All inter-stage communication uses `ConcurrentLinkedQueue`. Thread counts are configurable via `NodeConfig`.
 
+#### Recent threading improvements
+
+- **IOThread lock scope narrowed** - the `synchronized` block was previously wrapped around the entire job processing call, serializing all four IOThreads behind one lock. It now covers only the `poll()` that dequeues the job. All four threads process their PGP verification work concurrently.
+- **Atomic duplicate detection** - `transmissionIDMap.putIfAbsent()` makes the check-and-record operation atomic, eliminating a TOCTOU race where two IOThreads could both pass the duplicate check for the same event ID.
+- **inFlightImports guard** - `ConcurrentHashMap.putIfAbsent` prevents two concurrent IOThreads from simultaneously importing the same peer's first-contact event (NewNode/CXHELLO), which previously caused double key-cache writes and double peer directory inserts.
+- **Thread-safe collections** - `ownAddresses`, `seenCXIDs`, and per-event transmitter sets are now backed by `ConcurrentHashMap.newKeySet()`.
+
+See `CX-PROTOCOL.md` for the full technical breakdown.
+
 ---
 
 ## Plugin System
@@ -170,15 +179,21 @@ For plain text messages, extend `CXMessagePlugin` as shown in the Quick Start ab
 The `EventBuilder` supports three routing modes:
 
 ```java
-// Peer-to-peer
+// Peer-to-peer (CXS)
 peer.buildEvent(EventType.MESSAGE, data).toPeer(targetID).signData().queue();
 
-// Network broadcast
+// Network broadcast (CXN)
 peer.buildEvent(EventType.MESSAGE, data).toNetwork("CXNET").signData().queue();
 
 // Explicit bridge
 peer.buildEvent(EventType.MESSAGE, data).viaBridge("cxHTTP1", "https://example.com/cx").signData().queue();
 ```
+
+### Retry and CXN Fallback
+
+Failed CXS deliveries are retried with exponential backoff. After `CXS_TO_CXN_THRESHOLD` failures (default: 4) the event is automatically promoted to a CXN broadcast with E2E encryption so the mesh can relay it to the intended recipient. After `MAX_RETRIES` total attempts (default: 50) the event is discarded.
+
+**Planned:** per-event TTL and per-plugin try limits. Events and plugins will carry their own TTL (maximum age in flight) and number of CXS attempts to exhaust before falling back to CXN. See `CX-PROTOCOL.md` for the planned model.
 
 ---
 
@@ -222,6 +237,30 @@ peer.updateHTTPBridgePort(8081);                  // HTTP bridge on 8081
 ## Protocol Documentation
 
 See [`CX-PROTOCOL.md`](CX-PROTOCOL.md) for the full protocol specification covering encryption layers, blockchain structure, event types, permission system, Zero Trust mode, and consensus mechanism.
+
+---
+
+## Test Coverage
+
+Full coverage report: [`ConnectXBackend/optimizationCoverage/index.html`](ConnectXBackend/optimizationCoverage/index.html) (generated 2026-03-24).
+
+This report has been added to frequently show the progress, and tested coverage of CXNet.
+
+**Overall: 62.5% class, 46.6% method, 44.3% line**
+
+| Package | Class | Method | Line | Notes |
+|---|---|---|---|---|
+| `network.threads` | 100% | 100% | 80% | Full pipeline thread coverage |
+| `network.events` | 92% | 83% | 87% | All typed event classes exercised |
+| `network.nodemesh` | 92% | 72% | 57% | Core mesh, peer directory, retry logic |
+| `crypt.pgpainless` | 100% | 83% | 62% | Sign, verify, encrypt paths covered |
+| `network` (core) | 75% | 50% | 48% | CXNetwork, InputBundle, CXPath |
+| `io` | 83% | 56% | 47% | Serialization and I/O paths |
+| `dev.droppinganvil.v3` | 80% | 50% | 54% | ConnectX API, EventBuilder |
+| `analytics` | 0% | 0% | 0% | Not yet tested |
+| `api` | 0% | 0% | 0% | Plugin interfaces - exercised indirectly |
+| `network.remotedirectory` | 0% | 0% | 0% | Not implemented |
+| `network.services.messagex` | 0% | 0% | 0% | Not implemented |
 
 ---
 

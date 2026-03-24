@@ -1,8 +1,76 @@
 # ConnectX (CX) Protocol Documentation
 
-**Version:** 3.3
-**Last Updated:** 2026-03-16 (Threading Model, Pre-Validation IO Refactor Plan)
+**Version:** 3.4
+**Last Updated:** 2026-03-24 (Event Delivery Lifecycle, TTL and CXS-to-CXN fallback)
 **Status:** Early Development. Core networking and event API are functional; many subsystems are incomplete or in progress.
+
+---
+
+## Recent Updates (v3.4)
+
+### Threading Performance and Stability
+
+#### IOThread Pool - Lock Scope Narrowed
+
+Previously the `synchronized` block inside `IOThread.run()` wrapped the entire `processJob()` call. Because all four IOThreads share a single lock object (`cx.jobQueue`), this meant that while one thread processed a job (including full PGP verification), all other three threads blocked waiting for the lock. The 4-thread pool was functionally a single-threaded pipeline.
+
+The lock is now narrowed to the `poll()` call only - just long enough to remove one job from the queue atomically. Each thread then processes its job independently without holding the lock, so all four threads run their PGP operations concurrently.
+
+```
+Before: [lock → processJob (PGP verify) → unlock]   x4 threads, serialized
+After:  [lock → poll → unlock] [processJob (PGP verify)]  x4 threads, concurrent
+```
+
+This is the most impactful throughput change in this release. High-volume ingress (many peers sending simultaneously) now scales across all four IOThread cores instead of queueing behind one.
+
+#### NodeMesh Thread-Safety Hardening
+
+Several shared data structures in `NodeMesh` were replaced with thread-safe equivalents to eliminate races between concurrent IOThreads:
+
+| Field | Before | After | Reason |
+|---|---|---|---|
+| `ownAddresses` | `HashSet` | `ConcurrentHashMap.newKeySet()` | Multiple IOThreads call `add()` on socket accept |
+| `seenCXIDs` | `HashSet` | `ConcurrentHashMap.newKeySet()` | Concurrent reads/writes during peer tracking |
+| `transmissionIDMap` values | `HashSet<String>` | `ConcurrentHashMap.newKeySet()` | Per-event transmitter sets written from multiple IOThreads |
+
+#### Atomic Duplicate Detection
+
+Duplicate event detection uses `ConcurrentHashMap.putIfAbsent()` so the check-and-record is a single atomic operation. Previously a TOCTOU race could allow two concurrent IOThreads handling the same event ID (arriving via different relay paths within microseconds of each other) to both pass the duplicate check and both push the event into the event queue, resulting in double processing.
+
+`putIfAbsent` is atomic at the ConcurrentHashMap level: exactly one thread wins the insert and processes the event; all others get back the existing set and drop their copy.
+
+#### inFlightImports Guard (NewNode / CXHELLO Race)
+
+NewNode and CXHELLO handling involves a multi-step import sequence: extract the public key from the payload, import it into the cert cache, then verify the container and payload signatures using the newly-imported key. If two IOThreads receive the same peer's first-contact event simultaneously (common when a peer connects while the mesh is active), both threads can enter the import sequence concurrently, causing double key-cache writes and double peer directory inserts.
+
+`inFlightImports` is a `ConcurrentHashMap<String, Boolean>` keyed on the sender's container ID. `putIfAbsent` at the start of the import sequence ensures only one thread proceeds per sender. The second thread exits immediately, relying on the first to complete the import. The guard is cleared in a `finally` block so it is always released even if the import fails.
+
+---
+
+### Event Delivery Lifecycle
+
+#### CXS Retry and CXN Fallback
+
+When a CXS (single-peer) event fails to deliver, it enters the retry queue with exponential backoff. After a configurable number of failed CXS attempts the event is automatically promoted to a CXN broadcast with E2E encryption, allowing the mesh to carry it to the intended recipient even when a direct route is unavailable.
+
+Current defaults (`RetryBundle`):
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `MAX_RETRIES` | 50 | Total attempts before the event is discarded |
+| `INITIAL_RETRY_DELAY_MS` | 5 000 ms | Delay before first retry |
+| `BACKOFF_MULTIPLIER` | 4.0 | Exponential multiplier per attempt (5s, 20s, 80s, ...) |
+| `MAX_RETRY_DELAY_MS` | 300 000 ms | Cap on retry interval (5 minutes) |
+| `CXS_TO_CXN_THRESHOLD` | 4 | CXS failures before promoting to CXN broadcast |
+
+#### Planned: Per-Event TTL and Per-Plugin Tries
+
+These constants are global defaults for the current release. The planned model allows each event (and each plugin that generates events) to carry its own TTL and CXS-try limit:
+
+- **TTL** - maximum wall-clock age the event may remain in flight. Once elapsed the event is discarded regardless of retry count.
+- **Tries before CXN** - how many direct-route failures to tolerate before broadcasting via CXN with E2E encryption so the mesh can relay delivery.
+
+This will be expressed as fields on `NetworkEvent` or on a per-plugin configuration object. Plugins with latency-sensitive data can set a short TTL and promote to CXN quickly; durable protocol events can set a long TTL and exhaust more CXS attempts first.
 
 ---
 

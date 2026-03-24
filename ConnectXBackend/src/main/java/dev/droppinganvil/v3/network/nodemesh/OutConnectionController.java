@@ -48,7 +48,13 @@ public class OutConnectionController {
                 //TODO
             } else {
                 // Sign the NetworkEvent (inner layer) with our signature
-                cryptEvent = connectXAPI.signObject(out.ne, NetworkEvent.class, nc.se).toByteArray();
+                try {
+                    cryptEvent = connectXAPI.signObject(out.ne, NetworkEvent.class, nc.se).toByteArray();
+                } catch (Exception sigEx) {
+                    System.err.println("[OutController] SIGN FAILED for " + out.ne.eT + ": " + sigEx);
+                    sigEx.printStackTrace();
+                    //throw sigEx;
+                }
             }
         }
         // If out.prev != null, we're relaying - use the preserved signed event bytes
@@ -94,6 +100,12 @@ public class OutConnectionController {
         byte[] cryptNetworkContainer = connectXAPI.signObject(nc, NetworkContainer.class, nc.se).toByteArray();
         if (out.ne.p != null && out.ne.p.scope != null) {
             if (out.ne.p.scope.equalsIgnoreCase("CXS")) {
+                // Drop immediately if the target is ourselves - no loopback routing
+                if (out.ne.p.cxID != null && out.ne.p.cxID.equals(connectXAPI.getOwnID())) {
+                    System.err.println("[OutController] Dropping event " + out.ne.eT + " - target cxID is self");
+                    return;
+                }
+
                 // Single peer transmission using CXPath.cxID
                 // MULTI-PATH ROUTING: Try ALL available routes for redundancy
                 boolean sentViaAnyRoute = false;

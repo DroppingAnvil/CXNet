@@ -14,7 +14,6 @@ import dev.droppinganvil.v3.network.events.BlockExchange;
 import dev.droppinganvil.v3.network.events.ChainStatus;
 import dev.droppinganvil.v3.network.events.SeedExchange;
 import dev.droppinganvil.v3.network.events.ZeroTrustActivation;
-import dev.droppinganvil.v3.network.events.ZeroTrustActivation;
 /**
  * This class exist to test the ease of use of ConnectX API as well as test networking functionality
  * Peer3 will be created or loaded send message "1234" to 01
@@ -71,5 +70,11 @@ public class CXPeer3Test {
             peer3.buildEvent(EventType.ZERO_TRUST_ACTIVATION, ConnectX.serialize("cxJSON1", zt).getBytes("UTF-8"))
                 .toPeer("00000000-0000-0000-0000-000000000001").signData().queue();
         }
+        // E2E Test - to 01
+        peer3.buildEvent(EventType.MESSAGE, "12345677890".getBytes("UTF-8")).addRecipient("00000000-0000-0000-0000-000000000001").encrypt().toPeer("00000000-0000-0000-0000-000000000001").queue();
+        peer3.buildEvent(EventType.MESSAGE, "12345677890".getBytes("UTF-8")).addRecipient("00000000-0000-0000-0000-000000000001").encrypt().toPeer("00000000-0000-0000-0000-000000000001").queue();
+        // CXN - E2E, peer 2 should be offline for this test
+        peer3.buildEvent(EventType.MESSAGE, "123987".getBytes("UTF-8")).signData().toPeer("02000000-0000-0000-0000-000000000001").queue();
+
     }
 }

@@ -96,6 +96,24 @@ public class HTTPBridgeProvider implements BridgeProvider {
     }
 
     /**
+     * Validates a cxHTTP1 peer address.
+     * Expected format: "cxHTTP1:https://host/cx" or "cxHTTP1:http://host/cx"
+     * Rejects anything missing the protocol prefix, a proper http/https scheme,
+     * or a host component - prevents malformed bridge entries from entering routing tables.
+     */
+    @Override
+    public boolean isValidAddress(String addr) {
+        if (addr == null || addr.isEmpty()) return false;
+        // Must start with our protocol prefix
+        if (!addr.startsWith(PROTOCOL + ":")) return false;
+        String url = addr.substring(PROTOCOL.length() + 1);
+        // URL must use http or https scheme
+        if (!url.startsWith("http://") && !url.startsWith("https://")) return false;
+        // Must have at least a minimal host after the scheme (e.g. "https://x" = 9 chars minimum)
+        return url.length() > 8;
+    }
+
+    /**
      * CLIENT SIDE: Send event via HTTPS POST and wait for sync responses
      * Client uses HTTPS - TLS termination handled by RProx/CloudFlare
      */

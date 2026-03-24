@@ -24,7 +24,7 @@ public class RetryBundle {
     public static final long MAX_RETRY_DELAY_MS = 300000;    // 5 minutes max
 
     // CXS → CXN fallback configuration
-    public static final int CXS_TO_CXN_THRESHOLD = 15;  // After 3 CXS failures, try CXN with E2E
+    public static final int CXS_TO_CXN_THRESHOLD = 3;  // After N CXS failures, fall back to CXN broadcast with E2E
 
     public RetryBundle(OutputBundle bundle) {
         this.bundle = bundle;

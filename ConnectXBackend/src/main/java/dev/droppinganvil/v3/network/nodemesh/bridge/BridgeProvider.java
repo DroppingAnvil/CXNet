@@ -78,4 +78,17 @@ public interface BridgeProvider {
      * - false: Responses can be sent asynchronously (sockets)
      */
     boolean requiresSyncResponses();
+
+    /**
+     * Validate whether a full peer address string is a well-formed address for this bridge.
+     *
+     * The address is in the format "protocol:arg" (e.g. "cxHTTP1:https://host/cx").
+     * Each bridge implementation validates the arg portion against its own spec.
+     * Malformed addresses must be rejected before they enter routing tables.
+     *
+     * Default implementation returns false — bridges must explicitly opt in.
+     */
+    default boolean isValidAddress(String addr) {
+        return false;
+    }
 }

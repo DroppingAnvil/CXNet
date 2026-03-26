@@ -7,10 +7,8 @@ import dev.droppinganvil.v3.crypt.core.exceptions.EncryptionFailureException;
 import dev.droppinganvil.v3.network.nodemesh.Node;
 import dev.droppinganvil.v3.network.nodemesh.NodeConfig;
 import dev.droppinganvil.v3.network.nodemesh.PeerDirectory;
-import org.bouncycastle.bcpg.BCPGOutputStream;
-import org.bouncycastle.bcpg.HashAlgorithmTags;
 import org.bouncycastle.openpgp.*;
-import org.bouncycastle.openpgp.operator.bc.BcPGPContentSignerBuilder;
+import org.bouncycastle.openpgp.api.OpenPGPKey;
 import org.bouncycastle.util.io.Streams;
 import org.pgpainless.PGPainless;
 import org.pgpainless.algorithm.DocumentSignatureType;
@@ -39,6 +37,8 @@ public class PainlessCryptProvider extends CryptProvider {
      * On board secret key
      */
     private PGPSecretKeyRing secretKey;
+    /** Native OpenPGPKey wrapper - used for signing to avoid v4/v6 OPS mismatch */
+    private OpenPGPKey secretKeyNative;
     /**
      * Network public key cache
      */
@@ -95,13 +95,22 @@ public class PainlessCryptProvider extends CryptProvider {
             try {
                 DecryptionStream decryptionStream = PGPainless.decryptAndOrVerify()
                         .onInputStream(is)
-                        .withOptions(new ConsumerOptions()
+                        .withOptions(ConsumerOptions.get()
                                 .addDecryptionKey(secretKey, protector)
                                 .addVerificationCert(certCache.get(cxID))
                         );
                 Streams.pipeAll(decryptionStream, os);
                 decryptionStream.close();
-                return decryptionStream.getResult().isVerified();
+                org.pgpainless.decryption_verification.MessageMetadata meta = decryptionStream.getMetadata();
+                boolean verified = meta.isVerifiedSigned();
+                if (!verified) {
+                    System.err.println("[VERIFY-FAIL] isVerifiedSigned=false for " + cxID.substring(0, 8));
+                    System.err.println("[VERIFY-FAIL] verifiedInline=" + meta.getVerifiedInlineSignatures().size()
+                        + " rejectedInline=" + meta.getRejectedInlineSignatures().size());
+                    meta.getRejectedInlineSignatures().forEach(f ->
+                        System.err.println("[VERIFY-FAIL] rejected: " + f));
+                }
+                return verified;
             } catch (Exception e) {
                 e.printStackTrace();
                 DecryptionFailureException dfe = new DecryptionFailureException();
@@ -109,6 +118,7 @@ public class PainlessCryptProvider extends CryptProvider {
                 throw dfe;
             }
         }
+        System.err.println("[VERIFY-FAIL] cacheCert returned false for " + cxID);
         return false;
     }
     @Override
@@ -121,12 +131,12 @@ public class PainlessCryptProvider extends CryptProvider {
             EncryptionStream encryptor = PGPainless.encryptAndOrSign()
                     .onOutputStream(os)
                     .withOptions(ProducerOptions.signAndEncrypt(
-                            EncryptionOptions.encryptCommunications()
+                            EncryptionOptions.get()
                                     .addRecipient(certCache.get(cxID))
                                     .addRecipient(publicKey),
-                            new SigningOptions()
+                            SigningOptions.get()
                                     .overrideHashAlgorithm(HashAlgorithm.SHA512)
-                                    .addInlineSignature(protector, secretKey, DocumentSignatureType.CANONICAL_TEXT_DOCUMENT)
+                                    .addInlineSignature(protector, secretKeyNative, DocumentSignatureType.CANONICAL_TEXT_DOCUMENT)
                             ).setAsciiArmor(false)
                     );
             // CRITICAL: Must pipe data and close stream to finalize encryption
@@ -160,7 +170,7 @@ public class PainlessCryptProvider extends CryptProvider {
 
         try {
             // Build encryption options with all recipients
-            EncryptionOptions encryptionOptions = EncryptionOptions.encryptCommunications();
+            EncryptionOptions encryptionOptions = EncryptionOptions.get();
 
             // Add each recipient
             for (String cxID : recipientCxIDs) {
@@ -175,9 +185,9 @@ public class PainlessCryptProvider extends CryptProvider {
                     .onOutputStream(os)
                     .withOptions(ProducerOptions.signAndEncrypt(
                             encryptionOptions,
-                            new SigningOptions()
+                            SigningOptions.get()
                                     .overrideHashAlgorithm(HashAlgorithm.SHA512)
-                                    .addInlineSignature(protector, secretKey, DocumentSignatureType.CANONICAL_TEXT_DOCUMENT)
+                                    .addInlineSignature(protector, secretKeyNative, DocumentSignatureType.CANONICAL_TEXT_DOCUMENT)
                             ).setAsciiArmor(false)
                     );
 
@@ -211,33 +221,17 @@ public class PainlessCryptProvider extends CryptProvider {
                 System.out.println("Primary User ID (again): " + info.getPrimaryUserId());
                 //System.out.println("Preferred Hash Algorithms: " + info.getPreferredHashAlgorithms());
             }
-            // Use BouncyCastle directly - PGPainless SigningOptions.addInlineSignature calls
-            // KeyRingInfo.getPreferredHashAlgorithms which throws on keys whose signing subkey
-            // has no direct-key self-signature (standard Ed25519 keys from modernKeyRing).
-            // Raw BouncyCastle inline sign produces the same OpenPGP format PGPainless can verify.
-            PGPSecretKey sigKey = null;
-            for (java.util.Iterator it = secretKey.getSecretKeys(); it.hasNext(); ) {
-                PGPSecretKey sk = (PGPSecretKey) it.next();
-                if (sk.isSigningKey()) { sigKey = sk; break; }
-            }
-            if (sigKey == null) throw new EncryptionFailureException("No signing key found in key ring");
-            PGPPrivateKey privKey = sigKey.extractPrivateKey(protector.getDecryptor(sigKey.getKeyID()));
-            PGPSignatureGenerator sGen = new PGPSignatureGenerator(
-                new BcPGPContentSignerBuilder(sigKey.getPublicKey().getAlgorithm(), HashAlgorithmTags.SHA512));
-            sGen.init(PGPSignature.BINARY_DOCUMENT, privKey);
-            BCPGOutputStream bcpgOut = new BCPGOutputStream(os);
-            sGen.generateOnePassVersion(false).encode(bcpgOut);
-            PGPLiteralDataGenerator litGen = new PGPLiteralDataGenerator();
-            OutputStream litOut = litGen.open(bcpgOut, PGPLiteralData.BINARY, "", new java.util.Date(), new byte[4096]);
-            byte[] buf = new byte[4096];
-            int n;
-            while ((n = is.read(buf)) > 0) {
-                litOut.write(buf, 0, n);
-                sGen.update(buf, 0, n);
-            }
-            litGen.close();
-            sGen.generate().encode(bcpgOut);
-            bcpgOut.finish();
+            // PGPainless 2.x generates v6 keys via modernKeyRing; raw BouncyCastle produces
+            // v4 OPS packets which PGPainless 2.x rejects as "Incorrect OnePassSignature".
+            // Use PGPainless native signing so the OPS version matches the key version.
+            EncryptionStream signer = PGPainless.encryptAndOrSign()
+                .onOutputStream(os)
+                .withOptions(ProducerOptions.sign(
+                    SigningOptions.get()
+                        .addInlineSignature(protector, secretKeyNative, DocumentSignatureType.BINARY_DOCUMENT)
+                ).setAsciiArmor(false));
+            Streams.pipeAll(is, signer);
+            signer.close();
         } catch (Exception e) {
             EncryptionFailureException efe = new EncryptionFailureException();
             efe.initCause(e);
@@ -249,13 +243,13 @@ public class PainlessCryptProvider extends CryptProvider {
         try {
             DecryptionStream decryptionStream = PGPainless.decryptAndOrVerify()
                     .onInputStream(is)
-                    .withOptions(new ConsumerOptions()
+                    .withOptions(ConsumerOptions.get()
                             .addDecryptionKey(secretKey, protector)
                             .addVerificationCert(certCache.get(cxID))
                     );
             Streams.pipeAll(decryptionStream, os);
             decryptionStream.close();
-            return decryptionStream.getResult();
+            return decryptionStream.getMetadata();
         } catch (Exception e) {
             e.printStackTrace();
             DecryptionFailureException dfe = new DecryptionFailureException();
@@ -268,12 +262,12 @@ public class PainlessCryptProvider extends CryptProvider {
         try {
             DecryptionStream decryptionStream = PGPainless.decryptAndOrVerify()
                     .onInputStream(is)
-                    .withOptions(new ConsumerOptions()
+                    .withOptions(ConsumerOptions.get()
                             .addDecryptionKey(secretKey, protector)
                     );
             Streams.pipeAll(decryptionStream, os);
             decryptionStream.close();
-            return decryptionStream.getResult();
+            return decryptionStream.getMetadata();
         } catch (Exception e) {
             e.printStackTrace();
             DecryptionFailureException dfe = new DecryptionFailureException();
@@ -291,19 +285,21 @@ public class PainlessCryptProvider extends CryptProvider {
             } catch (Exception e) {
                 // If that fails, try decrypting it (old format with password-protected file)
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                DecryptionStream ds = PGPainless.decryptAndOrVerify().onInputStream(privateKeyFile.toURL().openStream()).withOptions(new ConsumerOptions()
-                .addDecryptionPassphrase(Passphrase.fromPassword(s)));
+                DecryptionStream ds = PGPainless.decryptAndOrVerify().onInputStream(privateKeyFile.toURL().openStream()).withOptions(ConsumerOptions.get()
+                .addMessagePassphrase(Passphrase.fromPassword(s)));
                 Streams.pipeAll(ds, baos);
                 ds.close();
                 secretKey = PGPainless.readKeyRing().secretKeyRing(baos.toByteArray());
             }
+            secretKeyNative = new OpenPGPKey(secretKey);
         } else {
-            secretKey = PGPainless.generateKeyRing()
-                    .modernKeyRing(cxID, s);
+            OpenPGPKey generatedKey = PGPainless.generateKeyRing().modernKeyRing(cxID, s);
+            secretKey = generatedKey.getPGPSecretKeyRing();
+            secretKeyNative = generatedKey;
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             FileOutputStream fos = new FileOutputStream(privateKeyFile);
             secretKey.encode(baos);
-            EncryptionStream es = PGPainless.encryptAndOrSign().onOutputStream(fos).withOptions(ProducerOptions.encrypt(new EncryptionOptions()
+            EncryptionStream es = PGPainless.encryptAndOrSign().onOutputStream(fos).withOptions(ProducerOptions.encrypt(EncryptionOptions.get()
             .addPassphrase(Passphrase.fromPassword(s))));
             Streams.pipeAll(new ByteArrayInputStream(baos.toByteArray()), es);
             es.close();  // CRITICAL: Must close EncryptionStream to finalize the encrypted file
@@ -315,10 +311,10 @@ public class PainlessCryptProvider extends CryptProvider {
         if (s == null || s.isEmpty()) {
             // If no password provided, key is either unprotected or has empty passphrase
             // Try empty passphrase first (most common for Kleopatra exported keys)
-            protector = SecretKeyRingProtector.unlockAllKeysWith(Passphrase.emptyPassphrase(), secretKey);
+            protector = SecretKeyRingProtector.unlockEachKeyWith(Passphrase.emptyPassphrase(), secretKey);
         } else {
             // Use provided passphrase
-            protector = SecretKeyRingProtector.unlockAllKeysWith(Passphrase.fromPassword(s), secretKey);
+            protector = SecretKeyRingProtector.unlockEachKeyWith(Passphrase.fromPassword(s), secretKey);
         }
 
         publicKey = KeyRingUtils.publicKeyRingFrom(secretKey);
@@ -333,7 +329,7 @@ public class PainlessCryptProvider extends CryptProvider {
             // This provides certificate pinning security against MITM attacks
             try {
                 nmipubkey = PGPainless.readKeyRing().publicKeyRing(
-                    new ByteArrayInputStream(HARDCODED_CXNET_NMI_PUBLIC_KEY.getBytes())
+                    new ByteArrayInputStream(java.util.Base64.getDecoder().decode(HARDCODED_CXNET_NMI_PUBLIC_KEY))
                 );
                 System.out.println("[Crypto] Loaded hardcoded CXNET NMI public key");
             } catch (Exception e) {
@@ -344,7 +340,10 @@ public class PainlessCryptProvider extends CryptProvider {
             File nmipublicKeyFile = new File(dir, "cx.asc");
             if (nmipublicKeyFile.exists()) {
                 try {
-                    PGPPublicKeyRing localKey = PGPainless.readKeyRing().publicKeyRing(nmipublicKeyFile.toURL().openStream());
+                    byte[] raw = java.nio.file.Files.readAllBytes(nmipublicKeyFile.toPath());
+                    PGPPublicKeyRing localKey = PGPainless.readKeyRing().publicKeyRing(
+                        new ByteArrayInputStream(java.util.Base64.getDecoder().decode(raw))
+                    );
                     if (!localKey.equals(nmipubkey)) {
                         System.err.println("[SECURITY WARNING] Local cx.asc does NOT match hardcoded CXNET NMI key!");
                         System.err.println("[SECURITY WARNING] Using hardcoded key for security.");
@@ -393,7 +392,7 @@ public class PainlessCryptProvider extends CryptProvider {
             // NOTE: NetworkEvent is SIGNED ONLY (not encrypted), so we don't add decryption keys
             DecryptionStream decryptionStream = PGPainless.decryptAndOrVerify()
                     .onInputStream(is)
-                    .withOptions(new ConsumerOptions()
+                    .withOptions(ConsumerOptions.get()
                             // NOTE: No decryption key - data is signed only, not encrypted
                             // NOTE: No verification cert - this strips without verifying
                     );

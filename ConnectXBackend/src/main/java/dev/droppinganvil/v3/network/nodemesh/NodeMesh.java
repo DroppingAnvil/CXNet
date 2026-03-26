@@ -17,7 +17,7 @@ import dev.droppinganvil.v3.network.threads.OutputProcessor;
 import dev.droppinganvil.v3.network.threads.RetryProcessor;
 import dev.droppinganvil.v3.network.threads.SocketWatcher;
 import org.bouncycastle.openpgp.PGPPublicKeyRing;
-import org.pgpainless.decryption_verification.OpenPgpMetadata;
+import org.pgpainless.decryption_verification.MessageMetadata;
 import us.anvildevelopment.util.tools.permissions.BasicEntry;
 import us.anvildevelopment.util.tools.permissions.Entry;
 
@@ -503,7 +503,7 @@ public class NodeMesh {
                     ByteArrayOutputStream decryptedJSON = new ByteArrayOutputStream();
                     //TODO
                     //TODO Move PGP specific actions back to PainlessCryptProvider, will need another refactor
-                    OpenPgpMetadata o3 = (OpenPgpMetadata) connectX.encryptionProvider.decrypt(baiss, decryptedJSON, ne.p.oCXID, true);
+                    MessageMetadata o3 = (MessageMetadata) connectX.encryptionProvider.decrypt(baiss, decryptedJSON, ne.p.oCXID, true);
                     byte[] arr1 = null;
                     arr1 = decryptedJSON.toByteArray();
                     if (arr1 != null && arr1.length > 0) {
@@ -513,13 +513,13 @@ public class NodeMesh {
                         connectX.nodeMesh.peerDirectory.lookup(senderCXID, true, true);
                         PGPPublicKeyRing originPub = ((PainlessCryptProvider) connectX.encryptionProvider).certCache.get(senderCXID);
 
-                        if (senderCXID != null && originPub != null && o3.containsVerifiedSignatureFrom(originPub)) {
+                        if (senderCXID != null && originPub != null && o3.isVerifiedInlineSignedBy(originPub)) {
                             ib.verifiedObjectBytes = arr1;
                         } else {
                             System.out.println("[NodeMesh] E2E Decryption validation failure, 005");
                             System.out.println(senderCXID);
                             System.out.println(originPub.getPublicKey().toString());
-                            System.out.println(o3.containsVerifiedSignatureFrom(originPub));
+                            System.out.println(o3.isVerifiedInlineSignedBy(originPub));
                         }
                     } else {
                         System.out.println("[NodeMesh] Internal event data verification failure, rejecting event. 006");

@@ -53,7 +53,7 @@ dependencies {
 ConnectX peer = new ConnectX("CX-PEER3", 49158, "03006000-0400-0500-0000-007000000001", "Peer3");
 peer.updateHTTPBridgePort(8081);
 peer.setPublicBridgeAddress("cxHTTP1", "https://cx7.anvildevelopment.us/cx");
-peer.buildEvent(EventType.MESSAGE, "Hello network!".getBytes()).toPeer("00000000-0000-0000-0000-000000000001").signData().queue();
+peer.buildEvent(EventType.MESSAGE, "Hello peer1!".getBytes()).toPeer("00000000-0000-0000-0000-000000000001").signData().queue();
 ```
 
 ### Receive messages with a plugin - 3 lines

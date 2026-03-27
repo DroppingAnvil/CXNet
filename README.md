@@ -1,9 +1,47 @@
 # ConnectX
 
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=DroppingAnvil_CXNet&metric=alert_status)](https://sonarcloud.io/project/overview?id=DroppingAnvil_CXNet)
+[![Maven](https://img.shields.io/badge/maven-0.3-blue)](https://repo.anvildevelopment.us/repository/maven-releases/)
+
 > **Early Development - Work in Progress**
 > The core networking, encryption, and event API are functional and tested. Many subsystems (blockchain sync, Zero Trust activation, LAN discovery, resource management, login, remote directory) are partially or not yet implemented.
 
 A decentralized P2P mesh network framework with end-to-end PGP encryption, blockchain-based event persistence, and a fluent Java API.
+
+---
+
+## Installation
+
+Add the Anvil Development repository and dependency to your `pom.xml`:
+
+```xml
+<repositories>
+  <repository>
+    <id>Sonatype</id>
+    <url>https://repo.anvildevelopment.us/repository/maven-releases/</url>
+  </repository>
+</repositories>
+
+<dependencies>
+  <dependency>
+    <groupId>us.anvildevelopment</groupId>
+    <artifactId>ConnectX</artifactId>
+    <version>0.3</version>
+  </dependency>
+</dependencies>
+```
+
+For Gradle:
+
+```groovy
+repositories {
+    maven { url 'https://repo.anvildevelopment.us/repository/maven-releases/' }
+}
+
+dependencies {
+    implementation 'us.anvildevelopment:ConnectX:0.3'
+}
+```
 
 ---
 
@@ -244,7 +282,7 @@ See [`CX-PROTOCOL.md`](CX-PROTOCOL.md) for the full protocol specification cover
 
 Full coverage report: [`ConnectXBackend/optimizationCoverage/index.html`](ConnectXBackend/optimizationCoverage/index.html) (generated 2026-03-24).
 
-This report has been added to frequently show the progress, and tested coverage of CXNet.
+Coverage is tracked and updated regularly alongside active development. Live analysis on every merge to `managed` via [SonarCloud](https://sonarcloud.io/project/overview?id=DroppingAnvil_CXNet).
 
 **Overall: 62.5% class, 46.6% method, 44.3% line**
 

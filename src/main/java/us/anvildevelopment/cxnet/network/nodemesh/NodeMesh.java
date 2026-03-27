@@ -10,8 +10,6 @@ import us.anvildevelopment.cxnet.crypt.pgpainless.PainlessCryptProvider;
 import us.anvildevelopment.cxnet.edge.NetworkBlock;
 import us.anvildevelopment.cxnet.edge.NetworkRecord;
 import us.anvildevelopment.cxnet.io.IOThread;
-import dev.droppinganvil.v3.network.*;
-import dev.droppinganvil.v3.network.events.*;
 import us.anvildevelopment.cxnet.network.*;
 import us.anvildevelopment.cxnet.network.events.*;
 import us.anvildevelopment.cxnet.network.threads.EventProcessor;

@@ -8,6 +8,12 @@
     <artifactId>ConnectX</artifactId>
     <version>0.3</version>
 
+
+    <properties>
+        <sonar.organization>droppinganvil</sonar.organization>
+    </properties>
+
+
     <repositories>
         <repository>
             <id>Sonatype</id>

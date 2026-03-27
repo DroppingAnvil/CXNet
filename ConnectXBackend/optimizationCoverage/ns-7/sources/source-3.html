@@ -94,7 +94,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;package dev.droppinganvil.v3.edge;
 &nbsp;
-&nbsp;import dev.droppinganvil.v3.network.events.NetworkEvent;
+&nbsp;import events.network.us.anvildevelopment.cxnet.NetworkEvent;
 &nbsp;import us.anvildevelopment.util.tools.database.annotations.MemoryOnly;
 &nbsp;import java.io.Serializable;
 &nbsp;import java.util.Map;
@@ -163,7 +163,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;     * @param connectX ConnectX instance for verification helpers
 &nbsp;     * @return true if event added successfully, false if verification failed
 &nbsp;     */
-&nbsp;    public boolean addEvent(int index, byte[] signedBlob, dev.droppinganvil.v3.ConnectX connectX) {
+&nbsp;    public boolean addEvent(int index, byte[] signedBlob, us.anvildevelopment.cxnet.ConnectX connectX) {
 &nbsp;        try {
 &nbsp;            // Peek sender cxID
 <b class="nc">&nbsp;            String senderID = peekSenderID(signedBlob, connectX);</b>
@@ -186,7 +186,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;            // Deserialize
 <b class="nc">&nbsp;            String verifiedJson = new String(verifiedOutput.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);</b>
-<b class="nc">&nbsp;            NetworkEvent event = (NetworkEvent) dev.droppinganvil.v3.ConnectX.deserialize(&quot;cxJSON1&quot;, verifiedJson, NetworkEvent.class);</b>
+<b class="nc">&nbsp;            NetworkEvent event = (NetworkEvent) us.anvildevelopment.cxnet.ConnectX.deserialize(&quot;cxJSON1&quot;, verifiedJson, NetworkEvent.class);</b>
 &nbsp;
 <b class="nc">&nbsp;            if (event == null) {</b>
 <b class="nc">&nbsp;                System.err.println(&quot;[NetworkBlock] Deserialization failed&quot;);</b>
@@ -211,7 +211,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;     * @param connectX ConnectX instance
 &nbsp;     * @return Number of events successfully prepared
 &nbsp;     */
-&nbsp;    public int prepare(dev.droppinganvil.v3.ConnectX connectX) {
+&nbsp;    public int prepare(us.anvildevelopment.cxnet.ConnectX connectX) {
 <b class="fc">&nbsp;        int prepared = 0;</b>
 <b class="pc">&nbsp;        for (Integer index : networkEvents.keySet()) {</b>
 <b class="nc">&nbsp;            if (prepare(index, connectX)) {</b>
@@ -230,7 +230,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;     * @param connectX ConnectX instance
 &nbsp;     * @return true if prepared successfully
 &nbsp;     */
-&nbsp;    public boolean prepare(int index, dev.droppinganvil.v3.ConnectX connectX) {
+&nbsp;    public boolean prepare(int index, us.anvildevelopment.cxnet.ConnectX connectX) {
 &nbsp;        // Already prepared?
 <b class="nc">&nbsp;        if (deserializedEvents.containsKey(index)) {</b>
 <b class="nc">&nbsp;            return true;</b>
@@ -261,7 +261,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;            // Deserialize
 <b class="nc">&nbsp;            String verifiedJson = new String(verifiedOutput.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);</b>
-<b class="nc">&nbsp;            NetworkEvent event = (NetworkEvent) dev.droppinganvil.v3.ConnectX.deserialize(&quot;cxJSON1&quot;, verifiedJson, NetworkEvent.class);</b>
+<b class="nc">&nbsp;            NetworkEvent event = (NetworkEvent) us.anvildevelopment.cxnet.ConnectX.deserialize(&quot;cxJSON1&quot;, verifiedJson, NetworkEvent.class);</b>
 &nbsp;
 <b class="nc">&nbsp;            if (event != null) {</b>
 <b class="nc">&nbsp;                deserializedEvents.put(index, event);</b>
@@ -283,7 +283,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;     * @param connectX ConnectX instance
 &nbsp;     * @return Sender cxID or null
 &nbsp;     */
-&nbsp;    private String peekSenderID(byte[] signedBlob, dev.droppinganvil.v3.ConnectX connectX) {
+&nbsp;    private String peekSenderID(byte[] signedBlob, us.anvildevelopment.cxnet.ConnectX connectX) {
 &nbsp;        try {
 &nbsp;            // Strip signature without verifying
 <b class="nc">&nbsp;            java.io.ByteArrayInputStream peekStream = new java.io.ByteArrayInputStream(signedBlob);</b>
@@ -293,7 +293,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;            // Deserialize unverified event to peek at path
 <b class="nc">&nbsp;            String unverifiedJson = peekOutput.toString(&quot;UTF-8&quot;);</b>
-<b class="nc">&nbsp;            NetworkEvent unverifiedEvent = (NetworkEvent) dev.droppinganvil.v3.ConnectX.deserialize(</b>
+<b class="nc">&nbsp;            NetworkEvent unverifiedEvent = (NetworkEvent) us.anvildevelopment.cxnet.ConnectX.deserialize(</b>
 &nbsp;                &quot;cxJSON1&quot;, unverifiedJson, NetworkEvent.class);
 &nbsp;
 &nbsp;            // Extract sender oCXID from path - REQUIRED for signature verification

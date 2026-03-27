@@ -1851,7 +1851,7 @@ ConnectX implements a scalable block-per-file persistence architecture for block
 #### Components
 
 ##### 1. BlockchainPersistence Class
-**Location:** `dev.droppinganvil.v3.network.BlockchainPersistence`
+**Location:** `network.us.anvildevelopment.cxnet.BlockchainPersistence`
 
 **Responsibilities:**
 - Save/load individual blocks
@@ -1899,7 +1899,7 @@ class ChainMetadata {
 **Format:** JSON serialized NetworkBlock objects
 
 ```json
-["dev.droppinganvil.v3.edge.NetworkBlock", {
+["edge.us.anvildevelopment.cxnet.NetworkBlock", {
   "block": 0,
   "networkEvents": ["java.util.concurrent.ConcurrentHashMap", {...}]
 }]
@@ -2413,7 +2413,7 @@ private NetworkBlock reconcileBlocks(List<NetworkBlock> conflictingBlocks) {
 
 **BLOCK_RESPONSE Payload:**
 ```json
-["dev.droppinganvil.v3.edge.NetworkBlock", {
+["edge.us.anvildevelopment.cxnet.NetworkBlock", {
     "block": 42,
     "chain": 3,
     "signedEventBlobs": {
@@ -2578,7 +2578,7 @@ Response containing requested block data.
 
 **Payload:**
 ```json
-["dev.droppinganvil.v3.edge.NetworkBlock", {
+["edge.us.anvildevelopment.cxnet.NetworkBlock", {
   "block": 42,
   "networkEvents": {...}
 }]
@@ -2876,7 +2876,7 @@ For each peer in broadcast, tries:
 
 ### LANScanner Implementation
 
-**Class:** `dev.droppinganvil.v3.network.nodemesh.LANScanner`
+**Class:** `nodemesh.network.us.anvildevelopment.cxnet.LANScanner`
 
 **Key Methods:**
 - `getLocalIP()`: Gets non-loopback IPv4 address
@@ -3243,7 +3243,7 @@ responseEvent.eT = EventType.CXHELLO_RESPONSE.name();
 responseEvent.iD = java.util.UUID.randomUUID().toString();
 responseEvent.d = responsePayloadJson.getBytes("UTF-8");  // Unsigned payload!
 
-responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
+responseEvent.p = new network.us.anvildevelopment.cxnet.CXPath();
 responseEvent.p.cxID = requesterID;
 responseEvent.p.oCXID = connectX.getOwnID();  // Set but not cryptographically bound
 responseEvent.p.scope = "CXS";
@@ -3274,7 +3274,7 @@ blockEvent.eT = EventType.BLOCK_RESPONSE.name();
 blockEvent.iD = java.util.UUID.randomUUID().toString();
 blockEvent.d = blockJson.getBytes("UTF-8");
 
-blockEvent.p = new dev.droppinganvil.v3.network.CXPath();
+blockEvent.p = new network.us.anvildevelopment.cxnet.CXPath();
 blockEvent.p.cxID = requesterID;
 blockEvent.p.oCXID = connectX.getOwnID();
 blockEvent.p.scope = originalEvent.p.scope;

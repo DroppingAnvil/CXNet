@@ -114,6 +114,8 @@ Each node runs:
 * **HTTP bridge** - Jetty-based servlet for internet-reachable peers
 * **Plugin registry** - application-level event handlers
 
+[Interactive codebase architecture analysis (SonarCloud)](https://sonarcloud.io/project/architecture/discovery?id=DroppingAnvil_CXNet&selectedNode=dev.droppinganvil.v3.ConnectX)
+
 ---
 
 ## Threading Model
@@ -280,9 +282,7 @@ See [`CX-PROTOCOL.md`](CX-PROTOCOL.md) for the full protocol specification cover
 
 ## Test Coverage
 
-Full coverage report: [`ConnectXBackend/optimizationCoverage/index.html`](ConnectXBackend/optimizationCoverage/index.html) (generated 2026-03-24).
-
-Coverage is tracked and updated regularly alongside active development. Live analysis on every merge to `managed` via [SonarCloud](https://sonarcloud.io/project/overview?id=DroppingAnvil_CXNet).
+Full coverage report: [`ConnectXBackend/optimizationCoverage/index.html`](ConnectXBackend/optimizationCoverage/index.html) (generated 2026-03-24). These figures come from full multi-peer test sessions with log analysis and reflect real runtime coverage. SonarCloud does not yet have equivalent coverage data.
 
 **Overall: 62.5% class, 46.6% method, 44.3% line**
 

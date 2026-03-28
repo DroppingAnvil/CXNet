@@ -58,7 +58,7 @@ public class IOThread implements Runnable {
         }
     }
     public static ByteArrayOutputStream reverse(InputStream is, Boolean closeAfter) throws IOException {
-k        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
         byte[] buffer = new byte[NodeConfig.ioReverseByteBuffer];
         int bytesRead;
         while ((bytesRead = is.read(buffer)) > -1) {

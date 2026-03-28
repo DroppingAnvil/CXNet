@@ -89,11 +89,11 @@ Current scope:     <a href="../../index.html">all classes</a>
 <pre>
 <code class="sourceCode" id="sourceCode">&nbsp;package dev.droppinganvil.v3.network.nodemesh;
 &nbsp;
-&nbsp;import dev.droppinganvil.v3.ConnectX;
-&nbsp;import dev.droppinganvil.v3.network.CXNetwork;
-&nbsp;import dev.droppinganvil.v3.network.CXPath;
-&nbsp;import dev.droppinganvil.v3.network.events.NetworkContainer;
-&nbsp;import dev.droppinganvil.v3.network.events.NetworkEvent;
+&nbsp;import us.anvildevelopment.cxnet.ConnectX;
+&nbsp;import network.us.anvildevelopment.cxnet.CXNetwork;
+&nbsp;import network.us.anvildevelopment.cxnet.CXPath;
+&nbsp;import events.network.us.anvildevelopment.cxnet.NetworkContainer;
+&nbsp;import events.network.us.anvildevelopment.cxnet.NetworkEvent;
 &nbsp;
 &nbsp;import java.net.Socket;
 &nbsp;
@@ -224,10 +224,10 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="fc">&nbsp;                            System.out.println(&quot;[ROUTE-TRY &quot; + routeAttempts + &quot;/&quot; + addresses.size() + &quot;] &quot; +</b>
 <b class="fc">&nbsp;                                out.ne.p.cxID.substring(0, 8) + &quot; via Bridge: &quot; + bridgeProtocol);</b>
 &nbsp;
-<b class="fc">&nbsp;                            dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =</b>
+<b class="fc">&nbsp;                            us.anvildevelopment.cxnet.network.nodemesh.bridge.BridgeProvider bridge =</b>
 <b class="fc">&nbsp;                                connectXAPI.getBridgeProvider(bridgeProtocol);</b>
 <b class="pc">&nbsp;                            if (bridge != null) {</b>
-<b class="fc">&nbsp;                                dev.droppinganvil.v3.network.CXPath bridgePath = new dev.droppinganvil.v3.network.CXPath();</b>
+<b class="fc">&nbsp;                                us.anvildevelopment.cxnet.network.CXPath bridgePath = new dev.droppinganvil.v3.network.CXPath();</b>
 <b class="fc">&nbsp;                                bridgePath.bridgeArg = bridgeEndpoint;</b>
 <b class="fc">&nbsp;                                bridge.transmitEvent(bridgePath, cryptNetworkContainer);</b>
 <b class="fc">&nbsp;                                sentViaAnyRoute = true;</b>
@@ -278,7 +278,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;                // Fallback: Try CXPath bridge from event path if getAllAddresses didn&#39;t work
 <b class="pc">&nbsp;                if (!sentViaAnyRoute &amp;&amp; out.ne.p.bridge != null &amp;&amp; out.ne.p.bridgeArg != null) {</b>
 &nbsp;                    try {
-<b class="fc">&nbsp;                        dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =</b>
+<b class="fc">&nbsp;                        us.anvildevelopment.cxnet.network.nodemesh.bridge.BridgeProvider bridge =</b>
 <b class="fc">&nbsp;                            connectXAPI.getBridgeProvider(out.ne.p.bridge);</b>
 <b class="pc">&nbsp;                        if (bridge != null) {</b>
 <b class="fc">&nbsp;                            bridge.transmitEvent(out.ne.p, cryptNetworkContainer);</b>
@@ -355,10 +355,10 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="nc">&nbsp;                                        String bridgeProtocol = parts[0];</b>
 <b class="nc">&nbsp;                                        String bridgeEndpoint = parts[1];</b>
 &nbsp;
-<b class="nc">&nbsp;                                        dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =</b>
+<b class="nc">&nbsp;                                        us.anvildevelopment.cxnet.network.nodemesh.bridge.BridgeProvider bridge =</b>
 <b class="nc">&nbsp;                                            connectXAPI.getBridgeProvider(bridgeProtocol);</b>
 <b class="nc">&nbsp;                                        if (bridge != null) {</b>
-<b class="nc">&nbsp;                                            dev.droppinganvil.v3.network.CXPath peerPath = new dev.droppinganvil.v3.network.CXPath();</b>
+<b class="nc">&nbsp;                                            us.anvildevelopment.cxnet.network.CXPath peerPath = new dev.droppinganvil.v3.network.CXPath();</b>
 <b class="nc">&nbsp;                                            peerPath.bridgeArg = bridgeEndpoint;</b>
 <b class="nc">&nbsp;                                            bridge.transmitEvent(peerPath, cryptNetworkContainer);</b>
 <b class="nc">&nbsp;                                            routes.append(bridgeProtocol);</b>
@@ -433,11 +433,11 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;        } else {
 &nbsp;            //TODO Duplicate code, consider centralizing method
 <b class="nc">&nbsp;            if (CXPath.isBridge(cxPath)) {</b>
-<b class="nc">&nbsp;                dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =</b>
+<b class="nc">&nbsp;                us.anvildevelopment.cxnet.network.nodemesh.bridge.BridgeProvider bridge =</b>
 <b class="nc">&nbsp;                        connectXAPI.getBridgeProvider(cxPath.bridge);</b>
 <b class="nc">&nbsp;                if (bridge != null) {</b>
 &nbsp;                    //TODO mem waste, fix duplicate, adverting risk
-<b class="nc">&nbsp;                    dev.droppinganvil.v3.network.CXPath bridgePath = new dev.droppinganvil.v3.network.CXPath();</b>
+<b class="nc">&nbsp;                    us.anvildevelopment.cxnet.network.CXPath bridgePath = new dev.droppinganvil.v3.network.CXPath();</b>
 <b class="nc">&nbsp;                    bridgePath.bridgeArg = cxPath.bridgeArg;</b>
 <b class="nc">&nbsp;                    bridge.transmitEvent(bridgePath, cryptNetworkContainer);</b>
 <b class="nc">&nbsp;                    System.out.println(&quot;[NodeMesh] Direct bridge &quot; + cxPath.address +</b>

@@ -89,10 +89,10 @@ Current scope:     <a href="../../index.html">all classes</a>
 <pre>
 <code class="sourceCode" id="sourceCode">&nbsp;package dev.droppinganvil.v3.test;
 &nbsp;
-&nbsp;import dev.droppinganvil.v3.ConnectX;
-&nbsp;import dev.droppinganvil.v3.network.events.EventType;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.Node;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider;
+&nbsp;import us.anvildevelopment.cxnet.ConnectX;
+&nbsp;import events.network.us.anvildevelopment.cxnet.EventType;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.Node;
+&nbsp;import bridge.nodemesh.network.us.anvildevelopment.cxnet.BridgeProvider;
 &nbsp;
 &nbsp;/**
 &nbsp; * HTTP Bridge Test
@@ -187,7 +187,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;        // Create or load CXNET network
 <b class="fc">&nbsp;        System.out.println(&quot;\nStep 3: Setting up CXNET network...&quot;);</b>
-&nbsp;        dev.droppinganvil.v3.network.CXNetwork cxnet;
+&nbsp;        network.us.anvildevelopment.cxnet.CXNetwork cxnet;
 &nbsp;
 &nbsp;        // Check if CXNET already exists in memory
 <b class="fc">&nbsp;        cxnet = server.getNetwork(NETWORK_NAME);</b>
@@ -235,7 +235,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;            // Create versioned seed for CXNET distribution
 <b class="fc">&nbsp;            System.out.println(&quot;  Creating official CXNET seed...&quot;);</b>
-<b class="fc">&nbsp;            dev.droppinganvil.v3.network.Seed seed = new dev.droppinganvil.v3.network.Seed();</b>
+<b class="fc">&nbsp;            us.anvildevelopment.cxnet.network.Seed seed = new dev.droppinganvil.v3.network.Seed();</b>
 &nbsp;
 &nbsp;            // Set seed metadata
 <b class="fc">&nbsp;            seed.seedID = java.util.UUID.randomUUID().toString();</b>
@@ -246,7 +246,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="fc">&nbsp;            seed.addNetwork(cxnet);</b>
 &nbsp;
 &nbsp;            // Add EPOCH as bootstrap peer (hv peer and peer finding node)
-<b class="fc">&nbsp;            dev.droppinganvil.v3.network.nodemesh.Node epochNode = new dev.droppinganvil.v3.network.nodemesh.Node();</b>
+<b class="fc">&nbsp;            us.anvildevelopment.cxnet.network.nodemesh.Node epochNode = new dev.droppinganvil.v3.network.nodemesh.Node();</b>
 <b class="fc">&nbsp;            epochNode.cxID = SERVER_ID;</b>
 <b class="fc">&nbsp;            epochNode.publicKey = serverPubKey;</b>
 <b class="fc">&nbsp;            epochNode.addr = &quot;cxHTTP1:https://CXNET.AnvilDevelopment.US/cx&quot;;</b>
@@ -290,7 +290,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;        // Create TESTNET for blockchain replication testing
 <b class="fc">&nbsp;        System.out.println(&quot;\nStep 3b: Setting up TESTNET (blockchain replication test network)...&quot;);</b>
-<b class="fc">&nbsp;        dev.droppinganvil.v3.network.CXNetwork testnet = server.getNetwork(&quot;TESTNET&quot;);</b>
+<b class="fc">&nbsp;        us.anvildevelopment.cxnet.network.CXNetwork testnet = server.getNetwork(&quot;TESTNET&quot;);</b>
 &nbsp;
 <b class="pc">&nbsp;        if (testnet == null) {</b>
 <b class="fc">&nbsp;            testnet = server.createNetwork(&quot;TESTNET&quot;);</b>
@@ -306,14 +306,14 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="fc">&nbsp;            System.out.println(&quot;    Sync interval: 30 seconds (testing mode)&quot;);</b>
 &nbsp;
 &nbsp;            // Create TESTNET seed
-<b class="fc">&nbsp;            dev.droppinganvil.v3.network.Seed testnetSeed = new dev.droppinganvil.v3.network.Seed();</b>
+<b class="fc">&nbsp;            us.anvildevelopment.cxnet.network.Seed testnetSeed = new dev.droppinganvil.v3.network.Seed();</b>
 <b class="fc">&nbsp;            testnetSeed.seedID = java.util.UUID.randomUUID().toString();</b>
 <b class="fc">&nbsp;            testnetSeed.timestamp = System.currentTimeMillis();</b>
 <b class="fc">&nbsp;            testnetSeed.networkID = &quot;TESTNET&quot;;</b>
 <b class="fc">&nbsp;            testnetSeed.addNetwork(testnet);</b>
 &nbsp;
 &nbsp;            // Add EPOCH as bootstrap peer for TESTNET too
-<b class="fc">&nbsp;            dev.droppinganvil.v3.network.nodemesh.Node epochNode = new dev.droppinganvil.v3.network.nodemesh.Node();</b>
+<b class="fc">&nbsp;            us.anvildevelopment.cxnet.network.nodemesh.Node epochNode = new dev.droppinganvil.v3.network.nodemesh.Node();</b>
 <b class="fc">&nbsp;            epochNode.cxID = SERVER_ID;</b>
 <b class="fc">&nbsp;            epochNode.publicKey = serverPubKey;</b>
 <b class="fc">&nbsp;            epochNode.addr = &quot;cxHTTP1:https://CXNET.AnvilDevelopment.US/cx&quot;;</b>
@@ -446,7 +446,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;     * Creates 100+ events to test block rotation
 &nbsp;     * EPOCH (NMI) has permissions to record events to all chains
 &nbsp;     */
-&nbsp;    private static void createTestBlockchainEvents(ConnectX server, dev.droppinganvil.v3.network.CXNetwork network) {
+&nbsp;    private static void createTestBlockchainEvents(ConnectX server, network.us.anvildevelopment.cxnet.CXNetwork network) {
 &nbsp;        try {
 <b class="nc">&nbsp;            String networkID = network.configuration.netID;</b>
 <b class="nc">&nbsp;            System.out.println(&quot;  Creating 105 test events on &quot; + networkID + &quot; c3 (Events chain) to test block rotation...&quot;);</b>
@@ -507,7 +507,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;                    // Check event queue
 <b class="fc">&nbsp;                    if (!server.eventQueue.isEmpty()) {</b>
-&nbsp;                        dev.droppinganvil.v3.network.InputBundle bundle;
+&nbsp;                        network.us.anvildevelopment.cxnet.InputBundle bundle;
 <b class="fc">&nbsp;                        synchronized (server.eventQueue) {</b>
 <b class="fc">&nbsp;                            bundle = server.eventQueue.poll();</b>
 <b class="fc">&nbsp;                        }</b>

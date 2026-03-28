@@ -124,21 +124,21 @@ Current scope:     <a href="../../index.html">all classes</a>
 <code class="sourceCode" id="sourceCode">&nbsp;package dev.droppinganvil.v3.network.nodemesh;
 &nbsp;
 &nbsp;import com.fasterxml.jackson.databind.exc.MismatchedInputException;
-&nbsp;import dev.droppinganvil.v3.ConnectX;
-&nbsp;import dev.droppinganvil.v3.Permission;
-&nbsp;import dev.droppinganvil.v3.analytics.AnalyticData;
-&nbsp;import dev.droppinganvil.v3.analytics.Analytics;
-&nbsp;import dev.droppinganvil.v3.crypt.core.exceptions.DecryptionFailureException;
-&nbsp;import dev.droppinganvil.v3.crypt.pgpainless.PainlessCryptProvider;
-&nbsp;import dev.droppinganvil.v3.edge.NetworkBlock;
-&nbsp;import dev.droppinganvil.v3.edge.NetworkRecord;
-&nbsp;import dev.droppinganvil.v3.io.IOThread;
+&nbsp;import us.anvildevelopment.cxnet.ConnectX;
+&nbsp;import us.anvildevelopment.cxnet.Permission;
+&nbsp;import analytics.us.anvildevelopment.cxnet.AnalyticData;
+&nbsp;import analytics.us.anvildevelopment.cxnet.Analytics;
+&nbsp;import exceptions.core.crypt.us.anvildevelopment.cxnet.DecryptionFailureException;
+&nbsp;import pgpainless.crypt.us.anvildevelopment.cxnet.PainlessCryptProvider;
+&nbsp;import edge.us.anvildevelopment.cxnet.NetworkBlock;
+&nbsp;import edge.us.anvildevelopment.cxnet.NetworkRecord;
+&nbsp;import io.us.anvildevelopment.cxnet.IOThread;
 &nbsp;import dev.droppinganvil.v3.network.*;
 &nbsp;import dev.droppinganvil.v3.network.events.*;
-&nbsp;import dev.droppinganvil.v3.network.threads.EventProcessor;
-&nbsp;import dev.droppinganvil.v3.network.threads.OutputProcessor;
-&nbsp;import dev.droppinganvil.v3.network.threads.RetryProcessor;
-&nbsp;import dev.droppinganvil.v3.network.threads.SocketWatcher;
+&nbsp;import threads.network.us.anvildevelopment.cxnet.EventProcessor;
+&nbsp;import threads.network.us.anvildevelopment.cxnet.OutputProcessor;
+&nbsp;import threads.network.us.anvildevelopment.cxnet.RetryProcessor;
+&nbsp;import threads.network.us.anvildevelopment.cxnet.SocketWatcher;
 &nbsp;import org.bouncycastle.openpgp.PGPPublicKeyRing;
 &nbsp;import org.pgpainless.decryption_verification.OpenPgpMetadata;
 &nbsp;import us.anvildevelopment.util.tools.permissions.BasicEntry;
@@ -1240,7 +1240,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="fc">&nbsp;                            PeerFinding pf =</b>
 <b class="fc">&nbsp;                                (PeerFinding) ConnectX.deserialize(&quot;cxJSON1&quot;, new String(ib.verifiedObjectBytes, &quot;UTF-8&quot;),</b>
 &nbsp;                                    PeerFinding.class);
-&nbsp;                           // dev.droppinganvil.v3.network.events.PeerFinding pff = dev.droppinganvil.v3.network.events.PeerFinding) connectX.encryptionProvider.verifyAndStrip()
+&nbsp;                           // events.network.us.anvildevelopment.cxnet.PeerFinding pff = events.network.us.anvildevelopment.cxnet.PeerFinding) connectX.encryptionProvider.verifyAndStrip()
 &nbsp;
 <b class="fc">&nbsp;                            if (&quot;request&quot;.equals(pf.t)) {</b>
 &nbsp;                                // Handle PeerFinding request - respond with our known peers
@@ -1315,7 +1315,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;                                    //responseEvent.d = responseJson.getBytes(&quot;UTF-8&quot;);
 &nbsp;
 &nbsp;                                    // Reply to sender
-&nbsp;                                   //responseEvent.p = new dev.droppinganvil.v3.network.CXPath();
+&nbsp;                                   //responseEvent.p = new network.us.anvildevelopment.cxnet.CXPath();
 &nbsp;                                    //responseEvent.p.cxID = nc.iD;
 &nbsp;                                    //responseEvent.p.scope = &quot;CXS&quot;; // Single peer response
 &nbsp;                                   // if (ne.p != null) {

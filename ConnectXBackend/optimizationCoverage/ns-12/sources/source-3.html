@@ -94,10 +94,10 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;package dev.droppinganvil.v3.network.threads;
 &nbsp;
-&nbsp;import dev.droppinganvil.v3.ConnectX;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.NodeConfig;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.OutConnectionController;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.RetryBundle;
+&nbsp;import us.anvildevelopment.cxnet.ConnectX;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.NodeConfig;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.OutConnectionController;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.RetryBundle;
 &nbsp;
 &nbsp;import java.util.ArrayList;
 &nbsp;import java.util.List;
@@ -191,8 +191,8 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;                            // Re-encrypt the event data with E2E encryption for the target peer
 <b class="fc">&nbsp;                            byte[] eventData = bundle.bundle.ne.d;</b>
 &nbsp;
-<b class="fc">&nbsp;                            dev.droppinganvil.v3.network.events.EventType et =</b>
-<b class="fc">&nbsp;                                dev.droppinganvil.v3.network.events.EventType.valueOf(bundle.bundle.ne.eT);</b>
+<b class="fc">&nbsp;                            us.anvildevelopment.cxnet.network.events.EventType et =</b>
+<b class="fc">&nbsp;                                us.anvildevelopment.cxnet.network.events.EventType.valueOf(bundle.bundle.ne.eT);</b>
 &nbsp;
 <b class="fc">&nbsp;                            outController.connectXAPI.buildEvent(et, eventData)</b>
 <b class="pc">&nbsp;                                .toNetwork(networkID != null ? networkID : &quot;CXNET&quot;)</b>

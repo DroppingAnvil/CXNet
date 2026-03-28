@@ -94,10 +94,10 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;package dev.droppinganvil.v3.network.threads;
 &nbsp;
-&nbsp;import dev.droppinganvil.v3.ConnectX;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.NodeConfig;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.OutConnectionController;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.OutputBundle;
+&nbsp;import us.anvildevelopment.cxnet.ConnectX;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.NodeConfig;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.OutConnectionController;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.OutputBundle;
 &nbsp;
 &nbsp;/**
 &nbsp; * Processes outbound network events from outputQueue
@@ -175,16 +175,16 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;                    } catch (Exception e) {
 &nbsp;                        // Move failed event to retry queue instead of dropping it
 &nbsp;                        // This prevents failed events (e.g., to offline EPOCH) from blocking the output queue
-<b class="fc">&nbsp;                        dev.droppinganvil.v3.network.nodemesh.RetryBundle retryBundle =</b>
-&nbsp;                            new dev.droppinganvil.v3.network.nodemesh.RetryBundle(bundle);
+<b class="fc">&nbsp;                        us.anvildevelopment.cxnet.network.nodemesh.RetryBundle retryBundle =</b>
+&nbsp;                            new nodemesh.network.us.anvildevelopment.cxnet.RetryBundle(bundle);
 <b class="fc">&nbsp;                        retryBundle.scheduleNextRetry(e.getMessage());</b>
 &nbsp;
 <b class="fc">&nbsp;                        outController.connectXAPI.retryQueue.add(retryBundle);</b>
 &nbsp;
 <b class="fc">&nbsp;                        System.err.println(&quot;[OUT-ERROR] &quot; + eventType + &quot; to &quot; + nodeAddr + &quot; failed: &quot; + e.getMessage());</b>
 <b class="fc">&nbsp;                        System.err.println(&quot;[RETRY-QUEUE] Added to retry queue (retry 1/&quot; +</b>
-&nbsp;                            dev.droppinganvil.v3.network.nodemesh.RetryBundle.MAX_RETRIES +
-&nbsp;                            &quot; in &quot; + (dev.droppinganvil.v3.network.nodemesh.RetryBundle.INITIAL_RETRY_DELAY_MS / 1000) + &quot;s)&quot;);
+&nbsp;                            nodemesh.network.us.anvildevelopment.cxnet.RetryBundle.MAX_RETRIES +
+&nbsp;                            &quot; in &quot; + (nodemesh.network.us.anvildevelopment.cxnet.RetryBundle.INITIAL_RETRY_DELAY_MS / 1000) + &quot;s)&quot;);
 &nbsp;                    }
 &nbsp;                }
 &nbsp;

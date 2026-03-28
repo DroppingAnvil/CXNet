@@ -89,11 +89,11 @@ Current scope:     <a href="../../index.html">all classes</a>
 <pre>
 <code class="sourceCode" id="sourceCode">&nbsp;package dev.droppinganvil.v3.test;
 &nbsp;
-&nbsp;import dev.droppinganvil.v3.ConnectX;
-&nbsp;import dev.droppinganvil.v3.network.CXNetwork;
-&nbsp;import dev.droppinganvil.v3.network.events.EventType;
-&nbsp;import dev.droppinganvil.v3.network.events.SeedExchange;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.PeerDirectory;
+&nbsp;import us.anvildevelopment.cxnet.ConnectX;
+&nbsp;import network.us.anvildevelopment.cxnet.CXNetwork;
+&nbsp;import events.network.us.anvildevelopment.cxnet.EventType;
+&nbsp;import events.network.us.anvildevelopment.cxnet.SeedExchange;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.PeerDirectory;
 &nbsp;
 &nbsp;import java.util.ArrayList;
 &nbsp;import java.util.List;
@@ -177,7 +177,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;                try {
 &nbsp;                    // Get THIS peer&#39;s bridge provider instance (not the global one)
-<b class="nc">&nbsp;                    dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider bridge =</b>
+<b class="nc">&nbsp;                    us.anvildevelopment.cxnet.network.nodemesh.bridge.BridgeProvider bridge =</b>
 <b class="nc">&nbsp;                        peer.getBridgeProvider(&quot;cxHTTP1&quot;);</b>
 <b class="nc">&nbsp;                    if (bridge instanceof dev.droppinganvil.v3.network.nodemesh.bridge.http.HTTPBridgeProvider) {</b>
 <b class="nc">&nbsp;                        ((dev.droppinganvil.v3.network.nodemesh.bridge.http.HTTPBridgeProvider) bridge).startServer(httpPort);</b>
@@ -232,7 +232,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;                        // Check if all peers are READY
 <b class="nc">&nbsp;                        int readyCount = 0;</b>
 <b class="nc">&nbsp;                        for (ConnectX peer : peers) {</b>
-<b class="nc">&nbsp;                            if (peer.state == dev.droppinganvil.v3.State.READY) {</b>
+<b class="nc">&nbsp;                            if (peer.state == us.anvildevelopment.cxnet.State.READY) {</b>
 <b class="nc">&nbsp;                                readyCount++;</b>
 &nbsp;                            }
 &nbsp;                        }
@@ -491,7 +491,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="nc">&nbsp;                            System.out.println(&quot;      ... and &quot; + (hvPeerCount - 3) + &quot; more&quot;);</b>
 &nbsp;                            break;
 &nbsp;                        }
-<b class="nc">&nbsp;                        dev.droppinganvil.v3.network.nodemesh.Node node = peer.nodeMesh.peerDirectory.hv.get(peerID);</b>
+<b class="nc">&nbsp;                        us.anvildevelopment.cxnet.network.nodemesh.Node node = peer.nodeMesh.peerDirectory.hv.get(peerID);</b>
 <b class="nc">&nbsp;                        System.out.println(&quot;      &quot; + peerID.substring(0, 8) + &quot; @ &quot; + node.addr);</b>
 &nbsp;                    }
 &nbsp;                }
@@ -602,8 +602,8 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="nc">&nbsp;        System.out.println(&quot;------------------------------------------------------------------&quot;);</b>
 <b class="nc">&nbsp;        System.out.println(&quot;Creating REGISTER_NODE event...&quot;);</b>
 &nbsp;
-<b class="nc">&nbsp;        dev.droppinganvil.v3.network.events.NetworkEvent registerEvent =</b>
-&nbsp;            new dev.droppinganvil.v3.network.events.NetworkEvent();
+<b class="nc">&nbsp;        us.anvildevelopment.cxnet.network.events.NetworkEvent registerEvent =</b>
+&nbsp;            new events.network.us.anvildevelopment.cxnet.NetworkEvent();
 <b class="nc">&nbsp;        registerEvent.eT = EventType.REGISTER_NODE.name();</b>
 <b class="nc">&nbsp;        registerEvent.iD = java.util.UUID.randomUUID().toString();</b>
 <b class="nc">&nbsp;        registerEvent.executeOnSync = true;</b>
@@ -634,8 +634,8 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="nc">&nbsp;        System.out.println(&quot;TEST 3: Node Blocking (BLOCK_NODE)&quot;);</b>
 <b class="nc">&nbsp;        System.out.println(&quot;------------------------------------------------------------------&quot;);</b>
 &nbsp;
-<b class="nc">&nbsp;        dev.droppinganvil.v3.network.events.NetworkEvent blockEvent =</b>
-&nbsp;            new dev.droppinganvil.v3.network.events.NetworkEvent();
+<b class="nc">&nbsp;        us.anvildevelopment.cxnet.network.events.NetworkEvent blockEvent =</b>
+&nbsp;            new events.network.us.anvildevelopment.cxnet.NetworkEvent();
 <b class="nc">&nbsp;        blockEvent.eT = EventType.BLOCK_NODE.name();</b>
 <b class="nc">&nbsp;        blockEvent.iD = java.util.UUID.randomUUID().toString();</b>
 <b class="nc">&nbsp;        blockEvent.executeOnSync = true;</b>
@@ -667,8 +667,8 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="nc">&nbsp;        System.out.println(&quot;TEST 4: Node Unblocking (UNBLOCK_NODE)&quot;);</b>
 <b class="nc">&nbsp;        System.out.println(&quot;------------------------------------------------------------------&quot;);</b>
 &nbsp;
-<b class="nc">&nbsp;        dev.droppinganvil.v3.network.events.NetworkEvent unblockEvent =</b>
-&nbsp;            new dev.droppinganvil.v3.network.events.NetworkEvent();
+<b class="nc">&nbsp;        us.anvildevelopment.cxnet.network.events.NetworkEvent unblockEvent =</b>
+&nbsp;            new events.network.us.anvildevelopment.cxnet.NetworkEvent();
 <b class="nc">&nbsp;        unblockEvent.eT = EventType.UNBLOCK_NODE.name();</b>
 <b class="nc">&nbsp;        unblockEvent.iD = java.util.UUID.randomUUID().toString();</b>
 <b class="nc">&nbsp;        unblockEvent.executeOnSync = true;</b>
@@ -1047,9 +1047,9 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;        // Grant EPOCH permission to record to CXNET c3 (for other operations)
 <b class="nc">&nbsp;        String EPOCH_ID = &quot;00000000-0000-0000-0000-000000000001&quot;;</b>
 <b class="nc">&nbsp;        java.util.Map&lt;String, us.anvildevelopment.util.tools.permissions.Entry&gt; epochPerms = new java.util.HashMap&lt;&gt;();</b>
-<b class="nc">&nbsp;        epochPerms.put(dev.droppinganvil.v3.Permission.Record.name() + &quot;-&quot; + c3ID,</b>
+<b class="nc">&nbsp;        epochPerms.put(us.anvildevelopment.cxnet.Permission.Record.name() + &quot;-&quot; + c3ID,</b>
 &nbsp;            new us.anvildevelopment.util.tools.permissions.BasicEntry(
-<b class="nc">&nbsp;                dev.droppinganvil.v3.Permission.Record.name() + &quot;-&quot; + c3ID, true, 10));</b>
+<b class="nc">&nbsp;                us.anvildevelopment.cxnet.Permission.Record.name() + &quot;-&quot; + c3ID, true, 10));</b>
 <b class="nc">&nbsp;        cxnet.networkPermissions.permissionSet.put(EPOCH_ID, epochPerms);</b>
 <b class="nc">&nbsp;        System.out.println(&quot;  ✓ Granted EPOCH permission to record to c3&quot;);</b>
 &nbsp;
@@ -1057,7 +1057,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="nc">&nbsp;        int eventsBefore = cxnet.c3.current != null ? cxnet.c3.current.networkEvents.size() : 0;</b>
 &nbsp;
 <b class="nc">&nbsp;        System.out.println(&quot;  c3 BEFORE: Block &quot; + c3Before + &quot; (&quot; + eventsBefore + &quot; events)&quot;);</b>
-<b class="nc">&nbsp;        System.out.println(&quot;  Peer 4 has permission: &quot; + cxnet.checkChainPermission(PEER4_ID, dev.droppinganvil.v3.Permission.Record.name(), c3ID));</b>
+<b class="nc">&nbsp;        System.out.println(&quot;  Peer 4 has permission: &quot; + cxnet.checkChainPermission(PEER4_ID, us.anvildevelopment.cxnet.Permission.Record.name(), c3ID));</b>
 <b class="nc">&nbsp;        System.out.println(&quot;  Sending 10 MESSAGE events from Peer 4 WITHOUT permission...&quot;);</b>
 &nbsp;
 <b class="nc">&nbsp;        for (int i = 0; i &lt; 10; i++) {</b>
@@ -1087,7 +1087,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="nc">&nbsp;        java.util.Map&lt;String, Object&gt; permissionGrant = new java.util.HashMap&lt;&gt;();</b>
 <b class="nc">&nbsp;        permissionGrant.put(&quot;network&quot;, &quot;TESTNET&quot;);</b>
 <b class="nc">&nbsp;        permissionGrant.put(&quot;nodeID&quot;, PEER4_ID);</b>
-<b class="nc">&nbsp;        permissionGrant.put(&quot;permission&quot;, dev.droppinganvil.v3.Permission.Record.name());</b>
+<b class="nc">&nbsp;        permissionGrant.put(&quot;permission&quot;, us.anvildevelopment.cxnet.Permission.Record.name());</b>
 <b class="nc">&nbsp;        permissionGrant.put(&quot;chain&quot;, c3ID.intValue());</b>
 <b class="nc">&nbsp;        permissionGrant.put(&quot;priority&quot;, 10);</b>
 &nbsp;
@@ -1105,7 +1105,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="nc">&nbsp;        Thread.sleep(2000);</b>
 &nbsp;
 &nbsp;        // Verify permission was granted
-<b class="nc">&nbsp;        boolean peer4HasPermission = cxnet.checkChainPermission(PEER4_ID, dev.droppinganvil.v3.Permission.Record.name(), c3ID);</b>
+<b class="nc">&nbsp;        boolean peer4HasPermission = cxnet.checkChainPermission(PEER4_ID, us.anvildevelopment.cxnet.Permission.Record.name(), c3ID);</b>
 <b class="nc">&nbsp;        System.out.println(&quot;  ✓ Peer 4 has Record permission on c3: &quot; + peer4HasPermission);</b>
 &nbsp;
 <b class="nc">&nbsp;        System.out.println(&quot;  Block length: 100 events&quot;);</b>
@@ -1181,7 +1181,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;        // Try WITHOUT permissions
 <b class="nc">&nbsp;        System.out.println(&quot;  Test 1: Peer 2 tries to record WITHOUT permissions&quot;);</b>
-<b class="nc">&nbsp;        boolean r1 = cxnet.checkChainPermission(PEER2_ID, dev.droppinganvil.v3.Permission.Record.name(), c3ID);</b>
+<b class="nc">&nbsp;        boolean r1 = cxnet.checkChainPermission(PEER2_ID, us.anvildevelopment.cxnet.Permission.Record.name(), c3ID);</b>
 <b class="nc">&nbsp;        System.out.println(&quot;    Has permission: &quot; + (r1 ? &quot;YES (unexpected!)&quot; : &quot;NO (expected)&quot;));</b>
 &nbsp;
 <b class="nc">&nbsp;        Thread.sleep(1000);</b>
@@ -1189,15 +1189,15 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;        // GRANT permissions
 <b class="nc">&nbsp;        System.out.println(&quot;\n  Test 2: Granting Peer 2 c3 recording permission...&quot;);</b>
 <b class="nc">&nbsp;        java.util.Map&lt;String, us.anvildevelopment.util.tools.permissions.Entry&gt; perms = new java.util.HashMap&lt;&gt;();</b>
-<b class="nc">&nbsp;        perms.put(dev.droppinganvil.v3.Permission.Record.name() + &quot;-&quot; + c3ID,</b>
+<b class="nc">&nbsp;        perms.put(us.anvildevelopment.cxnet.Permission.Record.name() + &quot;-&quot; + c3ID,</b>
 &nbsp;            new us.anvildevelopment.util.tools.permissions.BasicEntry(
-<b class="nc">&nbsp;                dev.droppinganvil.v3.Permission.Record.name() + &quot;-&quot; + c3ID, true, 10));</b>
+<b class="nc">&nbsp;                us.anvildevelopment.cxnet.Permission.Record.name() + &quot;-&quot; + c3ID, true, 10));</b>
 <b class="nc">&nbsp;        cxnet.networkPermissions.permissionSet.put(PEER2_ID, perms);</b>
 &nbsp;
 <b class="nc">&nbsp;        System.out.println(&quot;    ✓ Permissions granted&quot;);</b>
 &nbsp;
 &nbsp;        // Verify permission works
-<b class="nc">&nbsp;        boolean r2 = cxnet.checkChainPermission(PEER2_ID, dev.droppinganvil.v3.Permission.Record.name(), c3ID);</b>
+<b class="nc">&nbsp;        boolean r2 = cxnet.checkChainPermission(PEER2_ID, us.anvildevelopment.cxnet.Permission.Record.name(), c3ID);</b>
 <b class="nc">&nbsp;        System.out.println(&quot;    Has permission: &quot; + (r2 ? &quot;YES (expected)&quot; : &quot;NO (unexpected!)&quot;));</b>
 &nbsp;
 &nbsp;        // Have Peer 2 send a message WITH permissions
@@ -1217,7 +1217,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="nc">&nbsp;        System.out.println(&quot;    ✓ Permissions revoked&quot;);</b>
 &nbsp;
 &nbsp;        // Verify permission removed
-<b class="nc">&nbsp;        boolean r3 = cxnet.checkChainPermission(PEER2_ID, dev.droppinganvil.v3.Permission.Record.name(), c3ID);</b>
+<b class="nc">&nbsp;        boolean r3 = cxnet.checkChainPermission(PEER2_ID, us.anvildevelopment.cxnet.Permission.Record.name(), c3ID);</b>
 <b class="nc">&nbsp;        System.out.println(&quot;    Has permission: &quot; + (r3 ? &quot;YES (unexpected!)&quot; : &quot;NO (expected)&quot;));</b>
 &nbsp;
 &nbsp;        // Try sending AFTER revocation

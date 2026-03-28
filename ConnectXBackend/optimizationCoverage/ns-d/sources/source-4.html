@@ -89,12 +89,12 @@ Current scope:     <a href="../../index.html">all classes</a>
 <pre>
 <code class="sourceCode" id="sourceCode">&nbsp;package dev.droppinganvil.v3.network.nodemesh;
 &nbsp;
-&nbsp;import dev.droppinganvil.v3.Configuration;
-&nbsp;import dev.droppinganvil.v3.ConnectX;
-&nbsp;import dev.droppinganvil.v3.edge.DataContainer;
-&nbsp;import dev.droppinganvil.v3.network.events.EventType;
-&nbsp;import dev.droppinganvil.v3.network.events.NetworkEvent;
-&nbsp;import dev.droppinganvil.v3.network.events.NetworkContainer;
+&nbsp;import us.anvildevelopment.cxnet.Configuration;
+&nbsp;import us.anvildevelopment.cxnet.ConnectX;
+&nbsp;import edge.us.anvildevelopment.cxnet.DataContainer;
+&nbsp;import events.network.us.anvildevelopment.cxnet.EventType;
+&nbsp;import events.network.us.anvildevelopment.cxnet.NetworkEvent;
+&nbsp;import events.network.us.anvildevelopment.cxnet.NetworkContainer;
 &nbsp;
 &nbsp;import java.io.IOException;
 &nbsp;import java.net.*;
@@ -323,7 +323,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;            // Create CXHELLO payload using CXHello data structure
 &nbsp;            // Include peer&#39;s preferred address if available (for NAT/public IP scenarios)
 <b class="pc">&nbsp;            String peerAddress = (connectX.getSelf() != null) ? connectX.getSelf().addr : null;</b>
-<b class="fc">&nbsp;            dev.droppinganvil.v3.network.events.CXHello helloPayload =</b>
+<b class="fc">&nbsp;            us.anvildevelopment.cxnet.network.events.CXHello helloPayload =</b>
 <b class="fc">&nbsp;                new dev.droppinganvil.v3.network.events.CXHello(connectX.getOwnID(), primaryPort, signedNodeBlob, peerAddress);</b>
 &nbsp;
 <b class="fc">&nbsp;            String payloadJson = ConnectX.serialize(&quot;cxJSON1&quot;, helloPayload);</b>
@@ -476,7 +476,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="fc">&nbsp;            System.out.println(&quot;[LAN Scanner] ========================================\n&quot;);</b>
 &nbsp;
 &nbsp;            // Set ConnectX state to READY - signals that P2P discovery has completed
-<b class="fc">&nbsp;            connectX.state = dev.droppinganvil.v3.State.READY;</b>
+<b class="fc">&nbsp;            connectX.state = us.anvildevelopment.cxnet.State.READY;</b>
 <b class="pc">&nbsp;            if (NodeConfig.DEBUG) System.out.println(&quot;[LAN Scanner] Network state set to READY&quot;);</b>
 &nbsp;
 <b class="fc">&nbsp;            scanning = false;</b>

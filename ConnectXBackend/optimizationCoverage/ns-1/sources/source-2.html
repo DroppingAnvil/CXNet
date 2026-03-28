@@ -193,31 +193,31 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;package dev.droppinganvil.v3;
 &nbsp;
-&nbsp;import dev.droppinganvil.v3.api.CXPlugin;
-&nbsp;import dev.droppinganvil.v3.crypt.core.CryptProvider;
-&nbsp;import dev.droppinganvil.v3.crypt.pgpainless.PainlessCryptProvider;
-&nbsp;import dev.droppinganvil.v3.edge.NetworkRecord;
-&nbsp;import dev.droppinganvil.v3.exceptions.UnsafeKeywordException;
-&nbsp;import dev.droppinganvil.v3.io.IOJob;
-&nbsp;import dev.droppinganvil.v3.io.strings.JacksonProvider;
-&nbsp;import dev.droppinganvil.v3.io.strings.SerializationProvider;
-&nbsp;import dev.droppinganvil.v3.network.BlockchainPersistence;
-&nbsp;import dev.droppinganvil.v3.network.BlockConsensusTracker;
-&nbsp;import dev.droppinganvil.v3.network.CXNetwork;
-&nbsp;import dev.droppinganvil.v3.network.CXPath;
-&nbsp;import dev.droppinganvil.v3.network.InputBundle;
-&nbsp;import dev.droppinganvil.v3.network.NetworkDictionary;
-&nbsp;import dev.droppinganvil.v3.network.events.EventType;
-&nbsp;import dev.droppinganvil.v3.network.events.NetworkContainer;
-&nbsp;import dev.droppinganvil.v3.network.events.NetworkEvent;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.Node;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.NodeConfig;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.LANScanner;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.NodeMesh;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.OutputBundle;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.PeerDirectory;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.bridge.CXBridge;
+&nbsp;import api.us.anvildevelopment.cxnet.CXPlugin;
+&nbsp;import core.crypt.us.anvildevelopment.cxnet.CryptProvider;
+&nbsp;import pgpainless.crypt.us.anvildevelopment.cxnet.PainlessCryptProvider;
+&nbsp;import edge.us.anvildevelopment.cxnet.NetworkRecord;
+&nbsp;import exceptions.us.anvildevelopment.cxnet.UnsafeKeywordException;
+&nbsp;import io.us.anvildevelopment.cxnet.IOJob;
+&nbsp;import strings.io.us.anvildevelopment.cxnet.JacksonProvider;
+&nbsp;import strings.io.us.anvildevelopment.cxnet.SerializationProvider;
+&nbsp;import network.us.anvildevelopment.cxnet.BlockchainPersistence;
+&nbsp;import network.us.anvildevelopment.cxnet.BlockConsensusTracker;
+&nbsp;import network.us.anvildevelopment.cxnet.CXNetwork;
+&nbsp;import network.us.anvildevelopment.cxnet.CXPath;
+&nbsp;import network.us.anvildevelopment.cxnet.InputBundle;
+&nbsp;import network.us.anvildevelopment.cxnet.NetworkDictionary;
+&nbsp;import events.network.us.anvildevelopment.cxnet.EventType;
+&nbsp;import events.network.us.anvildevelopment.cxnet.NetworkContainer;
+&nbsp;import events.network.us.anvildevelopment.cxnet.NetworkEvent;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.Node;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.NodeConfig;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.LANScanner;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.NodeMesh;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.OutputBundle;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.PeerDirectory;
+&nbsp;import bridge.nodemesh.network.us.anvildevelopment.cxnet.BridgeProvider;
+&nbsp;import bridge.nodemesh.network.us.anvildevelopment.cxnet.CXBridge;
 &nbsp;import java.io.*;
 &nbsp;import java.nio.charset.StandardCharsets;
 &nbsp;import java.util.Arrays;
@@ -283,7 +283,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;    public NodeMesh nodeMesh;
 &nbsp;    public BlockchainPersistence blockchainPersistence;
-&nbsp;    public dev.droppinganvil.v3.edge.DataContainer dataContainer;
+&nbsp;    public edge.us.anvildevelopment.cxnet.DataContainer dataContainer;
 &nbsp;
 &nbsp;    /**
 &nbsp;     * Seed consensus collection for multi-peer verification
@@ -292,8 +292,8 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;     * Value: Map of peer ID -&gt; SeedResponseData
 &nbsp;     */
 <b class="fc">&nbsp;    public static class SeedResponseData {</b>
-&nbsp;        public dev.droppinganvil.v3.network.Seed dynamicSeed;
-&nbsp;        public dev.droppinganvil.v3.network.Seed epochSeed;
+&nbsp;        public network.us.anvildevelopment.cxnet.Seed dynamicSeed;
+&nbsp;        public network.us.anvildevelopment.cxnet.Seed epochSeed;
 &nbsp;        public boolean authoritative;
 &nbsp;        public String senderID;
 &nbsp;        public long timestamp;
@@ -395,8 +395,8 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;        // Each ConnectX instance gets its own HTTPBridgeProvider for independent HTTP servers
 <b class="pc">&nbsp;        if (!isBridgeProviderPresent(&quot;cxHTTP1&quot;)) {</b>
 &nbsp;            try {
-<b class="fc">&nbsp;                dev.droppinganvil.v3.network.nodemesh.bridge.http.HTTPBridgeProvider httpBridge =</b>
-&nbsp;                    new dev.droppinganvil.v3.network.nodemesh.bridge.http.HTTPBridgeProvider();
+<b class="fc">&nbsp;                us.anvildevelopment.cxnet.network.nodemesh.bridge.http.HTTPBridgeProvider httpBridge =</b>
+&nbsp;                    new http.bridge.nodemesh.network.us.anvildevelopment.cxnet.HTTPBridgeProvider();
 <b class="fc">&nbsp;                addBridgeProvider(httpBridge);</b>
 &nbsp;            } catch (Exception e) {
 &nbsp;                // Bridge registration failed - not critical for initialization
@@ -439,7 +439,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;    }
 &nbsp;
 &nbsp;    // Bridge Provider Management (per-instance for multi-peer support)
-&nbsp;    public void addBridgeProvider(dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider provider) throws UnsafeKeywordException, IllegalAccessException {
+&nbsp;    public void addBridgeProvider(bridge.nodemesh.network.us.anvildevelopment.cxnet.BridgeProvider provider) throws UnsafeKeywordException, IllegalAccessException {
 <b class="fc">&nbsp;        String protocol = provider.getBridgeProtocol();</b>
 <b class="fc">&nbsp;        checkSafety(protocol);</b>
 <b class="pc">&nbsp;        if (bridgeProviders.containsKey(protocol)) {</b>
@@ -449,7 +449,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="fc">&nbsp;        bridgeProviders.put(protocol, provider);</b>
 &nbsp;    }
 &nbsp;
-&nbsp;    public dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider getBridgeProvider(String protocol) {
+&nbsp;    public bridge.nodemesh.network.us.anvildevelopment.cxnet.BridgeProvider getBridgeProvider(String protocol) {
 <b class="fc">&nbsp;        return bridgeProviders.get(protocol);</b>
 &nbsp;    }
 &nbsp;
@@ -924,7 +924,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;         * Set transmission preferences
 &nbsp;         * @param transmitPref Transmission preference settings
 &nbsp;         */
-&nbsp;        public EventBuilder transmitPreference(dev.droppinganvil.v3.network.nodemesh.TransmitPref transmitPref) {
+&nbsp;        public EventBuilder transmitPreference(nodemesh.network.us.anvildevelopment.cxnet.TransmitPref transmitPref) {
 <b class="nc">&nbsp;            this.container.tP = transmitPref;</b>
 <b class="nc">&nbsp;            return this;</b>
 &nbsp;        }
@@ -1142,7 +1142,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;     * Checks both cxID and public key so a stale entry with a different ID
 &nbsp;     * but our key is also caught.
 &nbsp;     */
-&nbsp;    public boolean isSelfNode(dev.droppinganvil.v3.network.nodemesh.Node node) {
+&nbsp;    public boolean isSelfNode(nodemesh.network.us.anvildevelopment.cxnet.Node node) {
 <b class="pc">&nbsp;        if (node == null) return false;</b>
 <b class="pc">&nbsp;        if (node.cxID != null &amp;&amp; node.cxID.equals(getOwnID())) return true;</b>
 <b class="pc">&nbsp;        if (node.publicKey != null) {</b>
@@ -1153,7 +1153,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;    }
 &nbsp;
 &nbsp;    /** Remove all self entries from all peer directory maps. Checks both cxID and public key. */
-&nbsp;    private void purgeFromPeerDirectory(dev.droppinganvil.v3.network.nodemesh.PeerDirectory pd) {
+&nbsp;    private void purgeFromPeerDirectory(nodemesh.network.us.anvildevelopment.cxnet.PeerDirectory pd) {
 <b class="nc">&nbsp;        if (pd == null) return;</b>
 <b class="nc">&nbsp;        purgeSelfFromMap(pd.hv);</b>
 <b class="nc">&nbsp;        purgeSelfFromMap(pd.seen);</b>
@@ -1262,7 +1262,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;        );
 &nbsp;
 &nbsp;        // Load seed to extract cx.asc
-<b class="nc">&nbsp;        dev.droppinganvil.v3.network.Seed seed = dev.droppinganvil.v3.network.Seed.load(bootstrapSeed);</b>
+<b class="nc">&nbsp;        us.anvildevelopment.cxnet.network.Seed seed = us.anvildevelopment.cxnet.network.Seed.load(bootstrapSeed);</b>
 &nbsp;
 &nbsp;        // Extract EPOCH&#39;s public key (cx.asc) if not already present
 <b class="nc">&nbsp;        if (seed.certificates != null &amp;&amp; seed.certificates.containsKey(EPOCH_UUID)) {</b>
@@ -1303,7 +1303,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="fc">&nbsp;            File bootstrapSeed = new File(cxRoot, &quot;cxnet-bootstrap.cxn&quot;);</b>
 <b class="pc">&nbsp;            if (bootstrapSeed.exists()) {</b>
 <b class="fc">&nbsp;                System.out.println(&quot;[Bootstrap] Found distribution bootstrap seed&quot;);</b>
-<b class="fc">&nbsp;                dev.droppinganvil.v3.network.Seed seed = dev.droppinganvil.v3.network.Seed.load(bootstrapSeed);</b>
+<b class="fc">&nbsp;                us.anvildevelopment.cxnet.network.Seed seed = us.anvildevelopment.cxnet.network.Seed.load(bootstrapSeed);</b>
 &nbsp;
 &nbsp;                // Apply bootstrap seed to get initial CXNET config and EPOCH&#39;s public key
 <b class="fc">&nbsp;                applySeed(seed);</b>
@@ -1345,7 +1345,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;                }
 &nbsp;
 <b class="nc">&nbsp;                System.out.println(&quot;[Bootstrap] Loading local seed: &quot; + latestSeed.getName());</b>
-<b class="nc">&nbsp;                dev.droppinganvil.v3.network.Seed seed = dev.droppinganvil.v3.network.Seed.load(latestSeed);</b>
+<b class="nc">&nbsp;                us.anvildevelopment.cxnet.network.Seed seed = us.anvildevelopment.cxnet.network.Seed.load(latestSeed);</b>
 &nbsp;
 &nbsp;                // Apply seed (loads networks, peers, certificates)
 <b class="nc">&nbsp;                applySeed(seed);</b>
@@ -1393,7 +1393,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;     * @param seed Seed to apply
 &nbsp;     * @throws Exception if application fails
 &nbsp;     */
-&nbsp;    private void applySeed(dev.droppinganvil.v3.network.Seed seed) throws Exception {
+&nbsp;    private void applySeed(network.us.anvildevelopment.cxnet.Seed seed) throws Exception {
 <b class="fc">&nbsp;        System.out.println(&quot;[Seed] Applying seed &quot; + seed.seedID);</b>
 <b class="fc">&nbsp;        System.out.println(&quot;[Seed]   Networks: &quot; + seed.networks.size());</b>
 <b class="fc">&nbsp;        System.out.println(&quot;[Seed]   HV Peers: &quot; + seed.hvPeers.size());</b>
@@ -1416,7 +1416,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;        }
 &nbsp;
 &nbsp;        // Add hv peers to directory (skip self by cxID or public key)
-<b class="fc">&nbsp;        for (dev.droppinganvil.v3.network.nodemesh.Node peer : seed.hvPeers) {</b>
+<b class="fc">&nbsp;        for (us.anvildevelopment.cxnet.network.nodemesh.Node peer : seed.hvPeers) {</b>
 <b class="pc">&nbsp;            if (isSelfNode(peer)) {</b>
 <b class="nc">&nbsp;                System.out.println(&quot;[Seed] Skipped self in hvPeers: &quot; + peer.cxID);</b>
 &nbsp;                continue;
@@ -1426,7 +1426,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;        }
 &nbsp;
 &nbsp;        // Import networks using shared registration logic
-<b class="fc">&nbsp;        for (dev.droppinganvil.v3.network.CXNetwork network : seed.networks) {</b>
+<b class="fc">&nbsp;        for (us.anvildevelopment.cxnet.network.CXNetwork network : seed.networks) {</b>
 <b class="fc">&nbsp;            String networkID = network.configuration.netID;</b>
 <b class="fc">&nbsp;            System.out.println(&quot;[Seed] Importing network: &quot; + networkID);</b>
 &nbsp;
@@ -1486,7 +1486,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;                // Send NewNode using EventBuilder pattern with signature
 <b class="fc">&nbsp;                String[] bridgeParts = EPOCH_BRIDGE_ADDRESS.split(&quot;:&quot;, 2);</b>
-<b class="fc">&nbsp;                buildEvent(dev.droppinganvil.v3.network.events.EventType.NewNode, selfJson.getBytes(&quot;UTF-8&quot;))</b>
+<b class="fc">&nbsp;                buildEvent(us.anvildevelopment.cxnet.network.events.EventType.NewNode, selfJson.getBytes(&quot;UTF-8&quot;))</b>
 <b class="fc">&nbsp;                    .toPeer(EPOCH_UUID)</b>
 <b class="fc">&nbsp;                    .viaBridge(bridgeParts[0], bridgeParts[1])</b>
 <b class="fc">&nbsp;                    .signData()</b>
@@ -1500,7 +1500,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;            // Send SEED_REQUEST using EventBuilder pattern with signature
 <b class="fc">&nbsp;            String[] bridgeParts2 = EPOCH_BRIDGE_ADDRESS.split(&quot;:&quot;, 2);</b>
-<b class="fc">&nbsp;            buildEvent(dev.droppinganvil.v3.network.events.EventType.SEED_REQUEST,</b>
+<b class="fc">&nbsp;            buildEvent(us.anvildevelopment.cxnet.network.events.EventType.SEED_REQUEST,</b>
 <b class="fc">&nbsp;                serialize(&quot;cxJSON1&quot;, new dev.droppinganvil.v3.network.events.SeedExchange(&quot;CXNET&quot;)).getBytes(&quot;UTF-8&quot;))</b>
 <b class="fc">&nbsp;                .toPeer(EPOCH_UUID)</b>
 <b class="fc">&nbsp;                .viaBridge(bridgeParts2[0], bridgeParts2[1])</b>
@@ -1542,8 +1542,8 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;                    // Send PeerFinding request to discover more peers
 <b class="nc">&nbsp;                    System.out.println(&quot;[P2P Discovery] Sending PeerFinding to &quot; + peer.cxID.substring(0, 8));</b>
-<b class="nc">&nbsp;                    dev.droppinganvil.v3.network.events.PeerFinding peerFindingReq =</b>
-&nbsp;                        new dev.droppinganvil.v3.network.events.PeerFinding();
+<b class="nc">&nbsp;                    us.anvildevelopment.cxnet.network.events.PeerFinding peerFindingReq =</b>
+&nbsp;                        new events.network.us.anvildevelopment.cxnet.PeerFinding();
 <b class="nc">&nbsp;                    peerFindingReq.t = &quot;request&quot;;</b>
 <b class="nc">&nbsp;                    peerFindingReq.network = &quot;CXNET&quot;; // Request CXNET peers</b>
 <b class="nc">&nbsp;                    String peerFindingJson = serialize(&quot;cxJSON1&quot;, peerFindingReq);</b>
@@ -1573,9 +1573,9 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;     */
 &nbsp;    public void connect(int port) throws IOException {
 <b class="fc">&nbsp;        this.listeningPort = port;</b>
-<b class="fc">&nbsp;        dev.droppinganvil.v3.network.nodemesh.OutConnectionController outController =</b>
-&nbsp;            new dev.droppinganvil.v3.network.nodemesh.OutConnectionController(this);
-<b class="fc">&nbsp;        nodeMesh = dev.droppinganvil.v3.network.nodemesh.NodeMesh.initializeNetwork(this, port, outController);</b>
+<b class="fc">&nbsp;        us.anvildevelopment.cxnet.network.nodemesh.OutConnectionController outController =</b>
+&nbsp;            new nodemesh.network.us.anvildevelopment.cxnet.OutConnectionController(this);
+<b class="fc">&nbsp;        nodeMesh = us.anvildevelopment.cxnet.network.nodemesh.NodeMesh.initializeNetwork(this, port, outController);</b>
 &nbsp;        // Initialize nodeMesh.peerDirectory.peers for signed node persistence
 <b class="fc">&nbsp;        nodeMesh.peerDirectory.peers = nodemesh;</b>
 &nbsp;
@@ -1598,8 +1598,8 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="pc">&nbsp;                            nodeMesh.in.serverSocket.isBound() &amp;&amp; !nodeMesh.in.serverSocket.isClosed()) {</b>
 &nbsp;
 <b class="fc">&nbsp;                            System.out.println(&quot;[LAN Scanner] Starting LAN scan...&quot;);</b>
-<b class="fc">&nbsp;                            dev.droppinganvil.v3.network.nodemesh.LANScanner scanner =</b>
-&nbsp;                                new dev.droppinganvil.v3.network.nodemesh.LANScanner(this, port);
+<b class="fc">&nbsp;                            us.anvildevelopment.cxnet.network.nodemesh.LANScanner scanner =</b>
+&nbsp;                                new nodemesh.network.us.anvildevelopment.cxnet.LANScanner(this, port);
 <b class="fc">&nbsp;                            scanner.scanNetwork();</b>
 <b class="fc">&nbsp;                            System.out.println(&quot;[LAN Scanner] Scan complete, next scan in 5 minutes&quot;);</b>
 &nbsp;                        } else {
@@ -1704,7 +1704,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;                                // Create CXHELLO payload using CXHello data structure
 &nbsp;                                // Include peer&#39;s preferred address if available (for NAT/public IP scenarios)
 <b class="pc">&nbsp;                                String peerAddress = (getSelf() != null) ? getSelf().addr : null;</b>
-<b class="fc">&nbsp;                                dev.droppinganvil.v3.network.events.CXHello helloPayload =</b>
+<b class="fc">&nbsp;                                us.anvildevelopment.cxnet.network.events.CXHello helloPayload =</b>
 <b class="fc">&nbsp;                                        new dev.droppinganvil.v3.network.events.CXHello(getOwnID(), listeningPort, signedNodeBlob, peerAddress);</b>
 &nbsp;
 <b class="fc">&nbsp;                                String payloadJson = ConnectX.serialize(&quot;cxJSON1&quot;, helloPayload);</b>
@@ -1762,8 +1762,8 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;                                        try {
 &nbsp;                                            // Create PeerFinding request
-<b class="fc">&nbsp;                                            dev.droppinganvil.v3.network.events.PeerFinding peerFindingReq =</b>
-&nbsp;                                                new dev.droppinganvil.v3.network.events.PeerFinding();
+<b class="fc">&nbsp;                                            us.anvildevelopment.cxnet.network.events.PeerFinding peerFindingReq =</b>
+&nbsp;                                                new events.network.us.anvildevelopment.cxnet.PeerFinding();
 <b class="fc">&nbsp;                                            peerFindingReq.t = &quot;request&quot;;</b>
 <b class="fc">&nbsp;                                            peerFindingReq.network = &quot;CXNET&quot;; // Request CXNET peers</b>
 <b class="fc">&nbsp;                                            String peerFindingJson = serialize(&quot;cxJSON1&quot;, peerFindingReq);</b>
@@ -1995,8 +1995,8 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;        // Set zT flag in network configuration
 <b class="nc">&nbsp;        network.zT = true;</b>
 &nbsp;
-<b class="nc">&nbsp;        dev.droppinganvil.v3.network.events.ZeroTrustActivation payload =</b>
-&nbsp;            new dev.droppinganvil.v3.network.events.ZeroTrustActivation(
+<b class="nc">&nbsp;        us.anvildevelopment.cxnet.network.events.ZeroTrustActivation payload =</b>
+&nbsp;            new events.network.us.anvildevelopment.cxnet.ZeroTrustActivation(
 <b class="nc">&nbsp;                networkID, System.currentTimeMillis(), network.configuration.nmiPub);</b>
 &nbsp;
 <b class="nc">&nbsp;        String payloadJson = serialize(&quot;cxJSON1&quot;, payload);</b>
@@ -2004,7 +2004,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;        // Build and queue ZERO_TRUST_ACTIVATION event
 &nbsp;        // Record to c1 (Admin chain) and distribute to all network participants
-<b class="nc">&nbsp;        buildEvent(dev.droppinganvil.v3.network.events.EventType.ZERO_TRUST_ACTIVATION, payloadJson.getBytes(&quot;UTF-8&quot;))</b>
+<b class="nc">&nbsp;        buildEvent(us.anvildevelopment.cxnet.network.events.EventType.ZERO_TRUST_ACTIVATION, payloadJson.getBytes(&quot;UTF-8&quot;))</b>
 <b class="nc">&nbsp;            .withRecordFlag(true)  // Enable automatic recording</b>
 <b class="nc">&nbsp;            .toNetwork(networkID, network.networkDictionary.c1)  // Record to c1 (Admin chain)</b>
 <b class="nc">&nbsp;            .queue();</b>
@@ -2038,7 +2038,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;        }
 &nbsp;
 &nbsp;        // Follow the same pattern as OutConnectionController.transmitEvent()
-<b class="nc">&nbsp;        dev.droppinganvil.v3.network.events.NetworkContainer nc = new dev.droppinganvil.v3.network.events.NetworkContainer();</b>
+<b class="nc">&nbsp;        us.anvildevelopment.cxnet.network.events.NetworkContainer nc = new dev.droppinganvil.v3.network.events.NetworkContainer();</b>
 <b class="nc">&nbsp;        nc.se = &quot;cxJSON1&quot;;</b>
 <b class="nc">&nbsp;        nc.s = false; // Not E2E encrypted</b>
 <b class="nc">&nbsp;        nc.iD = getOwnID(); // Sender&#39;s cxID</b>
@@ -2049,7 +2049,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="nc">&nbsp;        nc.e = signedNetwork;</b>
 &nbsp;
 &nbsp;        // Sign the outer NetworkContainer
-<b class="nc">&nbsp;        byte[] signedContainer = signObject(nc, dev.droppinganvil.v3.network.events.NetworkContainer.class, nc.se).toByteArray();</b>
+<b class="nc">&nbsp;        byte[] signedContainer = signObject(nc, us.anvildevelopment.cxnet.network.events.NetworkContainer.class, nc.se).toByteArray();</b>
 &nbsp;
 &nbsp;        // Write to file
 <b class="nc">&nbsp;        FileOutputStream fos = new FileOutputStream(exportFile);</b>
@@ -2074,9 +2074,9 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="nc">&nbsp;        String networkContainer = baos.toString(&quot;UTF-8&quot;);</b>
 &nbsp;
 &nbsp;        // Step 2: Deserialize NetworkContainer from decrypted JSON
-<b class="nc">&nbsp;        dev.droppinganvil.v3.network.events.NetworkContainer nc =</b>
+<b class="nc">&nbsp;        us.anvildevelopment.cxnet.network.events.NetworkContainer nc =</b>
 <b class="nc">&nbsp;            (dev.droppinganvil.v3.network.events.NetworkContainer) deserialize(</b>
-&nbsp;                &quot;cxJSON1&quot;, networkContainer, dev.droppinganvil.v3.network.events.NetworkContainer.class);
+&nbsp;                &quot;cxJSON1&quot;, networkContainer, events.network.us.anvildevelopment.cxnet.NetworkContainer.class);
 &nbsp;
 <b class="nc">&nbsp;        if (nc == null || nc.iD == null) {</b>
 <b class="nc">&nbsp;            throw new IllegalAccessException(&quot;Invalid network container - missing sender ID&quot;);</b>
@@ -2281,7 +2281,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="pc">&nbsp;        if (!plugins.containsKey(eventType)) return false;</b>
 <b class="nc">&nbsp;        CXPlugin plugin = plugins.get(eventType);</b>
 &nbsp;        try {
-<b class="nc">&nbsp;            switch (plugin.dataLevel != null ? plugin.dataLevel : dev.droppinganvil.v3.api.DataLevel.NETWORK_EVENT) {</b>
+<b class="nc">&nbsp;            switch (plugin.dataLevel != null ? plugin.dataLevel : us.anvildevelopment.cxnet.api.DataLevel.NETWORK_EVENT) {</b>
 &nbsp;                case INPUT_BUNDLE:
 <b class="nc">&nbsp;                    return plugin.handleEvent(ib);</b>
 &nbsp;                case OBJECT:
@@ -2314,8 +2314,8 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;     * @param previousBlocks All blocks before this one (in order) to rebuild permission state
 &nbsp;     * @return true if all events in block are valid, false if any event is invalid
 &nbsp;     */
-&nbsp;    public boolean validateBlockChronologically(CXNetwork network, Long chainID, dev.droppinganvil.v3.edge.NetworkBlock block,
-&nbsp;                                               java.util.List&lt;dev.droppinganvil.v3.edge.NetworkBlock&gt; previousBlocks) {
+&nbsp;    public boolean validateBlockChronologically(CXNetwork network, Long chainID, edge.us.anvildevelopment.cxnet.NetworkBlock block,
+&nbsp;                                               java.util.List&lt;edge.us.anvildevelopment.cxnet.NetworkBlock&gt; previousBlocks) {
 <b class="nc">&nbsp;        if (network == null || block == null) {</b>
 <b class="nc">&nbsp;            return false;</b>
 &nbsp;        }
@@ -2327,7 +2327,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;        // Replay previous blocks to build current permission state
 <b class="nc">&nbsp;        if (previousBlocks != null) {</b>
-<b class="nc">&nbsp;            for (dev.droppinganvil.v3.edge.NetworkBlock prevBlock : previousBlocks) {</b>
+<b class="nc">&nbsp;            for (us.anvildevelopment.cxnet.edge.NetworkBlock prevBlock : previousBlocks) {</b>
 &nbsp;                // Prepare previous block: verify and deserialize all events
 <b class="nc">&nbsp;                prevBlock.prepare(this);</b>
 &nbsp;
@@ -2463,7 +2463,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;        // Synchronize on the chain to prevent concurrent modification
 <b class="nc">&nbsp;        synchronized (targetChain) {</b>
 &nbsp;            // Get current block
-<b class="nc">&nbsp;            dev.droppinganvil.v3.edge.NetworkBlock currentBlock = targetChain.current;</b>
+<b class="nc">&nbsp;            us.anvildevelopment.cxnet.edge.NetworkBlock currentBlock = targetChain.current;</b>
 <b class="nc">&nbsp;            if (currentBlock == null) {</b>
 &nbsp;                // Create genesis block if none exists
 <b class="nc">&nbsp;                currentBlock = new dev.droppinganvil.v3.edge.NetworkBlock(0L, chainID);</b>
@@ -2484,7 +2484,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;                // Create new block
 <b class="nc">&nbsp;                Long newBlockID = currentBlock.block + 1;</b>
-<b class="nc">&nbsp;                dev.droppinganvil.v3.edge.NetworkBlock newBlock = new dev.droppinganvil.v3.edge.NetworkBlock(newBlockID, chainID);</b>
+<b class="nc">&nbsp;                us.anvildevelopment.cxnet.edge.NetworkBlock newBlock = new dev.droppinganvil.v3.edge.NetworkBlock(newBlockID, chainID);</b>
 &nbsp;
 &nbsp;                // Add to block map
 <b class="nc">&nbsp;                targetChain.blockMap.put(newBlockID, newBlock);</b>
@@ -2701,7 +2701,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="fc">&nbsp;            System.out.println(&quot;[Blockchain Replay] Loading &quot; + chainName + &quot;...&quot;);</b>
 &nbsp;
 &nbsp;            // Load chain from disk (load all blocks)
-<b class="fc">&nbsp;            dev.droppinganvil.v3.edge.NetworkRecord chain = blockchainPersistence.loadChain(networkID, chainID, true);</b>
+<b class="fc">&nbsp;            us.anvildevelopment.cxnet.edge.NetworkRecord chain = blockchainPersistence.loadChain(networkID, chainID, true);</b>
 &nbsp;
 <b class="pc">&nbsp;            if (chain == null || chain.blockMap.isEmpty()) {</b>
 <b class="nc">&nbsp;                System.out.println(&quot;[Blockchain Replay]   No blocks found in &quot; + chainName);</b>
@@ -2712,7 +2712,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;            // Process blocks in order (0, 1, 2, ...)
 <b class="fc">&nbsp;            for (long blockNum = 0; blockNum &lt; chain.blockMap.size(); blockNum++) {</b>
-<b class="fc">&nbsp;                dev.droppinganvil.v3.edge.NetworkBlock block = chain.blockMap.get(blockNum);</b>
+<b class="fc">&nbsp;                us.anvildevelopment.cxnet.edge.NetworkBlock block = chain.blockMap.get(blockNum);</b>
 <b class="pc">&nbsp;                if (block == null) continue;</b>
 &nbsp;
 &nbsp;                // Prepare block: verify and deserialize all events
@@ -2720,15 +2720,15 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;                // Process events in this block
 <b class="pc">&nbsp;                for (java.util.Map.Entry&lt;Integer, dev.droppinganvil.v3.network.events.NetworkEvent&gt; entry : block.deserializedEvents.entrySet()) {</b>
-<b class="nc">&nbsp;                    dev.droppinganvil.v3.network.events.NetworkEvent event = entry.getValue();</b>
+<b class="nc">&nbsp;                    us.anvildevelopment.cxnet.network.events.NetworkEvent event = entry.getValue();</b>
 &nbsp;
 &nbsp;                    // Only replay state-modifying events
 <b class="nc">&nbsp;                    if (event.executeOnSync) {</b>
 &nbsp;                        try {
 &nbsp;                            // Queue event for processing through existing framework
 &nbsp;                            // Create a simple NetworkContainer for the replayed event
-<b class="nc">&nbsp;                            dev.droppinganvil.v3.network.events.NetworkContainer nc =</b>
-&nbsp;                                new dev.droppinganvil.v3.network.events.NetworkContainer();
+<b class="nc">&nbsp;                            us.anvildevelopment.cxnet.network.events.NetworkContainer nc =</b>
+&nbsp;                                new events.network.us.anvildevelopment.cxnet.NetworkContainer();
 <b class="nc">&nbsp;                            nc.se = &quot;cxJSON1&quot;;</b>
 <b class="nc">&nbsp;                            nc.s = false;</b>
 &nbsp;
@@ -2791,7 +2791,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;            // Send request using EventBuilder pattern with automatic signature
 <b class="fc">&nbsp;            EventBuilder eb = buildEvent(</b>
-&nbsp;                dev.droppinganvil.v3.network.events.EventType.CHAIN_STATUS_REQUEST,
+&nbsp;                events.network.us.anvildevelopment.cxnet.EventType.CHAIN_STATUS_REQUEST,
 <b class="fc">&nbsp;                requestJson.getBytes(&quot;UTF-8&quot;)</b>
 <b class="fc">&nbsp;            ).toPeer(nmiID).signData();</b>
 <b class="fc">&nbsp;            eb.getPath().network = networkID;</b>
@@ -2846,7 +2846,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;            // Deserialize from JSON
 <b class="nc">&nbsp;            FileInputStream fis = new FileInputStream(dataFile);</b>
 <b class="nc">&nbsp;            dataContainer = (dev.droppinganvil.v3.edge.DataContainer) deserialize(</b>
-&nbsp;                &quot;cxJSON1&quot;, fis, dev.droppinganvil.v3.edge.DataContainer.class);
+&nbsp;                &quot;cxJSON1&quot;, fis, edge.us.anvildevelopment.cxnet.DataContainer.class);
 &nbsp;            fis.close();
 &nbsp;        } catch (Exception e) {
 <b class="nc">&nbsp;            System.err.println(&quot;[DataContainer] Failed to load data.cxd: &quot; + e.getMessage());</b>

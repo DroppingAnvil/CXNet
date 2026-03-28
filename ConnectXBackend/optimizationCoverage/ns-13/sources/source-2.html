@@ -94,11 +94,11 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;package dev.droppinganvil.v3.test;
 &nbsp;
-&nbsp;import dev.droppinganvil.v3.ConnectX;
-&nbsp;import dev.droppinganvil.v3.network.CXNetwork;
-&nbsp;import dev.droppinganvil.v3.network.Seed;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.Node;
-&nbsp;import dev.droppinganvil.v3.network.nodemesh.bridge.BridgeProvider;
+&nbsp;import us.anvildevelopment.cxnet.ConnectX;
+&nbsp;import network.us.anvildevelopment.cxnet.CXNetwork;
+&nbsp;import network.us.anvildevelopment.cxnet.Seed;
+&nbsp;import nodemesh.network.us.anvildevelopment.cxnet.Node;
+&nbsp;import bridge.nodemesh.network.us.anvildevelopment.cxnet.BridgeProvider;
 &nbsp;
 &nbsp;import java.io.File;
 &nbsp;import java.util.UUID;
@@ -247,7 +247,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;        // Create or load CXNET network
 <b class="nc">&nbsp;        System.out.println(&quot;\nStep 3: Setting up CXNET network...&quot;);</b>
-&nbsp;        dev.droppinganvil.v3.network.CXNetwork cxnet;
+&nbsp;        network.us.anvildevelopment.cxnet.CXNetwork cxnet;
 &nbsp;
 &nbsp;        // Check if CXNET already exists in memory
 <b class="nc">&nbsp;        cxnet = server.getNetwork(NETWORK_NAME);</b>
@@ -295,7 +295,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 &nbsp;
 &nbsp;            // Create versioned seed for CXNET distribution
 <b class="nc">&nbsp;            System.out.println(&quot;  Creating official CXNET seed...&quot;);</b>
-<b class="nc">&nbsp;            dev.droppinganvil.v3.network.Seed seed = new dev.droppinganvil.v3.network.Seed();</b>
+<b class="nc">&nbsp;            us.anvildevelopment.cxnet.network.Seed seed = new dev.droppinganvil.v3.network.Seed();</b>
 &nbsp;
 &nbsp;            // Set seed metadata
 <b class="nc">&nbsp;            seed.seedID = java.util.UUID.randomUUID().toString();</b>
@@ -306,7 +306,7 @@ Current scope:     <a href="../../index.html">all classes</a>
 <b class="nc">&nbsp;            seed.addNetwork(cxnet);</b>
 &nbsp;
 &nbsp;            // Add EPOCH as bootstrap peer (hv peer and peer finding node)
-<b class="nc">&nbsp;            dev.droppinganvil.v3.network.nodemesh.Node epochNode = new dev.droppinganvil.v3.network.nodemesh.Node();</b>
+<b class="nc">&nbsp;            us.anvildevelopment.cxnet.network.nodemesh.Node epochNode = new dev.droppinganvil.v3.network.nodemesh.Node();</b>
 <b class="nc">&nbsp;            epochNode.cxID = SERVER_ID;</b>
 <b class="nc">&nbsp;            epochNode.publicKey = serverPubKey;</b>
 <b class="nc">&nbsp;            epochNode.addr = &quot;cxHTTP1:https://CXNET.AnvilDevelopment.US/cx&quot;;</b>

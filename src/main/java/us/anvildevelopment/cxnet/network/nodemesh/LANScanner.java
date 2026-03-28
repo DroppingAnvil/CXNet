@@ -4,9 +4,9 @@ import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.State;
 import us.anvildevelopment.cxnet.network.events.EventType;
 import us.anvildevelopment.cxnet.network.events.CXHello;
-import us.anvildevelopment.cxnet.network.events.NetworkEvent;
-import us.anvildevelopment.cxnet.network.events.NetworkContainer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.net.*;
 import java.util.*;
@@ -19,6 +19,7 @@ import java.util.Iterator;
  * Enables direct P2P communication and firewall traversal
  */
 public class LANScanner {
+    private static final Logger log = LoggerFactory.getLogger(LANScanner.class);
     private final ConnectX connectX;
     private final int primaryPort;
     private final AtomicInteger discovered = new AtomicInteger(0);
@@ -34,7 +35,7 @@ public class LANScanner {
 
     // Common ConnectX ports to check
     private static final int[] COMMON_PORTS = {
-        49152, 49153, 49154, 49155, 49156,  // Default range
+        49151, 49152, 49153, 49154, 49155, 49156, 49157, 49158, 49159, // Default range
         8080, 8081, 8082, 8083, 8084,        // HTTP test ports
         50000, 50001, 50002                  // Alternative range
     };
@@ -84,7 +85,7 @@ public class LANScanner {
                 }
             }
         } catch (SocketException e) {
-            System.err.println("[LAN Scanner] Error getting local IP: " + e.getMessage());
+            log.error("[LAN Scanner] Error getting local IP: {}", e.getMessage());
         }
 
         return null;
@@ -106,7 +107,7 @@ public class LANScanner {
                 }
             }
         } catch (Exception e) {
-            System.err.println("[LAN Scanner] Error getting subnet mask: " + e.getMessage());
+            log.error("[LAN Scanner] Error getting subnet mask: {}", e.getMessage());
         }
 
         // Default to /24 (255.255.255.0)
@@ -147,7 +148,7 @@ public class LANScanner {
                 ipList.add(ip);
             }
         } catch (Exception e) {
-            System.err.println("[LAN Scanner] Error calculating IP range: " + e.getMessage());
+            log.error("[LAN Scanner] Error calculating IP range: {}", e.getMessage());
         }
 
         return ipList;
@@ -214,8 +215,7 @@ public class LANScanner {
             if (targetPort == ownPort) {
                 String localIP = getLocalIP();
                 if (targetIP.equals(localIP) || targetIP.equals("127.0.0.1")) {
-                    if (NodeConfig.DEBUG)
-                        System.out.println("[LAN Scanner] Skipping own P2P address " + targetIP + ":" + targetPort);
+                    log.debug("[LAN Scanner] Skipping own P2P address {}:{}", targetIP, targetPort);
                     return;
                 }
             }
@@ -236,6 +236,7 @@ public class LANScanner {
             String peerAddress = (connectX.getSelf() != null) ? connectX.getSelf().addr : null;
             CXHello helloPayload =
                 new CXHello(connectX.getOwnID(), primaryPort, signedNodeBlob, peerAddress);
+            helloPayload.requestSeed = connectX.bootstrapSearch;
 
             String payloadJson = ConnectX.serialize("cxJSON1", helloPayload);
 
@@ -247,31 +248,18 @@ public class LANScanner {
             byte[] signedPayload = signedPayloadOutput.toByteArray();
             signedPayloadOutput.close();
 
-            // Manually create NetworkEvent (like NEWNODE bootstrap pattern)
-            NetworkEvent helloEvent = new NetworkEvent(EventType.CXHELLO, signedPayload);
-            helloEvent.eT = EventType.CXHELLO.name();
-            helloEvent.iD = java.util.UUID.randomUUID().toString();
-            // DON'T set event.p (Permission/CXPath) - leave null for direct transmission fallback
+            // Build via EventBuilder: scope, oCXID, event ID, and container fields are set by the builder.
+            // lowLevel() sets scope="CXS", routes directly to the raw address (peer cxID not yet known).
+            // nc.iD (transmitter ID) is set by OutConnectionController before signing, not here.
+            connectX.buildEvent(EventType.CXHELLO, signedPayload)
+                .lowLevel(targetIP + ":" + targetPort)
+                .queue();
 
-            // Create target node with address only (no peer ID known yet)
-            Node targetNode = new Node();
-            targetNode.addr = targetIP + ":" + targetPort;
-
-            // Manually create NetworkContainer
-            NetworkContainer nc = new NetworkContainer();
-            nc.se = "cxJSON1";
-            nc.s = false;  // Not E2E encrypted
-            nc.iD = connectX.getSelf().cxID;  // Set sender ID (like NewNode)
-
-            // Create OutputBundle directly (bypassing buildEvent) - follows NEWNODE pattern
-            OutputBundle bundle = new OutputBundle(helloEvent, targetNode, null, null, nc);
-            connectX.queueEvent(bundle);
-
-            System.out.println("[LAN Scanner] Queued CXHELLO for " + targetIP + ":" + targetPort);
+            log.info("[LAN Scanner] Queued CXHELLO for {}:{}", targetIP, targetPort);
 
         } catch (Exception e) {
             // Failed to send, skip (normal for non-ConnectX hosts)
-            System.err.println("[LAN Scanner] Failed to send CXHELLO to " + targetIP + ":" + targetPort + " - " + e.getMessage());
+            log.warn("[LAN Scanner] Failed to send CXHELLO to {}:{} - {}", targetIP, targetPort, e.getMessage());
         }
     }
 
@@ -297,27 +285,25 @@ public class LANScanner {
      */
     public void scanNetwork() {
         if (scanning) {
-            System.out.println("[LAN Scanner] Scan already in progress");
+            log.info("[LAN Scanner] Scan already in progress");
             return;
         }
 
         Thread scanThread = new Thread(() -> {
             scanning = true;
             discovered.set(0);
-
-            if (NodeConfig.DEBUG) System.out.println("\n[LAN Scanner] ========================================");
-            if (NodeConfig.DEBUG) System.out.println("[LAN Scanner] Starting active LAN peer discovery...");
-            if (NodeConfig.DEBUG) System.out.println("[LAN Scanner] ========================================");
+            
+            log.debug("[LAN Scanner] Starting active LAN peer discovery...");
 
             String localIP = getLocalIP();
             if (localIP == null) {
-                System.err.println("[LAN Scanner] Unable to determine local IP address");
+                log.error("[LAN Scanner] Unable to determine local IP address");
                 scanning = false;
                 return;
             }
 
             int subnetMask = getSubnetMask(localIP);
-            if (NodeConfig.DEBUG) System.out.println("[LAN Scanner] Local IP: " + localIP + "/" + subnetMask);
+            log.debug("[LAN Scanner] Local IP: {}/{}", localIP, subnetMask);
 
             List<String> ipRange = getIPRange(localIP, subnetMask);
 
@@ -325,12 +311,12 @@ public class LANScanner {
             // This enables testing and supports multiple instances on same server
             if (!ipRange.contains("127.0.0.1")) {
                 ipRange.add(0, "127.0.0.1");  // Add at beginning for priority
-                if (NodeConfig.DEBUG) System.out.println("[LAN Scanner] Added localhost (127.0.0.1) to scan range");
+                log.debug("[LAN Scanner] Added localhost (127.0.0.1) to scan range");
             }
 
-            if (NodeConfig.DEBUG) System.out.println("[LAN Scanner] Scanning " + ipRange.size() + " addresses...");
-            if (NodeConfig.DEBUG) System.out.println("[LAN Scanner] Checking " + (COMMON_PORTS.length + 1) + " ports per host");
-            if (NodeConfig.DEBUG) System.out.println("[LAN Scanner] Primary port: " + primaryPort);
+            log.debug("[LAN Scanner] Scanning {} addresses...", ipRange.size());
+            log.debug("[LAN Scanner] Checking {} ports per host", (COMMON_PORTS.length + 1));
+            log.debug("[LAN Scanner] Primary port: {}", primaryPort);
 
             AtomicInteger progress = new AtomicInteger(0);
             List<Thread> scanThreads = new ArrayList<>();
@@ -341,7 +327,7 @@ public class LANScanner {
                     int foundPort = findPeerPort(ip);
 
                     if (foundPort != -1) {
-                        System.out.println("[LAN Scanner] ✓ Found active peer at " + ip + ":" + foundPort);
+                        log.info("[LAN Scanner] Found active peer at {}:{}", ip, foundPort);
                         //TODO is foundPort correct????
                         sendCXHELLO(ip, foundPort);
                         discovered.incrementAndGet();
@@ -349,8 +335,7 @@ public class LANScanner {
 
                     int p = progress.incrementAndGet();
                     if (p % 25 == 0 || p == ipRange.size()) {
-                        if (NodeConfig.DEBUG) System.out.println("[LAN Scanner] Progress: " + p + "/" + ipRange.size() +
-                                         " (" + discovered.get() + " discovered)");
+                        log.debug("[LAN Scanner] Progress: {}/{} ({} discovered)", p, ipRange.size(), discovered.get());
                     }
                 });
 
@@ -378,17 +363,14 @@ public class LANScanner {
                     Thread.currentThread().interrupt();
                 }
             }
-
-            System.out.println("\n[LAN Scanner] ========================================");
-            System.out.println("[LAN Scanner] Scan complete!");
-            System.out.println("[LAN Scanner] Found " + discovered.get() + " active peers on local network");
-            if (NodeConfig.DEBUG) System.out.println("[LAN Scanner] Total peers in DataContainer: " +
-                             connectX.dataContainer.getAllLocalPeerAddresses().size());
-            System.out.println("[LAN Scanner] ========================================\n");
+            
+            log.info("[LAN Scanner] Scan complete!");
+            log.info("[LAN Scanner] Found {} active peers on local network", discovered.get());
+            log.debug("[LAN Scanner] Total peers in DataContainer: {}", connectX.dataContainer.getAllLocalPeerAddresses().size());
 
             // Set ConnectX state to READY - signals that P2P discovery has completed
             connectX.state = State.READY;
-            if (NodeConfig.DEBUG) System.out.println("[LAN Scanner] Network state set to READY");
+            log.debug("[LAN Scanner] Network state set to READY");
 
             scanning = false;
         });
@@ -405,7 +387,7 @@ public class LANScanner {
     public void broadcastHello() {
         Thread broadcastThread = new Thread(() -> {
             try {
-                System.out.println("[LAN Scanner] Broadcasting CXHELLO to local network...");
+                log.info("[LAN Scanner] Broadcasting CXHELLO to local network...");
 
                 DatagramSocket socket = new DatagramSocket();
                 socket.setBroadcast(true);
@@ -433,12 +415,12 @@ public class LANScanner {
                         socket.send(packet);
                     }
 
-                    System.out.println("[LAN Scanner] Broadcast sent to " + broadcastIP + " on " + COMMON_PORTS.length + " ports");
+                    log.info("[LAN Scanner] Broadcast sent to {} on {} ports", broadcastIP, COMMON_PORTS.length);
                 }
 
                 socket.close();
             } catch (Exception e) {
-                System.err.println("[LAN Scanner] Broadcast failed: " + e.getMessage());
+                log.error("[LAN Scanner] Broadcast failed: {}", e.getMessage());
             }
         });
 

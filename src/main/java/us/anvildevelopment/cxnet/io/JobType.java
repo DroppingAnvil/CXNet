@@ -5,5 +5,6 @@ public enum JobType {
     REVERSE,
     NETWORK_READ,
     SIGN_OBJECT,
-    DECRYPT
+    DECRYPT,
+    BUILD_OUTPUT
 }

@@ -8,6 +8,8 @@ package us.anvildevelopment.cxnet.network;
 import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.edge.NetworkBlock;
 import us.anvildevelopment.cxnet.edge.NetworkRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.FileReader;
@@ -56,6 +58,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * - Blocks loaded lazily from disk when accessed
  */
 public class BlockchainPersistence {
+    private static final Logger log = LoggerFactory.getLogger(BlockchainPersistence.class);
 
     public static final int MAX_CHAINS = 100;
 
@@ -204,8 +207,8 @@ public class BlockchainPersistence {
                 writer.flush();
             }
 
-            System.out.println("[Blockchain Persistence] Saved chain " + chain.chainID + " metadata for network " +
-                             networkID + " (" + metadata.blockCount + " blocks)");
+            log.info("[Blockchain Persistence] Saved chain {} metadata for network {} ({} blocks)",
+                             chain.chainID, networkID, metadata.blockCount);
 
         } finally {
             chainLocks[chain.chainID.intValue()].unlock();
@@ -230,7 +233,7 @@ public class BlockchainPersistence {
 
         File chainFile = new File(cxRoot, "blockchain" + File.separator + networkID + File.separator + "chain-" + chainID + ".json");
         if (!chainFile.exists()) {
-            System.out.println("[Blockchain Persistence] No saved chain metadata found: " + chainFile.getPath());
+            log.info("[Blockchain Persistence] No saved chain metadata found: {}", chainFile.getPath());
             return null;
         }
 
@@ -290,8 +293,8 @@ public class BlockchainPersistence {
                 chain.current = chain.blockMap.get(metadata.currentBlockID);
             }
 
-            System.out.println("[Blockchain Persistence] Loaded chain " + chainID + " for network " +
-                             networkID + " (" + chain.blockMap.size() + "/" + metadata.blockCount + " blocks in memory)");
+            log.info("[Blockchain Persistence] Loaded chain {} for network {} ({}/{} blocks in memory)",
+                             chainID, networkID, chain.blockMap.size(), metadata.blockCount);
 
             return chain;
 
@@ -326,7 +329,7 @@ public class BlockchainPersistence {
     public void deleteNetwork(String networkID) throws IOException {
         File networkDir = new File(cxRoot, "blockchain" + File.separator + networkID);
         deleteRecursively(networkDir);
-        System.out.println("[Blockchain Persistence] Deleted blockchain data for network " + networkID);
+        log.info("[Blockchain Persistence] Deleted blockchain data for network {}", networkID);
     }
 
     /**

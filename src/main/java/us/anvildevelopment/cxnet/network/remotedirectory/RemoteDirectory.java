@@ -10,12 +10,16 @@ import okhttp3.ResponseBody;
 import us.anvildevelopment.util.tools.database.FileConnector;
 import us.anvildevelopment.util.tools.permissions.BasicPermissionContainer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.io.*;
 
 /**
  * Object for accessing files stored remotely or locally
  */
 public class RemoteDirectory {
+    private static final Logger log = LoggerFactory.getLogger(RemoteDirectory.class);
+
     public static OkHttpClient httpClient = new OkHttpClient();
 
     public boolean readOnly;
@@ -81,7 +85,7 @@ public class RemoteDirectory {
                     directoryPermissions = (BasicPermissionContainer) fc.getObject(".permissions", "default", BasicPermissionContainer.class);
                 }
             } catch (Exception e) {
-                e.printStackTrace();
+                log.error("Error loading permissions", e);
                 // Fallback to empty permissions
                 directoryPermissions = new BasicPermissionContainer();
             }

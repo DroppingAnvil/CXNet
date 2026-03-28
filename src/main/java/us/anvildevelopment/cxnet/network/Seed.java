@@ -8,6 +8,8 @@ package us.anvildevelopment.cxnet.network;
 import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.network.nodemesh.Node;
 import us.anvildevelopment.cxnet.network.nodemesh.PeerDirectory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.util.ArrayList;
@@ -27,6 +29,8 @@ import java.util.Map;
  * Seeds are versioned and stored both locally (seeds/ directory) and on-chain (c2 Resources chain)
  */
 public class Seed {
+    private static final Logger log = LoggerFactory.getLogger(Seed.class);
+
     /**
      * Unique identifier for this seed version
      * Used for tracking, versioning, and on-chain storage
@@ -202,16 +206,16 @@ public class Seed {
      * @throws Exception if application fails
      */
     public void apply(ConnectX connectX) throws Exception {
-        System.out.println("[Seed] Applying seed " + seedID);
-        System.out.println("[Seed]   Networks: " + networks.size());
-        System.out.println("[Seed]   HV Peers: " + hvPeers.size());
-        System.out.println("[Seed]   Certificates: " + certificates.size());
+        log.info("[Seed] Applying seed {}", seedID);
+        log.info("[Seed]   Networks: {}", networks.size());
+        log.info("[Seed]   HV Peers: {}", hvPeers.size());
+        log.info("[Seed]   Certificates: {}", certificates.size());
 
         // Use reflection to call private applySeed method in ConnectX
         java.lang.reflect.Method applySeedMethod = ConnectX.class.getDeclaredMethod("applySeed", Seed.class);
         applySeedMethod.setAccessible(true);
         applySeedMethod.invoke(connectX, this);
 
-        System.out.println("[Seed] Seed application complete");
+        log.info("[Seed] Seed application complete");
     }
 }

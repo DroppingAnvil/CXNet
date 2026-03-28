@@ -1,5 +1,9 @@
 package us.anvildevelopment.cxnet.crypt.pgpainless;
 
+import org.bouncycastle.openpgp.api.OpenPGPKeyMaterialProvider;
+import org.pgpainless.decryption_verification.MessageMetadata;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.crypt.core.CryptProvider;
 import us.anvildevelopment.cxnet.crypt.core.exceptions.DecryptionFailureException;
@@ -27,6 +31,7 @@ import java.io.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class PainlessCryptProvider extends CryptProvider {
+    private static final Logger log = LoggerFactory.getLogger(PainlessCryptProvider.class);
 
     public PainlessCryptProvider(ConnectX connectX) {
         super("Encryption Layer", "Core", connectX);
@@ -103,25 +108,26 @@ public class PainlessCryptProvider extends CryptProvider {
                 org.pgpainless.decryption_verification.MessageMetadata meta = decryptionStream.getMetadata();
                 boolean verified = meta.isVerifiedSigned();
                 if (!verified) {
-                    System.err.println("[VERIFY-FAIL] isVerifiedSigned=false for " + cxID.substring(0, 8));
-                    System.err.println("[VERIFY-FAIL] verifiedInline=" + meta.getVerifiedInlineSignatures().size()
+                    log.info("[VERIFY-FAIL] isVerifiedSigned=false for " + cxID.substring(0, 8));
+                    log.info("[VERIFY-FAIL] verifiedInline=" + meta.getVerifiedInlineSignatures().size()
                         + " rejectedInline=" + meta.getRejectedInlineSignatures().size());
                     meta.getRejectedInlineSignatures().forEach(f ->
-                        System.err.println("[VERIFY-FAIL] rejected: " + f));
+                        log.info("[VERIFY-FAIL] rejected: " + f));
                 }
                 return verified;
             } catch (Exception e) {
+                log.error(e.getMessage());
                 e.printStackTrace();
                 DecryptionFailureException dfe = new DecryptionFailureException();
                 dfe.initCause(e);
                 throw dfe;
             }
         }
-        System.err.println("[VERIFY-FAIL] cacheCert returned false for " + cxID);
+        log.info("[VERIFY-FAIL] cacheCert returned false for " + cxID);
         return false;
     }
     @Override
-    public void encrypt(InputStream is, OutputStream os, String cxID) throws EncryptionFailureException {
+    public synchronized void encrypt(InputStream is, OutputStream os, String cxID) throws EncryptionFailureException {
         if (!cacheCert(cxID, false, true, super.connectX)) throw new EncryptionFailureException();
         if (is == null) {
             throw new EncryptionFailureException("InputStream cannot be null - no data to encrypt");
@@ -142,6 +148,7 @@ public class PainlessCryptProvider extends CryptProvider {
             Streams.pipeAll(is, encryptor);
             encryptor.close();
         } catch (Exception e) {
+            log.error(e.getMessage());
             EncryptionFailureException efe = new EncryptionFailureException();
             efe.initCause(e);
             throw efe;
@@ -200,7 +207,7 @@ public class PainlessCryptProvider extends CryptProvider {
         }
     }
     @Override
-    public void sign(InputStream is, OutputStream os) throws EncryptionFailureException {
+    public synchronized void sign(InputStream is, OutputStream os) throws EncryptionFailureException {
         if (!ready) {
             throw new EncryptionFailureException("Encryption provider not initialized - call setup() first");
         }
@@ -213,12 +220,12 @@ public class PainlessCryptProvider extends CryptProvider {
                 PGPPublicKeyRing publicRing = PGPainless.extractCertificate(secretKey);
                 KeyRingInfo info = new KeyRingInfo(publicRing);
 
-                System.out.println("Primary User ID: " + info.getPrimaryUserId());
-                System.out.println("Public Keys: " + info.getPublicKeys());
-                System.out.println("Algorithm: " + info.getAlgorithm());
-                System.out.println("Signing Subkeys: " + info.getSigningSubkeys());
-                System.out.println("Primary User ID (again): " + info.getPrimaryUserId());
-                //System.out.println("Preferred Hash Algorithms: " + info.getPreferredHashAlgorithms());
+                log.info("Primary User ID: " + info.getPrimaryUserId());
+                log.info("Public Keys: " + info.getPublicKeys());
+                log.info("Algorithm: " + info.getAlgorithm());
+                log.info("Signing Subkeys: " + info.getSigningSubkeys());
+                log.info("Primary User ID (again): " + info.getPrimaryUserId());
+                //log.info("Preferred Hash Algorithms: " + info.getPreferredHashAlgorithms());
             }
             // PGPainless 2.x generates v6 keys via modernKeyRing; raw BouncyCastle produces
             // v4 OPS packets which PGPainless 2.x rejects as "Incorrect OnePassSignature".
@@ -250,6 +257,7 @@ public class PainlessCryptProvider extends CryptProvider {
             decryptionStream.close();
             return decryptionStream.getMetadata();
         } catch (Exception e) {
+
             e.printStackTrace();
             DecryptionFailureException dfe = new DecryptionFailureException();
             dfe.initCause(e);
@@ -322,7 +330,7 @@ public class PainlessCryptProvider extends CryptProvider {
         if (epochMode) {
             // EPOCH mode: This node IS the NMI, use own key as network master key
             nmipubkey = publicKey;
-            System.out.println("[Crypto] EPOCH mode: Using own key as CXNET NMI");
+            log.info("[Crypto] EPOCH mode: Using own key as CXNET NMI");
         } else {
             // Standard mode: Use hardcoded CXNET NMI public key
             // This provides certificate pinning security against MITM attacks
@@ -330,7 +338,7 @@ public class PainlessCryptProvider extends CryptProvider {
                 nmipubkey = PGPainless.readKeyRing().publicKeyRing(
                     new ByteArrayInputStream(java.util.Base64.getDecoder().decode(HARDCODED_CXNET_NMI_PUBLIC_KEY))
                 );
-                System.out.println("[Crypto] Loaded hardcoded CXNET NMI public key");
+                log.info("[Crypto] Loaded hardcoded CXNET NMI public key");
             } catch (Exception e) {
                 throw new IOException("Failed to load hardcoded CXNET NMI public key: " + e.getMessage(), e);
             }
@@ -344,12 +352,12 @@ public class PainlessCryptProvider extends CryptProvider {
                         new ByteArrayInputStream(java.util.Base64.getDecoder().decode(raw))
                     );
                     if (!localKey.equals(nmipubkey)) {
-                        System.err.println("[SECURITY WARNING] Local cx.asc does NOT match hardcoded CXNET NMI key!");
-                        System.err.println("[SECURITY WARNING] Using hardcoded key for security.");
-                        System.err.println("[SECURITY WARNING] TODO: Implement multi-peer verification");
+                        log.error("[SECURITY WARNING] Local cx.asc does NOT match hardcoded CXNET NMI key!");
+                        log.error("[SECURITY WARNING] Using hardcoded key for security.");
+                        log.error("[SECURITY WARNING] TODO: Implement multi-peer verification");
                     }
                 } catch (Exception e) {
-                    System.err.println("[Crypto] Warning: Could not compare local cx.asc: " + e.getMessage());
+                    log.error("[Crypto] Warning: Could not compare local cx.asc: " + e.getMessage());
                 }
             }
         }
@@ -365,7 +373,7 @@ public class PainlessCryptProvider extends CryptProvider {
         }
         try {
             Node n = connectX.nodeMesh.peerDirectory.lookup(cxID, tryImport, sync);
-            System.out.println(n);
+            log.info(n.toString());
             if (n != null) {
                 PGPPublicKeyRing cert = PGPainless.readKeyRing()
                         .publicKeyRing(
@@ -387,18 +395,34 @@ public class PainlessCryptProvider extends CryptProvider {
     @Override
     public void stripSignature(InputStream is, OutputStream os) throws DecryptionFailureException {
         try {
-            // Strip signature WITHOUT verification - used for NewNode peeking
-            // NOTE: NetworkEvent is SIGNED ONLY (not encrypted), so we don't add decryption keys
+            // Create a provider that returns null for any missing certificate → skip verification
+            OpenPGPKeyMaterialProvider.OpenPGPCertificateProvider missingCertProvider = keyId -> {
+                String keyHex = (keyId != null)
+                        ? "0x" + Long.toHexString(keyId.getKeyId()).toUpperCase()
+                        : "null";
+                log.info("[stripSignature] Ignoring missing certificate for key: " + keyHex);
+                return null;   // ← This should allow stripping without verification
+            };
+
+            ConsumerOptions options = ConsumerOptions.get()
+                    .setMissingCertificateCallback(missingCertProvider)
+                    .setAllowDecryptionWithMissingKeyFlags();
+            // Do NOT addVerificationCert here
+
             DecryptionStream decryptionStream = PGPainless.decryptAndOrVerify()
                     .onInputStream(is)
-                    .withOptions(ConsumerOptions.get()
-                            // NOTE: No decryption key - data is signed only, not encrypted
-                            // NOTE: No verification cert - this strips without verifying
-                    );
+                    .withOptions(options);
+
             Streams.pipeAll(decryptionStream, os);
             decryptionStream.close();
+
+            // Debug
+            MessageMetadata metadata = decryptionStream.getMetadata();
+            log.info("[stripSignature] Peeking complete. " +
+                    "Verified signatures: " + metadata.getVerifiedSignatures().size());
+
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("[stripSignature] Failed to strip signature", e);
             DecryptionFailureException dfe = new DecryptionFailureException();
             dfe.initCause(e);
             throw dfe;

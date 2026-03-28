@@ -174,9 +174,29 @@ public class BootstrapServerTest {
                 System.out.println("  Created seeds/ directory");
             }
 
-            // Save versioned seed to seeds/{seedID}.cxn
+            // Sign the seed and save as a PGP-signed blob (all .cxn files are signed blobs)
+            String seedJson = ConnectX.serialize("cxJSON1", seed);
+            java.io.ByteArrayInputStream seedInput = new java.io.ByteArrayInputStream(seedJson.getBytes("UTF-8"));
+            java.io.ByteArrayOutputStream signedOutput = new java.io.ByteArrayOutputStream();
+            server.encryptionProvider.sign(seedInput, signedOutput);
+            seedInput.close();
+            byte[] signedBlob = signedOutput.toByteArray();
+            signedOutput.close();
+
+            // Save signed blob to seeds/{seedID}.cxn
             java.io.File seedFile = new java.io.File(seedsDir, seed.seedID + ".cxn");
-            seed.save(seedFile);
+            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(seedFile)) {
+                fos.write(signedBlob);
+            }
+
+            // Save as distribution bootstrap file (picked up by other peers on startup)
+            java.io.File bootstrapFile = new java.io.File(server.cxRoot, "cxnet-bootstrap.cxn");
+            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(bootstrapFile)) {
+                fos.write(signedBlob);
+            }
+
+            // Load into RAM so EPOCH can include it in CXHELLO responses
+            server.signedBootstrapSeed = signedBlob;
 
             // Update CXNET configuration with current seed ID
             if (cxnet.configuration.currentSeedID != null) {

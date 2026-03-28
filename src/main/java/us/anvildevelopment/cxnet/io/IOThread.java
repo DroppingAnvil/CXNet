@@ -4,10 +4,13 @@ import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.network.nodemesh.NodeConfig;
 import us.anvildevelopment.cxnet.network.nodemesh.NodeMesh;
 import us.anvildevelopment.cxnet.utils.obj.BaseStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.*;
 
 public class IOThread implements Runnable {
+    private static final Logger log = LoggerFactory.getLogger(IOThread.class);
     public boolean run = false;
     public Long sleep;
     public BaseStatus status;
@@ -39,7 +42,7 @@ public class IOThread implements Runnable {
                 try {
                     processJob(ioJob, true);
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    log.error("Unexpected error processing IO job", e);
                     ioJob.success = false;
                     ioJob.doAfter(false);
                 }
@@ -49,26 +52,26 @@ public class IOThread implements Runnable {
                 try {
                     Thread.sleep(sleep);
                 } catch (InterruptedException e) {
-                    e.printStackTrace();
+                    log.error("IOThread sleep interrupted", e);
                 }
             }
         }
     }
     public static ByteArrayOutputStream reverse(InputStream is, Boolean closeAfter) throws IOException {
-        //TODO
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+k        ByteArrayOutputStream baos = new ByteArrayOutputStream();
         byte[] buffer = new byte[NodeConfig.ioReverseByteBuffer];
-        while(is.read(buffer) > -1) {
-            baos.write(buffer);
+        int bytesRead;
+        while ((bytesRead = is.read(buffer)) > -1) {
+            baos.write(buffer, 0, bytesRead);
         }
         if (closeAfter) is.close();
         return baos;
     }
     public static void write(InputStream is, OutputStream os, Boolean closeAfter) throws IOException {
-        //TODO
         byte[] buffer = new byte[NodeConfig.ioWriteByteBuffer];
-        while(is.read(buffer) > -1) {
-            os.write(buffer);
+        int bytesRead;
+        while ((bytesRead = is.read(buffer)) > -1) {
+            os.write(buffer, 0, bytesRead);
         }
         if (closeAfter) {
             is.close();
@@ -91,13 +94,17 @@ public class IOThread implements Runnable {
                     write(ioJob.is, ioJob.os, ioJob.closeAfter);
                     break;
                 case REVERSE:
-                    reverse(ioJob.is, ioJob.closeAfter);
+                    ioJob.o = reverse(ioJob.is, ioJob.closeAfter);
                     break;
                 case NETWORK_READ:
                     NetworkInputIOJob ioj = (NetworkInputIOJob) ioJob;
                     nodeMesh.processNetworkInput(ioJob.is, ioj.s);
                     break;
                 case SIGN_OBJECT:
+                    break;
+                case BUILD_OUTPUT:
+                    ((ConnectX.EventBuilder) ioJob.o).execute();
+                    break;
             }
             if (ioJob.next != null) {
                 processJob(ioJob.next, false);
@@ -108,7 +115,7 @@ public class IOThread implements Runnable {
             }
             return true;
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Unexpected error in processJob", e);
             ioJob.success = false;
             ioJob.doAfter(false);
             return false;

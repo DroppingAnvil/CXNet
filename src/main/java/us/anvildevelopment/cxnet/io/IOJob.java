@@ -2,6 +2,7 @@ package us.anvildevelopment.cxnet.io;
 
 import java.io.InputStream;
 import java.io.OutputStream;
+import us.anvildevelopment.cxnet.ConnectX;
 
 public class IOJob {
     public InputStream is;
@@ -34,6 +35,11 @@ public class IOJob {
         this.is = is;
         this.jt = JobType.REVERSE;
         this.closeAfter = closeAfter;
+    }
+
+    public IOJob(ConnectX.EventBuilder builder) {
+        this.jt = JobType.BUILD_OUTPUT;
+        this.o = builder;
     }
 
     /**

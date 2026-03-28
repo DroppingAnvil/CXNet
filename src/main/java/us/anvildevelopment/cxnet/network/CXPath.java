@@ -63,7 +63,7 @@ public class CXPath {
     public String sAR;
 
     public Scope getScope() {
-        return Scope.valueOf(scope);
+        return scope != null ? Scope.valueOf(scope) : null;
     }
 
     public static CXPath getPathFromString(String address) {

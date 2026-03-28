@@ -9,11 +9,14 @@ import us.anvildevelopment.cxnet.network.nodemesh.NodeConfig;
 import us.anvildevelopment.cxnet.network.nodemesh.OutConnectionController;
 import us.anvildevelopment.cxnet.network.nodemesh.OutputBundle;
 import us.anvildevelopment.cxnet.network.nodemesh.RetryBundle;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Processes outbound network events from outputQueue
  */
 public class OutputProcessor implements Runnable {
+    private static final Logger log = LoggerFactory.getLogger(OutputProcessor.class);
     public static boolean active = true;
     private OutConnectionController outController;
 
@@ -25,7 +28,7 @@ public class OutputProcessor implements Runnable {
     public void run() {
         String peerID = outController.connectXAPI.getOwnID();
         String peerShort = (peerID != null && peerID.length() >= 8) ? peerID.substring(0, 8) : "UNKNOWN";
-        System.out.println("[OutputProcessor] Thread started for peer " + peerShort);
+        log.info("[OutputProcessor] Thread started for peer {}", peerShort);
         int loopCount = 0;
 
         while (active) {
@@ -40,22 +43,20 @@ public class OutputProcessor implements Runnable {
 
                 // Log every 100 iterations OR when queue is large (only if enabled)
                 if (NodeConfig.enableOutLoopLogging && (loopCount % 100 == 0 || queueSizeBefore > 5)) {
-                    System.out.println("[OUT-LOOP] Peer " + peerShort + " iteration " + loopCount +
-                        ", queue: " + queueSizeBefore + ", polled: " + (bundle != null));
+                    log.info("[OUT-LOOP] Peer {} iteration {}, queue: {}, polled: {}", peerShort, loopCount, queueSizeBefore, (bundle != null));
                 }
 
                 // Debug: Log if we polled from a non-empty queue
                 if (queueSizeBefore > 10) {
                     // Log when queue is large (stuck?)
-                    System.out.println("[poll-DEBUG] Peer " + peerShort + " queue size: " + queueSizeBefore +
-                        ", polled: " + (bundle != null ? "YES" : "NULL"));
+                    log.info("[poll-DEBUG] Peer {} queue size: {}, polled: {}", peerShort, queueSizeBefore, (bundle != null ? "YES" : "NULL"));
                     if (bundle != null && bundle.ne != null && bundle.ne.eT != null) {
-                        System.out.println("[poll-DEBUG]   -> Event type: " + bundle.ne.eT);
+                        log.info("[poll-DEBUG]   -> Event type: {}", bundle.ne.eT);
                     }
                 } else if (bundle != null) {
                     String et = (bundle.ne != null && bundle.ne.eT != null) ? bundle.ne.eT : "NULL";
                     if (et.contains("HELLO")) {
-                        System.out.println("[poll-DEBUG] Peer " + peerShort + " polled " + et);
+                        log.info("[poll-DEBUG] Peer {} polled {}", peerShort, et);
                     }
                 }
 
@@ -79,7 +80,7 @@ public class OutputProcessor implements Runnable {
                     }
 
                     // Log EVERY bundle for debugging
-                    System.out.println("[OUT-DEBUG] Type=" + eventType + ", Node=" + nodeAddr + ", Perm=" + hasPerm);
+                    log.info("[OUT-DEBUG] Type={}, Node={}, Perm={}", eventType, nodeAddr, hasPerm);
 
                     try {
                         outController.transmitEvent(bundle);
@@ -92,16 +93,15 @@ public class OutputProcessor implements Runnable {
 
                         outController.connectXAPI.retryQueue.add(retryBundle);
 
-                        System.err.println("[OUT-ERROR] " + eventType + " to " + nodeAddr + " failed: " + e.getMessage());
-                        System.err.println("[RETRY-QUEUE] Added to retry queue (retry 1/" +
-                            RetryBundle.MAX_RETRIES +
-                            " in " + (RetryBundle.INITIAL_RETRY_DELAY_MS / 1000) + "s)");
+                        log.error("[OUT-ERROR] {} to {} failed: {}", eventType, nodeAddr, e.getMessage());
+                        log.error("[RETRY-QUEUE] Added to retry queue (retry 1/{} in {}s)",
+                            RetryBundle.MAX_RETRIES, (RetryBundle.INITIAL_RETRY_DELAY_MS / 1000));
                     }
                 }
 
                 Thread.sleep(NodeConfig.IO_THREAD_SLEEP);
             } catch (InterruptedException e) {
-                e.printStackTrace();
+                log.error("OutputProcessor interrupted", e);
             }
         }
     }

@@ -82,9 +82,10 @@ public abstract class CryptProvider {
             if (destination.exists() && IPXFileUtils.checkBasicIORights(destination)) {
                 if (!destination.delete()) throw new IOException();
             }
-            FileInputStream input = new FileInputStream(in);
-            FileOutputStream encryptedOutput = new FileOutputStream(destination);
-            encrypt(input, encryptedOutput, cxID);
+            try (FileInputStream input = new FileInputStream(in);
+                 FileOutputStream encryptedOutput = new FileOutputStream(destination)) {
+                encrypt(input, encryptedOutput, cxID);
+            }
             if (!in.delete()) throw new IOException();
     }
     public Object decrypt(InputStream is, OutputStream os, String cxID, boolean tryImport) throws DecryptionFailureException {

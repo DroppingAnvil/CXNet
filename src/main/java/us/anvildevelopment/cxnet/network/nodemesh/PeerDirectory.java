@@ -10,6 +10,8 @@ import us.anvildevelopment.cxnet.analytics.AnalyticData;
 import us.anvildevelopment.cxnet.analytics.Analytics;
 import us.anvildevelopment.cxnet.exceptions.UnsafeKeywordException;
 import us.anvildevelopment.util.tools.database.annotations.MemoryOnly;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.Serializable;
@@ -17,6 +19,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class PeerDirectory implements Serializable {
+    private static final Logger log = LoggerFactory.getLogger(PeerDirectory.class);
+
     public ConcurrentHashMap<String,Node> peerCache = new ConcurrentHashMap<>();
     /**
      * For tracking nodes we have connected to directly over the internet, in the future this might be changed to a set of cxIDs
@@ -83,7 +87,7 @@ public class PeerDirectory implements Serializable {
                                 }
                             }
                         } catch (Exception e) {
-                            e.printStackTrace();
+                            log.error("Error loading peer from disk", e);
                         }
                    // } else {
                         //TODO async
@@ -192,11 +196,11 @@ public class PeerDirectory implements Serializable {
                         fos.flush();
                         fos.close();
 
-                        System.out.println("[PeerDirectory] Persisted signed node: " + n.cxID.substring(0, 8) +
-                            " to " + peerFile.getAbsolutePath() + " (" + signed.length + " bytes)");
+                        log.info("[PeerDirectory] Persisted signed node: {} to {} ({} bytes)",
+                            n.cxID.substring(0, 8), peerFile.getAbsolutePath(), signed.length);
                     }
                 } catch (Exception e) {
-                    System.err.println("[PeerDirectory] Failed to persist node " + n.cxID + ": " + e.getMessage());
+                    log.error("[PeerDirectory] Failed to persist node {}: {}", n.cxID, e.getMessage());
                 }
             }
         } else {
@@ -235,7 +239,7 @@ public class PeerDirectory implements Serializable {
                     return signedBytes;
                 }
             } catch (Exception e) {
-                System.err.println("[PeerDirectory] Failed to load signed node " + cxID + ": " + e.getMessage());
+                log.error("[PeerDirectory] Failed to load signed node {}: {}", cxID, e.getMessage());
             }
         }
 
@@ -286,17 +290,17 @@ public class PeerDirectory implements Serializable {
                 if (peerFile.exists()) {
                     boolean deleted = peerFile.delete();
                     if (deleted) {
-                        System.out.println("[PeerDirectory] Removed node from filesystem: " + cxID + " at " + peerFile.getAbsolutePath());
+                        log.info("[PeerDirectory] Removed node from filesystem: {} at {}", cxID, peerFile.getAbsolutePath());
                     } else {
-                        System.err.println("[PeerDirectory] Failed to delete file: " + peerFile.getAbsolutePath());
+                        log.error("[PeerDirectory] Failed to delete file: {}", peerFile.getAbsolutePath());
                     }
                 }
             }
         } catch (Exception e) {
-            System.err.println("[PeerDirectory] Error removing node from filesystem: " + cxID + " - " + e.getMessage());
+            log.error("[PeerDirectory] Error removing node from filesystem: {} - {}", cxID, e.getMessage());
         }
 
-        System.out.println("[PeerDirectory] Removed node from memory: " + cxID);
+        log.info("[PeerDirectory] Removed node from memory: {}", cxID);
     }
 
     public boolean stableConnection() {
@@ -324,12 +328,12 @@ public class PeerDirectory implements Serializable {
         // PRIORITY 1: CXHELLO discovered LAN addresses (highest priority for P2P)
         if (connectX != null && connectX.dataContainer != null) {
             java.util.List<String> lanAddresses = connectX.dataContainer.getLocalPeerAddresses(cxID);
-            System.out.println("[getAllAddresses] Peer " + cxID.substring(0, 8) + ": Found " + lanAddresses.size() + " LAN addresses in DataContainer");
+            log.info("[getAllAddresses] Peer {}: Found {} LAN addresses in DataContainer", cxID.substring(0, 8), lanAddresses.size());
             for (String addr : lanAddresses) {
                 if (addr != null && !addr.isEmpty() && !seen.contains(addr)) {
                     addresses.add(addr);
                     seen.add(addr);
-                    System.out.println("[getAllAddresses]   - LAN: " + addr);
+                    log.info("[getAllAddresses]   - LAN: {}", addr);
                 }
             }
         }
@@ -346,11 +350,11 @@ public class PeerDirectory implements Serializable {
             if (node != null && node.addr != null && !node.addr.isEmpty() && !seen.contains(node.addr)) {
                 addresses.add(node.addr);
                 seen.add(node.addr);
-                System.out.println("[getAllAddresses]   - Node: " + node.addr);
+                log.info("[getAllAddresses]   - Node: {}", node.addr);
             }
         }
 
-        System.out.println("[getAllAddresses] Total addresses for " + cxID.substring(0, 8) + ": " + addresses.size());
+        log.info("[getAllAddresses] Total addresses for {}: {}", cxID.substring(0, 8), addresses.size());
         return addresses;
     }
 }

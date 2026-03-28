@@ -13,6 +13,8 @@ import us.anvildevelopment.cxnet.network.CXPath;
 import us.anvildevelopment.cxnet.network.events.NetworkContainer;
 import us.anvildevelopment.cxnet.network.nodemesh.bridge.BridgeProvider;
 import okhttp3.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -56,6 +58,7 @@ import java.util.concurrent.TimeUnit;
  * 7. Client processes responses locally
  */
 public class HTTPBridgeProvider implements BridgeProvider {
+    private static final Logger log = LoggerFactory.getLogger(HTTPBridgeProvider.class);
 
     private static final String PROTOCOL = "cxHTTP1";
     private static final MediaType OCTET_STREAM = MediaType.get("application/octet-stream");
@@ -156,17 +159,17 @@ public class HTTPBridgeProvider implements BridgeProvider {
                         NetworkContainer nc = (NetworkContainer) ConnectX.deserialize("cxJSON1", json, NetworkContainer.class);
                         responses.add(nc);
                     } else {
-                        System.out.println("[HTTP Bridge] Received non-JSON response (acknowledgment): " + trimmed);
+                        log.info("[HTTP Bridge] Received non-JSON response (acknowledgment): {}", trimmed);
                     }
                 } catch (Exception parseEx) {
                     // Response parsing failed - likely an acknowledgment or error message
-                    System.out.println("[HTTP Bridge] Response parse skipped (likely acknowledgment)");
+                    log.info("[HTTP Bridge] Response parse skipped (likely acknowledgment)");
                 }
             }
 
             response.close();
         } catch (Exception e) {
-            System.err.println("HTTP Bridge transmit error: " + e.getMessage());
+            log.error("HTTP Bridge transmit error: {}", e.getMessage());
             throw e;
         }
 
@@ -181,11 +184,11 @@ public class HTTPBridgeProvider implements BridgeProvider {
      */
     @Override
     public void startServer(int port) throws Exception {
-        // IMPORTANT: Bind to 0.0.0.0 (all interfaces) so RProx can reach us from LAN
+        // IMPORTANT: Bind to 0.0.0.0 (all interfaces)
         // Default InetSocketAddress(port) may bind to localhost only on some systems
         httpServer = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
 
-        // Main CX endpoint - receives forwarded requests from RProx
+        // Main CX endpoint - receives requests
         httpServer.createContext("/cx", new CXMessageHandler());
 
         // Health check endpoint - for monitoring/load balancers
@@ -197,19 +200,18 @@ public class HTTPBridgeProvider implements BridgeProvider {
         httpServer.setExecutor(null); // Use default executor
         httpServer.start();
 
-        System.out.println("cxHTTP1 Bridge Server started on port " + port);
-        System.out.println("  Binding: 0.0.0.0:" + port + " (all interfaces)");
-        System.out.println("  INTERNAL Endpoint: http://localhost:" + port + "/cx");
-        System.out.println("  INTERNAL Health: http://localhost:" + port + "/health");
-        System.out.println("  PUBLIC Endpoint: https://CXNET.AnvilDevelopment.US/cx (via RProx)");
-        System.out.println("  ⚠️  WARNING: Server uses plain HTTP - MUST be behind RProx for security");
+        log.info("cxHTTP1 Bridge Server started on port {}", port);
+        log.info("  Binding: 0.0.0.0:{} (all interfaces)", port);
+        log.info("  INTERNAL Endpoint: http://localhost:{}/cx", port);
+        log.info("  INTERNAL Health: http://localhost:{}/health", port);
+        log.warn("WARNING: Server uses plain HTTP, CX is cryptographic by design but we still recommend a solution like RProx behind Cloudflare");
     }
 
     @Override
     public void stopServer() {
         if (httpServer != null) {
             httpServer.stop(0);
-            System.out.println("cxHTTP1 Bridge Server stopped");
+            log.info("cxHTTP1 Bridge Server stopped");
         }
     }
 
@@ -280,8 +282,7 @@ public class HTTPBridgeProvider implements BridgeProvider {
                 sendResponse(exchange, 200, new byte[0]);
 
             } catch (Exception e) {
-                System.err.println("[HTTP Bridge Server] Error: " + e.getMessage());
-                e.printStackTrace();
+                log.error("[HTTP Bridge Server] Error", e);
                 sendResponse(exchange, 500, ("Error: " + e.getMessage()).getBytes());
             }
         }

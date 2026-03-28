@@ -7,8 +7,12 @@ package us.anvildevelopment.cxnet.network.threads;
 
 import us.anvildevelopment.cxnet.network.nodemesh.NodeConfig;
 import us.anvildevelopment.cxnet.network.nodemesh.NodeMesh;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class EventProcessor implements Runnable{
+    private static final Logger log = LoggerFactory.getLogger(EventProcessor.class);
+
     public static boolean active = true;
     private NodeMesh nodeMesh;
 
@@ -23,7 +27,7 @@ public class EventProcessor implements Runnable{
             try {
                 Thread.sleep(NodeConfig.IO_THREAD_SLEEP);
             } catch (InterruptedException e) {
-                e.printStackTrace();
+                log.error("EventProcessor interrupted", e);
             }
         }
     }

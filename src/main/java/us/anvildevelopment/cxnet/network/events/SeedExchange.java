@@ -21,8 +21,8 @@ public class SeedExchange {
     public String network;
     /** Current dynamic seed built from live peer state. Response only. */
     public Seed dynamicSeed;
-    /** Signed epoch seed loaded from disk, if available. Response only. */
-    public Seed epochSeed;
+    /** Raw PGP-signed epoch seed blob, if available. Response only. Verified by receiver via applySignedSeed(). */
+    public byte[] epochSeedBlob;
     /** True if the responding peer is an authoritative NMI/backend node. Response only. */
     public Boolean authoritative;
     /** ID of the responding peer. Response only. */

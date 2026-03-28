@@ -5,6 +5,8 @@
 
 package us.anvildevelopment.cxnet;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import us.anvildevelopment.cxnet.api.CXPlugin;
 import us.anvildevelopment.cxnet.api.DataLevel;
 import us.anvildevelopment.cxnet.crypt.core.CryptProvider;
@@ -36,6 +38,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class ConnectX {
+    private static final Logger log = LoggerFactory.getLogger(ConnectX.class);
     // EPOCH NMI Bootstrap Constants
     public static final String EPOCH_UUID = "00000000-0000-0000-0000-000000000001";
 
@@ -72,6 +75,10 @@ public class ConnectX {
     public File cxRoot = new File("ConnectX");
     public File nodemesh;
     public File resources;
+    /** True when this node has no bootstrap seed and should request one via CXHELLO */
+    public volatile boolean bootstrapSearch = false;
+    /** NMI-signed seed blob to share with peers that request one. Only valid if signed by EPOCH. */
+    public byte[] signedBootstrapSeed = null;
     private transient Node self;
     public int listeningPort = 0;
     private final ConcurrentHashMap<String, CXPlugin> plugins = new ConcurrentHashMap<>();
@@ -100,7 +107,7 @@ public class ConnectX {
      */
     public static class SeedResponseData {
         public Seed dynamicSeed;
-        public Seed epochSeed;
+        public byte[] epochSeedBlob;
         public boolean authoritative;
         public String senderID;
         public long timestamp;
@@ -458,6 +465,9 @@ public class ConnectX {
         private String recipientPublicKey = null;
         private byte[] signature = null;
         private java.util.List<String> encryptionRecipients = new java.util.ArrayList<>();
+        private boolean doSign = false;
+        private boolean doEncrypt = false;
+        private boolean doLowLevel = false;
 
         private EventBuilder(ConnectX connectX, EventType eventType, byte[] data) {
             this.connectX = connectX;
@@ -783,19 +793,7 @@ public class ConnectX {
          * @return This builder for chaining
          */
         public EventBuilder signData() {
-            try {
-                // Sign the current data payload
-                ByteArrayInputStream dataInput = new ByteArrayInputStream(this.event.d);
-                ByteArrayOutputStream signedOutput = new ByteArrayOutputStream();
-                connectX.encryptionProvider.sign(dataInput, signedOutput);
-                dataInput.close();
-
-                // Replace event data with signed blob
-                this.event.d = signedOutput.toByteArray();
-                signedOutput.close();
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to sign event data", e);
-            }
+            this.doSign = true;
             return this;
         }
 
@@ -823,31 +821,25 @@ public class ConnectX {
          * @return This builder for chaining
          */
         public EventBuilder encrypt() {
-            try {
-                if (encryptionRecipients.isEmpty()) {
-                    throw new RuntimeException("No encryption recipients specified - call addRecipient() first");
-                }
-
-                // Encrypt the current data payload for all recipients
-                ByteArrayInputStream dataInput = new ByteArrayInputStream(this.event.d);
-                ByteArrayOutputStream encryptedOutput = new ByteArrayOutputStream();
-               // for (String cxID : encryptionRecipients) {
-             //       connectX.nodeMesh.peerDirectory.lookup(cxID, true, true);
-             //   }
-                connectX.encryptionProvider.encrypt(dataInput, encryptedOutput, encryptionRecipients);
-                dataInput.close();
-
-                // Replace event data with encrypted blob
-                this.event.d = encryptedOutput.toByteArray();
-                encryptedOutput.close();
-
-                // Set E2E flag so receiver knows to decrypt
-                this.event.e2e = true;
-
-                System.out.println("[E2E] Encrypted event data for " + encryptionRecipients.size() + " recipients");
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to encrypt event data", e);
+            if (encryptionRecipients.isEmpty()) {
+                throw new RuntimeException("No encryption recipients specified - call addRecipient() first");
             }
+            this.doEncrypt = true;
+            return this;
+        }
+
+        /**
+         * Low-level direct transmission to a raw address (IP:port or bridge).
+         * The event is spec-compliant (scope="CXS", oCXID set, etc.).
+         * The ll flag tells OutConnectionController to route via out.n.addr directly
+         * instead of resolving by cxID -- used when the peer's cxID is not yet known.
+         * @param address Target address, e.g. "192.168.1.5:49152"
+         */
+        public EventBuilder lowLevel(String address) {
+            this.doLowLevel = true;
+            this.path.scope = "CXS";
+            this.targetNode = new Node();
+            this.targetNode.addr = address;
             return this;
         }
 
@@ -858,27 +850,45 @@ public class ConnectX {
          * This is the terminal operation that actually queues the event
          */
         public void queue() {
-            // Warn if addRecipient() was called but encrypt() was never invoked - data will be sent in clear
-            if (!encryptionRecipients.isEmpty() && !event.e2e) {
-                System.err.println("[EventBuilder] WARNING: addRecipient() called but encrypt() was never invoked for "
-                    + event.eT + " - call .encrypt() before .queue() for E2E encryption");
+            us.anvildevelopment.cxnet.io.IOJob job = new us.anvildevelopment.cxnet.io.IOJob(this);
+            synchronized (connectX.jobQueue) {
+                connectX.jobQueue.add(job);
+            }
+        }
+
+        /**
+         * Called by IOThread (BUILD_OUTPUT): performs deferred sign/encrypt then places OutputBundle on outputQueue.
+         */
+        public void execute() {
+            try {
+                if (doSign) {
+                    ByteArrayInputStream dataInput = new ByteArrayInputStream(this.event.d);
+                    ByteArrayOutputStream signedOutput = new ByteArrayOutputStream();
+                    connectX.encryptionProvider.sign(dataInput, signedOutput);
+                    this.event.d = signedOutput.toByteArray();
+                }
+
+                if (doEncrypt) {
+                    ByteArrayInputStream dataInput = new ByteArrayInputStream(this.event.d);
+                    ByteArrayOutputStream encryptedOutput = new ByteArrayOutputStream();
+                    connectX.encryptionProvider.encrypt(dataInput, encryptedOutput, encryptionRecipients);
+                    this.event.d = encryptedOutput.toByteArray();
+                    this.event.e2e = true;
+                    System.out.println("[E2E] Encrypted event data for " + encryptionRecipients.size() + " recipients");
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to prepare event data", e);
             }
 
-            // Set origin CXID to sender's actual ID for signature verification
             if (this.path.oCXID == null && connectX.self != null) {
                 this.path.oCXID = connectX.self.cxID;
             }
-            /// EXPERIMENTAL
             container.p = path;
-            /*
-            The node should be looked up for future use and added with .toPeer(Node), this is for backwards compatibility with some features that require this method
-             */
-           if (this.path.scope.equals("CXS") && this.targetNode == null) {
+            if (this.path.scope.equals("CXS") && this.targetNode == null) {
                 targetNode = new Node();
-               targetNode.cxID = this.path.cxID;
+                targetNode.cxID = this.path.cxID;
             }
-           ///
-            // Create output bundle with all configured parameters
+
             OutputBundle bundle = new OutputBundle(
                 event,
                 targetNode,
@@ -886,8 +896,7 @@ public class ConnectX {
                 signature,
                 container
             );
-
-            // Queue the event
+            bundle.ll = doLowLevel;
             connectX.queueEvent(bundle);
         }
 
@@ -1060,7 +1069,7 @@ public class ConnectX {
             throw new FileNotFoundException("EPOCH seed file not found: " + epochSeedFile.getAbsolutePath());
         }
 
-        // Copy to bootstrap seed location
+        // Copy signed blob to bootstrap seed location
         File bootstrapSeed = new File(cxRoot, "cxnet-bootstrap.cxn");
         java.nio.file.Files.copy(
             epochSeedFile.toPath(),
@@ -1068,11 +1077,14 @@ public class ConnectX {
             java.nio.file.StandardCopyOption.REPLACE_EXISTING
         );
 
-        // Load seed to extract cx.asc
-        Seed seed = Seed.load(bootstrapSeed);
+        // Strip signature to read the seed JSON and extract cx.asc if needed
+        byte[] blob = java.nio.file.Files.readAllBytes(bootstrapSeed.toPath());
+        ByteArrayOutputStream stripped = new ByteArrayOutputStream();
+        encryptionProvider.stripSignature(new ByteArrayInputStream(blob), stripped);
+        Seed seed = (Seed) deserialize("cxJSON1", stripped.toString(StandardCharsets.UTF_8), Seed.class);
 
         // Extract EPOCH's public key (cx.asc) if not already present
-        if (seed.certificates != null && seed.certificates.containsKey(EPOCH_UUID)) {
+        if (seed != null && seed.certificates != null && seed.certificates.containsKey(EPOCH_UUID)) {
             File cxAsc = new File(cxRoot, "cx.asc");
             if (!cxAsc.exists()) {
                 String epochPublicKey = seed.certificates.get(EPOCH_UUID);
@@ -1096,90 +1108,199 @@ public class ConnectX {
      */
     public void attemptCXNETBootstrap() {
         try {
-            // Check if CXNET already exists
             if (networkMap.containsKey("CXNET")) {
-                System.out.println("[Bootstrap] CXNET already loaded");
-                // Even if loaded, check for updates from EPOCH
+                log.info("[Bootstrap] CXNET already loaded");
                 requestSeedUpdateFromEpoch();
+                if (self != null && EPOCH_UUID.equals(self.cxID)) {
+                    loadSignedBootstrapSeedAsync("CXNET");
+                }
                 return;
             }
 
-            System.out.println("[Bootstrap] CXNET not found, attempting bootstrap...");
+            log.info("[Bootstrap] CXNET not found, attempting bootstrap...");
 
-            // Step 1: Check for distribution bootstrap seed (shipped with software)
-            File bootstrapSeed = new File(cxRoot, "cxnet-bootstrap.cxn");
-            if (bootstrapSeed.exists()) {
-                System.out.println("[Bootstrap] Found distribution bootstrap seed");
-                Seed seed = Seed.load(bootstrapSeed);
-
-                // Apply bootstrap seed to get initial CXNET config and EPOCH's public key
-                applySeed(seed);
-
-                System.out.println("[Bootstrap] Successfully bootstrapped from distribution seed");
-
-                // Copy bootstrap seed to seeds/ directory for future use
-                File seedsDir = new File(cxRoot, "seeds");
-                if (!seedsDir.exists()) {
-                    seedsDir.mkdirs();
-                }
-                File seedCopy = new File(seedsDir, seed.seedID + ".cxn");
-                if (!seedCopy.exists()) {
-                    seed.save(seedCopy);
-                    System.out.println("[Bootstrap] Saved bootstrap seed to seeds/ directory");
-                }
-
-                // Request updated seed from EPOCH (bootstrap seed may be outdated)
-                requestSeedUpdateFromEpoch();
-                return;
-            }
-
-            // Step 2: Check for local seeds directory
-            File seedsDir = new File(cxRoot, "seeds");
-            if (!seedsDir.exists()) {
-                seedsDir.mkdirs();
-                System.out.println("[Bootstrap] Created seeds/ directory");
-            }
-
-            // Look for existing seed files
-            File[] seedFiles = seedsDir.listFiles((dir, name) -> name.endsWith(".cxn"));
-            if (seedFiles != null && seedFiles.length > 0) {
-                // Load the most recently modified seed
-                File latestSeed = seedFiles[0];
-                for (File f : seedFiles) {
-                    if (f.lastModified() > latestSeed.lastModified()) {
-                        latestSeed = f;
+            // Step 1: Distribution bootstrap seed blob shipped with software
+            File bootstrapFile = new File(cxRoot, "cxnet-bootstrap.cxn");
+            if (bootstrapFile.exists()) {
+                log.info("[Bootstrap] Found bootstrap seed blob, queuing load...");
+                jobQueue.add(new IOJob(new FileInputStream(bootstrapFile), true) {
+                    @Override
+                    public void doAfter(boolean success) {
+                        if (success && o instanceof ByteArrayOutputStream) {
+                            applySignedSeed(((ByteArrayOutputStream) o).toByteArray());
+                            requestSeedUpdateFromEpoch();
+                        }
                     }
+                });
+                return;
+            }
+
+            // Step 2: Any seed blob in the seeds/ directory
+            File seedsDir = new File(cxRoot, "seeds");
+            seedsDir.mkdirs();
+            File[] seedFiles = seedsDir.listFiles((d, name) -> name.endsWith(".cxn"));
+            if (seedFiles != null && seedFiles.length > 0) {
+                File latest = seedFiles[0];
+                for (File f : seedFiles) {
+                    if (f.lastModified() > latest.lastModified()) latest = f;
                 }
-
-                System.out.println("[Bootstrap] Loading local seed: " + latestSeed.getName());
-                Seed seed = Seed.load(latestSeed);
-
-                // Apply seed (loads networks, peers, certificates)
-                applySeed(seed);
-
-                System.out.println("[Bootstrap] Successfully bootstrapped from local seed");
-
-                // Initiate P2P discovery with peers from seed (works even if EPOCH is offline)
-                initiateP2PDiscovery();
-
-                // Request updated seed from EPOCH (local seed may be outdated)
-                requestSeedUpdateFromEpoch();
+                final File seedFile = latest;
+                log.info("[Bootstrap] Loading seed blob: {}", seedFile.getName());
+                jobQueue.add(new IOJob(new FileInputStream(seedFile), true) {
+                    @Override
+                    public void doAfter(boolean success) {
+                        if (success && o instanceof ByteArrayOutputStream) {
+                            applySignedSeed(((ByteArrayOutputStream) o).toByteArray());
+                            initiateP2PDiscovery();
+                            requestSeedUpdateFromEpoch();
+                        }
+                    }
+                });
                 return;
             }
 
-            // Step 3: No local seed found - request from EPOCH (if we're not EPOCH)
+            // Step 3: EPOCH is the seed authority -- generate initial seed on first run
             if (self != null && EPOCH_UUID.equals(self.cxID)) {
-                System.out.println("[Bootstrap] This is EPOCH - no bootstrap needed");
+                log.info("[Bootstrap] This is EPOCH with no local seed -- generating initial bootstrap");
+                initEpochBootstrap();
                 return;
             }
 
-            System.out.println("[Bootstrap] No bootstrap or local seed found");
-            System.out.println("[Bootstrap] Unable to bootstrap - please obtain cxnet-bootstrap.cxn");
-            System.out.println("[Bootstrap] Download from: https://CXNET.AnvilDevelopment.US/bootstrap");
+            // Step 4: Attempt remote fetch from AnvilDevelopment distribution endpoint
+            log.info("[Bootstrap] No local seed found, attempting remote fetch...");
+            fetchBootstrapSeedAsync();
 
         } catch (Exception e) {
-            System.err.println("[Bootstrap] Bootstrap attempt failed: " + e.getMessage());
-            e.printStackTrace();
+            log.error("[Bootstrap] Bootstrap attempt failed", e);
+        }
+    }
+
+    /**
+     * Called when EPOCH starts with no local seed data.
+     * Creates CXNET (if not already present), builds a Seed from current state,
+     * signs it with EPOCH's key, persists the blob to disk, and sets signedBootstrapSeed.
+     * Safe to call on restart -- no-op if a seed blob already exists on disk.
+     */
+    private void initEpochBootstrap() {
+        try {
+            // Ensure CXNET exists in networkMap
+            CXNetwork cxnet = networkMap.get("CXNET");
+            if (cxnet == null) {
+                cxnet = createNetwork("CXNET");
+                log.info("[EpochBootstrap] Created CXNET network");
+            }
+
+            // Build seed from current state
+            Seed seed = new Seed();
+            seed.seedID = java.util.UUID.randomUUID().toString();
+            seed.timestamp = System.currentTimeMillis();
+            seed.networkID = "CXNET";
+            seed.addNetwork(cxnet);
+            if (self != null) {
+                seed.addHvPeer(self);
+                seed.addPeerFindingNode(self);
+            }
+
+            // Serialize and sign with EPOCH's key
+            String seedJson = serialize("cxJSON1", seed);
+            ByteArrayInputStream seedInput = new ByteArrayInputStream(seedJson.getBytes(StandardCharsets.UTF_8));
+            ByteArrayOutputStream signedOutput = new ByteArrayOutputStream();
+            encryptionProvider.sign(seedInput, signedOutput);
+            seedInput.close();
+            byte[] signedBlob = signedOutput.toByteArray();
+            signedOutput.close();
+
+            // Persist: seeds/{seedID}.cxn
+            File seedsDir = new File(cxRoot, "seeds");
+            seedsDir.mkdirs();
+            try (FileOutputStream fos = new FileOutputStream(new File(seedsDir, seed.seedID + ".cxn"))) {
+                fos.write(signedBlob);
+            }
+
+            // Persist: cxnet-bootstrap.cxn (distribution copy)
+            try (FileOutputStream fos = new FileOutputStream(new File(cxRoot, "cxnet-bootstrap.cxn"))) {
+                fos.write(signedBlob);
+            }
+
+            // Record current seed ID in network config
+            if (cxnet.configuration.currentSeedID != null) {
+                cxnet.configuration.lastSeedID = cxnet.configuration.currentSeedID;
+            }
+            cxnet.configuration.currentSeedID = seed.seedID;
+
+            // Load into RAM for CXHELLO relay
+            signedBootstrapSeed = signedBlob;
+
+            log.info("[EpochBootstrap] Bootstrap seed created and signed: {}", seed.seedID);
+        } catch (Exception e) {
+            log.error("[EpochBootstrap] Failed to create initial bootstrap seed", e);
+        }
+    }
+
+    /**
+     * Fetches the bootstrap seed blob from the AnvilDevelopment distribution endpoint on a
+     * background thread. On success, calls applySignedSeed() and persists to disk.
+     * On failure, sets bootstrapSearch=true so peers can supply via CXHELLO.
+     */
+    private void fetchBootstrapSeedAsync() {
+        Thread fetchThread = new Thread(() -> {
+            try {
+                log.info("[Bootstrap] Fetching seed from https://anvildevelopment.us/downloads/cxnet-bootstrap.cxn ...");
+                java.net.URL url = new java.net.URL("https://anvildevelopment.us/downloads/cxnet-bootstrap.cxn");
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                conn.setConnectTimeout(8000);
+                conn.setReadTimeout(8000);
+                conn.setRequestProperty("User-Agent", "ConnectX/" + ConnectX.class.getPackage().getImplementationVersion());
+                int status = conn.getResponseCode();
+                if (status == 200) {
+                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                    try (java.io.InputStream in = conn.getInputStream()) {
+                        byte[] buf = new byte[4096];
+                        int n;
+                        while ((n = in.read(buf)) != -1) baos.write(buf, 0, n);
+                    }
+                    byte[] blob = baos.toByteArray();
+                    log.info("[Bootstrap] Fetched {} bytes from remote, applying...", blob.length);
+                    applySignedSeed(blob);
+                    requestSeedUpdateFromEpoch();
+                } else {
+                    log.warn("[Bootstrap] Remote fetch returned HTTP {}, falling back to CXHELLO", status);
+                    bootstrapSearch = true;
+                }
+                conn.disconnect();
+            } catch (Exception e) {
+                log.warn("[Bootstrap] Remote fetch failed: {} - falling back to CXHELLO", e.getMessage());
+                bootstrapSearch = true;
+            }
+        });
+        fetchThread.setName("Bootstrap-Fetch-Thread");
+        fetchThread.setDaemon(true);
+        fetchThread.start();
+    }
+
+    /**
+     * Asynchronously loads the current seed blob for the given network into RAM
+     * so it can be relayed in CXHELLO responses without re-signing.
+     */
+    private void loadSignedBootstrapSeedAsync(String networkID) {
+        try {
+            CXNetwork network = networkMap.get(networkID);
+            if (network == null || network.configuration == null
+                    || network.configuration.currentSeedID == null) return;
+            File seedFile = new File(new File(cxRoot, "seeds"),
+                    network.configuration.currentSeedID + ".cxn");
+            if (!seedFile.exists()) return;
+            jobQueue.add(new IOJob(new FileInputStream(seedFile), true) {
+                @Override
+                public void doAfter(boolean success) {
+                    if (success && o instanceof ByteArrayOutputStream) {
+                        signedBootstrapSeed = ((ByteArrayOutputStream) o).toByteArray();
+                        log.info("[Bootstrap] Signed seed blob loaded for CXHELLO relay");
+                    }
+                }
+            });
+        } catch (Exception e) {
+            log.error("[Bootstrap] Could not queue seed blob load", e);
         }
     }
 
@@ -1189,7 +1310,7 @@ public class ConnectX {
      */
     private void requestSeedUpdateFromEpoch() {
         if (self != null && !EPOCH_UUID.equals(self.cxID)) {
-            System.out.println("[Bootstrap] Requesting seed update from EPOCH...");
+            log.info("[Bootstrap] Requesting seed update from EPOCH...");
             requestSeedFromEpoch();
         }
     }
@@ -1201,10 +1322,10 @@ public class ConnectX {
      * @throws Exception if application fails
      */
     private void applySeed(Seed seed) throws Exception {
-        System.out.println("[Seed] Applying seed " + seed.seedID);
-        System.out.println("[Seed]   Networks: " + seed.networks.size());
-        System.out.println("[Seed]   HV Peers: " + seed.hvPeers.size());
-        System.out.println("[Seed]   Certificates: " + seed.certificates.size());
+        log.info("[Seed] Applying seed " + seed.seedID);
+        log.info("[Seed]   Networks: " + seed.networks.size());
+        log.info("[Seed]   HV Peers: " + seed.hvPeers.size());
+        log.info("[Seed]   Certificates: " + seed.certificates.size());
 
         // IMPORTANT: Extract and save NMI public key (cx.asc) first
         // This allows nodes to initialize crypto before connecting
@@ -1216,32 +1337,32 @@ public class ConnectX {
                 writer.write(nmiPublicKey);
                 writer.flush();
                 writer.close();
-                System.out.println("[Seed] Extracted NMI public key to cx.asc");
+                log.info("[Seed] Extracted NMI public key to cx.asc");
             } else {
-                System.out.println("[Seed] cx.asc already exists, skipping extraction");
+                log.info("[Seed] cx.asc already exists, skipping extraction");
             }
         }
 
         // Add hv peers to directory (skip self by cxID or public key)
         for (Node peer : seed.hvPeers) {
             if (isSelfNode(peer)) {
-                System.out.println("[Seed] Skipped self in hvPeers: " + peer.cxID);
+                log.info("[Seed] Skipped self in hvPeers: " + peer.cxID);
                 continue;
             }
             nodeMesh.peerDirectory.addNode(peer);
-            System.out.println("[Seed] Added peer: " + peer.cxID);
+            log.info("[Seed] Added peer: " + peer.cxID);
         }
 
         // Import networks using shared registration logic
         for (CXNetwork network : seed.networks) {
             String networkID = network.configuration.netID;
-            System.out.println("[Seed] Importing network: " + networkID);
+            log.info("[Seed] Importing network: " + networkID);
 
             try {
                 // Use shared network registration (handles persistence, replay, sync)
                 registerNetwork(network);
             } catch (Exception e) {
-                System.err.println("[Seed] Failed to register network " + networkID + ": " + e.getMessage());
+                log.error("[Seed] Failed to register network " + networkID + ": " + e.getMessage());
                 e.printStackTrace();
             }
         }
@@ -1250,13 +1371,67 @@ public class ConnectX {
         for (java.util.Map.Entry<String, String> cert : seed.certificates.entrySet()) {
             try {
                 encryptionProvider.cacheCert(cert.getKey(), false, false, this);
-                System.out.println("[Seed] Cached certificate: " + cert.getKey());
+                log.info("[Seed] Cached certificate: " + cert.getKey());
             } catch (Exception e) {
-                System.err.println("[Seed] Failed to cache certificate for " + cert.getKey() + ": " + e.getMessage());
+                log.error("[Seed] Failed to cache certificate for " + cert.getKey() + ": " + e.getMessage());
             }
         }
 
-        System.out.println("[Seed] Seed application complete");
+        log.info("[Seed] Seed application complete");
+    }
+
+    /**
+     * Verify and apply a NMI-signed seed blob received from a peer via CXHELLO.
+     * The blob MUST be signed by EPOCH (NMI) -- verified against the hardcoded NMI public key.
+     * Any peer can relay the blob unchanged; only EPOCH can produce a valid one.
+     * @param signedBlob Raw signed seed blob (PGP-signed, not encrypted)
+     */
+    public void applySignedSeed(byte[] signedBlob) {
+        try {
+            PainlessCryptProvider pcp = (PainlessCryptProvider) encryptionProvider;
+            pcp.certCache.putIfAbsent(EPOCH_UUID, pcp.nmipubkey);
+
+            // Log first bytes to diagnose PGP format issues
+            if (signedBlob != null && signedBlob.length > 0) {
+                StringBuilder hexPreview = new StringBuilder();
+                for (int i = 0; i < Math.min(16, signedBlob.length); i++) {
+                    hexPreview.append(String.format("%02X ", signedBlob[i]));
+                }
+                log.debug("[Bootstrap] signedBlob length={}, first bytes: {}", signedBlob.length, hexPreview.toString().trim());
+            }
+
+            ByteArrayInputStream signedInput = new ByteArrayInputStream(signedBlob);
+            ByteArrayOutputStream strippedOutput = new ByteArrayOutputStream();
+
+            boolean verified = encryptionProvider.verifyAndStrip(signedInput, strippedOutput, EPOCH_UUID);
+            if (!verified) {
+                log.error("[Bootstrap] Rejected seed blob: NMI signature verification failed");
+                return;
+            }
+
+            String seedJson = strippedOutput.toString(StandardCharsets.UTF_8);
+            Seed seed = (Seed) deserialize("cxJSON1", seedJson, Seed.class);
+            applySeed(seed);
+            signedBootstrapSeed = signedBlob;
+            bootstrapSearch = false;
+
+            // Queue async writes to persist blob on disk
+            File seedsDir = new File(cxRoot, "seeds");
+            seedsDir.mkdirs();
+            final byte[] blobRef = signedBlob;
+            final String seedID = seed.seedID;
+            try {
+                jobQueue.add(new IOJob(new ByteArrayInputStream(blobRef),
+                        new FileOutputStream(new File(seedsDir, seedID + ".cxn")), true));
+                jobQueue.add(new IOJob(new ByteArrayInputStream(blobRef),
+                        new FileOutputStream(new File(cxRoot, "cxnet-bootstrap.cxn")), true));
+            } catch (FileNotFoundException e) {
+                log.error("[Bootstrap] Could not queue blob write", e);
+            }
+            log.info("[Bootstrap] Applied signed seed: {}", seedID);
+        } catch (Exception e) {
+            log.error("[Bootstrap] Failed to apply signed seed blob", e);
+        }
     }
 
     /**
@@ -1873,11 +2048,12 @@ public class ConnectX {
      */
     public CXNetwork importNetwork(File importFile) throws Exception {
         // Follow the same pattern as NodeMesh.processNetworkInput()
-        FileInputStream fis = new FileInputStream(importFile);
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
 
         // Step 1: Decrypt outer NetworkContainer (verifies outer signature)
-        Object o = encryptionProvider.decrypt(fis, baos);
+        try (FileInputStream fis = new FileInputStream(importFile)) {
+            encryptionProvider.decrypt(fis, baos);
+        }
         String networkContainer = baos.toString("UTF-8");
 
         // Step 2: Deserialize NetworkContainer from decrypted JSON
@@ -1917,11 +2093,6 @@ public class ConnectX {
 
         // Register network (shared logic for both import and seed application)
         registerNetwork(network);
-
-        fis.close();
-        baos.close();
-        bais.close();
-        networkBaos.close();
 
         return network;
     }
@@ -2649,12 +2820,10 @@ public class ConnectX {
             return;
         }
 
-        try {
+        try (FileInputStream fis = new FileInputStream(dataFile)) {
             // Deserialize from JSON
-            FileInputStream fis = new FileInputStream(dataFile);
             dataContainer = (DataContainer) deserialize(
                 "cxJSON1", fis, DataContainer.class);
-            fis.close();
         } catch (Exception e) {
             System.err.println("[DataContainer] Failed to load data.cxd: " + e.getMessage());
             // Create new container on error

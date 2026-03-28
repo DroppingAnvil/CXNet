@@ -8,6 +8,8 @@ package us.anvildevelopment.cxnet.network.nodemesh.bridge.http;
 import us.anvildevelopment.cxnet.network.CXPath;
 import us.anvildevelopment.cxnet.network.nodemesh.bridge.CXBridge;
 import okhttp3.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.Socket;
 
@@ -18,6 +20,7 @@ import java.net.Socket;
  *  BridgeArg: HTTP Path
  */
 public class HTTPBridge implements CXBridge {
+    private static final Logger log = LoggerFactory.getLogger(HTTPBridge.class);
     public static OkHttpClient httpClient;
     public static final MediaType jsonType = MediaType.get("application/json; charset=utf-8");
 
@@ -56,7 +59,7 @@ public class HTTPBridge implements CXBridge {
             rr.close();
             return rr.isSuccessful();
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("HTTP bridge transmit error", e);
             return false;
         }
     }

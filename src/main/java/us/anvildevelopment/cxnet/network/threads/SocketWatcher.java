@@ -9,11 +9,14 @@ import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.io.NetworkInputIOJob;
 import us.anvildevelopment.cxnet.network.nodemesh.NodeConfig;
 import us.anvildevelopment.cxnet.network.nodemesh.NodeMesh;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.Socket;
 
 public class SocketWatcher implements Runnable {
+    private static final Logger log = LoggerFactory.getLogger(SocketWatcher.class);
     public static boolean active = true;
     public ConnectX cx;
     private NodeMesh nodeMesh;
@@ -37,7 +40,7 @@ public class SocketWatcher implements Runnable {
                 if (s != null) {
                     long acceptTime = System.currentTimeMillis();
                     String remoteAddr = s.getInetAddress().getHostAddress() + ":" + s.getPort();
-                    if (NodeConfig.DEBUG) System.out.println("[RX:" + localPort + "/" + cx.getOwnID().substring(0,8) + "] ACCEPT from " + remoteAddr + " (connected=" + s.isConnected() + ", closed=" + s.isClosed() + ")");
+                    log.debug("[RX:{}/{}] ACCEPT from {} (connected={}, closed={})", localPort, cx.getOwnID().substring(0,8), remoteAddr, s.isConnected(), s.isClosed());
 
                     if (!NodeMesh.blacklist.containsKey(s.getInetAddress().getHostAddress()) & !NodeMesh.timeout.containsKey(s.getInetAddress().getHostAddress())) {
                         java.io.InputStream rawStream = s.getInputStream();
@@ -46,7 +49,7 @@ public class SocketWatcher implements Runnable {
                         long setupTime = System.currentTimeMillis();
                         int available = rawStream.available();
                         String peerPrefix = "[RX:" + localPort + "/" + cx.getOwnID().substring(0,8) + "]";
-                        if (NodeConfig.DEBUG) System.out.println(peerPrefix + " Setup " + (setupTime - acceptTime) + "ms, available=" + available + " bytes");
+                        log.debug("{} Setup {}ms, available={} bytes", peerPrefix, (setupTime - acceptTime), available);
 
                         s.setSoTimeout(400); // 400ms timeout
                         byte[] chunk = new byte[8192];
@@ -57,25 +60,25 @@ public class SocketWatcher implements Runnable {
                             long readDuration = System.currentTimeMillis() - readStart;
 
                             if (bytesRead > 0) {
-                                if (NodeConfig.DEBUG) System.out.println(peerPrefix + " Read " + bytesRead + " bytes in " + readDuration + "ms");
+                                log.debug("{} Read {} bytes in {}ms", peerPrefix, bytesRead, readDuration);
                                 buffer.write(chunk, 0, bytesRead);
                                 while (rawStream.available() > 0 && (bytesRead = rawStream.read(chunk)) != -1) {
                                     buffer.write(chunk, 0, bytesRead);
                                 }
                             } else if (bytesRead == -1) {
-                                if (NodeConfig.DEBUG) System.out.println(peerPrefix + " EOF after " + readDuration + "ms - sender closed");
+                                log.debug("{} EOF after {}ms - sender closed", peerPrefix, readDuration);
                             } else {
-                                if (NodeConfig.DEBUG)  System.out.println(peerPrefix + " Zero bytes after " + readDuration + "ms");
+                                log.debug("{} Zero bytes after {}ms", peerPrefix, readDuration);
                             }
                         } catch (java.net.SocketTimeoutException e) {
-                            if (NodeConfig.DEBUG) System.out.println(peerPrefix + " TIMEOUT after 400ms - no data");
+                            log.debug("{} TIMEOUT after 400ms - no data", peerPrefix);
                         } catch (Exception e) {
-                            if (NodeConfig.DEBUG) System.out.println(peerPrefix + " ERROR: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+                            log.debug("{} ERROR: {} - {}", peerPrefix, e.getClass().getSimpleName(), e.getMessage());
                         }
 
                         byte[] data = buffer.toByteArray();
                         long totalTime = System.currentTimeMillis() - acceptTime;
-                        if (NodeConfig.DEBUG) System.out.println(peerPrefix + " TOTAL: " + data.length + " bytes in " + totalTime + "ms");
+                        log.debug("{} TOTAL: {} bytes in {}ms", peerPrefix, data.length, totalTime);
 
                         // Create InputStream from buffered data
                         java.io.ByteArrayInputStream bufferedStream = new java.io.ByteArrayInputStream(data);
@@ -84,13 +87,13 @@ public class SocketWatcher implements Runnable {
                             cx.jobQueue.add(ni);
                         }
                     } else {
-                        System.out.println("[SocketWatcher] Connection blacklisted/timeout, closing");
+                        log.info("[SocketWatcher] Connection blacklisted/timeout, closing");
                         s.close();
                     }
                 }
                 Thread.sleep(NodeConfig.ioSocketSleep);
             } catch (IOException | InterruptedException e) {
-                e.printStackTrace();
+                log.error("SocketWatcher error", e);
             }
         }
     }

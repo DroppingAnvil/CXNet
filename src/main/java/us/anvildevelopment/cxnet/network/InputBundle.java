@@ -55,6 +55,9 @@ public class InputBundle {
      * @return success
      */
     public boolean readyObject(Class<?> clazz, String serializationMethod, ConnectX connectX) throws Exception {
+        // If object was already set directly (e.g. CXHELLO path), no need to deserialize
+        if (object != null) return true;
+        if (verifiedObjectBytes == null) return false;
         ByteArrayInputStream bais = new ByteArrayInputStream(verifiedObjectBytes);
         Object o1 = connectX.deserialize(serializationMethod, bais, clazz);
         if (o1 != null) {

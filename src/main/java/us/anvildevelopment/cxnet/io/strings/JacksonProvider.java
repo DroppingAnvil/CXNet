@@ -21,9 +21,12 @@ public class JacksonProvider implements SerializationProvider {
         // Ignore unknown properties during deserialization to handle schema evolution
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         // Enable polymorphic type handling for abstract classes like Entry
+        //AD.target.PACKAGE/REFACTOR | Any time packages are changed or come from out of the CXNET package none will be accepted unless adding here
+        //TODO add subtype from added plugins
         PolymorphicTypeValidator ptv = BasicPolymorphicTypeValidator.builder()
+                .allowIfSubType("us.anvildevelopment.cxnet.")
                 .allowIfSubType("us.anvildevelopment.util.tools.permissions.")
-                .allowIfSubType("dev.droppinganvil.")
+                .allowIfSubType("us.anvildevelopment.")
                 .allowIfSubType("java.util.")
                 .allowIfSubType("java.lang.")
                 .build();

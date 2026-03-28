@@ -72,8 +72,9 @@ public class CXPeer3Test {
         }
         // E2E Test - to 01
         peer3.buildEvent(EventType.MESSAGE, "12345677890".getBytes("UTF-8")).addRecipient("00000000-0000-0000-0000-000000000001").encrypt().toPeer("00000000-0000-0000-0000-000000000001").queue();
-        peer3.buildEvent(EventType.MESSAGE, "12345677890".getBytes("UTF-8")).addRecipient("00000000-0000-0000-0000-000000000001").encrypt().toPeer("00000000-0000-0000-0000-000000000001").queue();
-        // CXN - E2E, peer 2 should be offline for this test
+       peer3.buildEvent(EventType.MESSAGE, "12345677890".getBytes("UTF-8")).addRecipient("00000000-0000-0000-0000-000000000001").encrypt().toPeer("00000000-0000-0000-0000-000000000001").queue();
+         //CXN - E2E, peer 2 should be offline for this test
+        //NOTE This specific test will always fail if this peer has never met the other peer, Node lookup and the global CXNET is to prevent this exact issue but the specific feature is not implemented yet
         peer3.buildEvent(EventType.MESSAGE, "123987".getBytes("UTF-8")).signData().toPeer("02000000-0000-0000-0000-000000000001").queue();
 
     }

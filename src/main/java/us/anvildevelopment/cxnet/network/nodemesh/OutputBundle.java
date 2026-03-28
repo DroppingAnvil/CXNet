@@ -14,6 +14,12 @@ public class OutputBundle {
     public String s;
     public byte[] prev;
     public NetworkContainer nc;
+    /**
+     * Low-level direct transmission flag.
+     * When true, bypasses CXS/CXN scope routing and sends directly to out.n.addr.
+     * Use for pre-discovery events (CXHELLO) where peer ID is not yet known.
+     */
+    public boolean ll;
 
     public OutputBundle(NetworkEvent ne, Node n, String s, byte[] prev, NetworkContainer nc) {
         this.ne = ne;

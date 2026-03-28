@@ -1,6 +1,8 @@
 package us.anvildevelopment.cxnet.network;
 
 import us.anvildevelopment.cxnet.edge.NetworkBlock;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.security.MessageDigest;
 import java.util.*;
@@ -19,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 4. Get result: tracker.getConsensusBlock(requestKey)
  */
 public class BlockConsensusTracker {
+    private static final Logger log = LoggerFactory.getLogger(BlockConsensusTracker.class);
 
     /**
      * Tracks a single block request across multiple peers
@@ -106,11 +109,9 @@ public class BlockConsensusTracker {
                                                 timeoutMs, minPeers, minResponseRate, consensusThreshold);
         activeRequests.put(requestKey, request);
 
-        System.out.println("[Consensus] Created block request " + requestKey + " for " + peers.size() + " peers");
-        System.out.println("[Consensus]   Config: minPeers=" + minPeers +
-                         ", responseRate=" + minResponseRate +
-                         ", threshold=" + consensusThreshold +
-                         ", timeout=" + timeoutMs + "ms");
+        log.info("[Consensus] Created block request {} for {} peers", requestKey, peers.size());
+        log.info("[Consensus]   Config: minPeers={}, responseRate={}, threshold={}, timeout={}ms",
+                         minPeers, minResponseRate, consensusThreshold, timeoutMs);
         return requestKey;
     }
 
@@ -125,7 +126,7 @@ public class BlockConsensusTracker {
     public boolean recordResponse(String requestKey, String peerID, NetworkBlock block) {
         BlockRequest request = activeRequests.get(requestKey);
         if (request == null) {
-            System.err.println("[Consensus] Request not found: " + requestKey);
+            log.error("[Consensus] Request not found: {}", requestKey);
             return false;
         }
 
@@ -135,10 +136,9 @@ public class BlockConsensusTracker {
         request.responses.put(peerID, block);
         request.blockHashes.put(peerID, blockHash);
 
-        System.out.println("[Consensus] Recorded response from " + peerID.substring(0, 8) +
-                         " for " + requestKey +
-                         " (hash: " + blockHash.substring(0, 8) + ")" +
-                         " (" + request.responses.size() + "/" + request.requestedPeers.size() + ")");
+        log.info("[Consensus] Recorded response from {} for {} (hash: {}) ({}/{})",
+                         peerID.substring(0, 8), requestKey, blockHash.substring(0, 8),
+                         request.responses.size(), request.requestedPeers.size());
 
         return true;
     }
@@ -182,7 +182,7 @@ public class BlockConsensusTracker {
 
             return hexString.toString();
         } catch (Exception e) {
-            System.err.println("[Consensus] Error calculating block hash: " + e.getMessage());
+            log.error("[Consensus] Error calculating block hash: {}", e.getMessage());
             return "error";
         }
     }
@@ -209,14 +209,14 @@ public class BlockConsensusTracker {
 
         // Check minimum peer count (use request-specific settings)
         if (responseCount < request.minPeers) {
-            System.out.println("[Consensus] Insufficient responses: " + responseCount + " < " + request.minPeers);
+            log.info("[Consensus] Insufficient responses: {} < {}", responseCount, request.minPeers);
             return false;
         }
 
         // Check response rate (use request-specific settings)
         double responseRate = request.getResponseRate();
         if (responseRate < request.minResponseRate) {
-            System.out.println("[Consensus] Insufficient response rate: " + responseRate + " < " + request.minResponseRate);
+            log.info("[Consensus] Insufficient response rate: {} < {}", responseRate, request.minResponseRate);
             return false;
         }
 
@@ -252,16 +252,15 @@ public class BlockConsensusTracker {
             request.consensusReached = true;
             request.consensusBlock = hashToBlock.get(majorityHash);
 
-            System.out.println("[Consensus] REACHED for " + requestKey);
-            System.out.println("[Consensus]   Agreement: " + majorityCount + "/" + responseCount +
-                             " (" + String.format("%.1f%%", agreementRate * 100) + ")");
-            System.out.println("[Consensus]   Consensus hash: " + majorityHash);
+            log.info("[Consensus] REACHED for {}", requestKey);
+            log.info("[Consensus]   Agreement: {}/{} ({}%)",
+                             majorityCount, responseCount, String.format("%.1f", agreementRate * 100));
+            log.info("[Consensus]   Consensus hash: {}", majorityHash);
 
             return true;
         } else {
-            System.out.println("[Consensus] No consensus yet for " + requestKey +
-                             " (best: " + majorityCount + "/" + responseCount +
-                             " = " + String.format("%.1f%%", agreementRate * 100) + ")");
+            log.info("[Consensus] No consensus yet for {} (best: {}/{} = {}%)",
+                             requestKey, majorityCount, responseCount, String.format("%.1f", agreementRate * 100));
             return false;
         }
     }
@@ -292,7 +291,7 @@ public class BlockConsensusTracker {
      */
     public void removeRequest(String requestKey) {
         activeRequests.remove(requestKey);
-        System.out.println("[Consensus] Removed request " + requestKey);
+        log.info("[Consensus] Removed request {}", requestKey);
     }
 
     /**
@@ -309,12 +308,12 @@ public class BlockConsensusTracker {
         }
 
         for (String key : timedOut) {
-            System.out.println("[Consensus] Request timed out: " + key);
+            log.info("[Consensus] Request timed out: {}", key);
             activeRequests.remove(key);
         }
 
         if (!timedOut.isEmpty()) {
-            System.out.println("[Consensus] Cleaned up " + timedOut.size() + " timed out requests");
+            log.info("[Consensus] Cleaned up {} timed out requests", timedOut.size());
         }
     }
 

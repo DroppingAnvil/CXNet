@@ -6,10 +6,13 @@ import us.anvildevelopment.cxnet.network.CXPath;
 import us.anvildevelopment.cxnet.network.events.NetworkContainer;
 import us.anvildevelopment.cxnet.network.events.NetworkEvent;
 import us.anvildevelopment.cxnet.network.nodemesh.bridge.BridgeProvider;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.Socket;
 
 public class OutConnectionController {
+    private static final Logger log = LoggerFactory.getLogger(OutConnectionController.class);
     public ConnectX connectXAPI;
 
     public OutConnectionController(ConnectX api) {
@@ -23,8 +26,7 @@ public class OutConnectionController {
 
         // Debug: Log routing info
         if (out.ne != null && out.ne.eT != null && out.ne.eT.contains("HELLO")) {
-            System.out.println("[TX-DEBUG] Event=" + out.ne.eT + ", ne.p=" + (out.ne.p != null ? out.ne.p.scope : "null") +
-                ", out.n=" + (out.n != null ? out.n.addr : "null"));
+            log.info("[TX-DEBUG] Event={}, ne.p={}, out.n={}", out.ne.eT, (out.ne.p != null ? out.ne.p.scope : "null"), (out.n != null ? out.n.addr : "null"));
         }
 
         // IMPORTANT: Always set transmitter ID before signing NetworkContainer
@@ -52,8 +54,7 @@ public class OutConnectionController {
                 try {
                     cryptEvent = connectXAPI.signObject(out.ne, NetworkEvent.class, nc.se).toByteArray();
                 } catch (Exception sigEx) {
-                    System.err.println("[OutController] SIGN FAILED for " + out.ne.eT + ": " + sigEx);
-                    sigEx.printStackTrace();
+                    log.error("[OutController] SIGN FAILED for {}", out.ne.eT, sigEx);
                     //throw sigEx;
                 }
             }
@@ -70,18 +71,18 @@ public class OutConnectionController {
             try {
                 boolean recorded = connectXAPI.Event(out.ne, connectXAPI.getOwnID(), cryptEvent);
                 if (recorded) {
-                    System.out.println("[Blockchain] Recorded event " + out.ne.eT + " to chain " + out.ne.p.chainID);
+                    log.info("[Blockchain] Recorded event " + out.ne.eT + " to chain " + out.ne.p.chainID);
                 } else {
-                    System.err.println("[Blockchain] Event() returned false for " + out.ne.eT);
+                    log.info("[Blockchain] Event() returned false for " + out.ne.eT);
                 }
             } catch (Exception e) {
-                System.err.println("[Blockchain] Failed to record event during transmission: " + e.getMessage());
+                log.info("[Blockchain] Failed to record event during transmission: " + e.getMessage());
                 e.printStackTrace();
             }
         } else {
             // Debug: Why didn't we record?
             if (out.ne.eT != null && out.ne.eT.equals("MESSAGE")) {
-                System.out.println("[Blockchain-Debug] MESSAGE not recorded: prev=" + (out.prev == null) +
+                log.info("[Blockchain-Debug] MESSAGE not recorded: prev=" + (out.prev == null) +
                     ", hasPath=" + (out.ne.p != null) +
                     ", hasScope=" + (out.ne.p != null && out.ne.p.scope != null) +
                     ", scope=" + (out.ne.p != null ? out.ne.p.scope : "null") +
@@ -99,11 +100,40 @@ public class OutConnectionController {
 
         // Sign the NetworkContainer (outer layer) with our signature as the transmitter
         byte[] cryptNetworkContainer = connectXAPI.signObject(nc, NetworkContainer.class, nc.se).toByteArray();
-        if (out.ne.p != null && out.ne.p.scope != null) {
+        if (out.ll && out.n != null && out.n.addr != null && !out.n.addr.isEmpty()) {
+            // Low-level direct transmission: bypass scope routing, send straight to out.n.addr.
+            // Used for pre-discovery events (CXHELLO) where peer ID is not yet known.
+            CXPath cxPath = CXPath.getPathFromString(out.n.addr);
+            if (CXPath.isSocket(cxPath)) {
+                try {
+                    log.info("[OutController] [LL] Direct transmit to {} ({} bytes)", out.n.addr, cryptNetworkContainer.length);
+                    String[] addr = out.n.addr.split(":");
+                    Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
+                    java.io.OutputStream os = s.getOutputStream();
+                    os.write(cryptNetworkContainer);
+                    os.flush();
+                    Thread.sleep(500);
+                    s.close();
+                    log.info("[OutController] [LL] Direct transmit SUCCESS to {}", out.n.addr);
+                } catch (Exception e) {
+                    log.info("[OutController] [LL] Direct transmit FAILED to {}: {}", out.n.addr, e.getMessage());
+                }
+            } else if (CXPath.isBridge(cxPath)) {
+                BridgeProvider bridge = connectXAPI.getBridgeProvider(cxPath.bridge);
+                if (bridge != null) {
+                    CXPath bridgePath = new CXPath();
+                    bridgePath.bridgeArg = cxPath.bridgeArg;
+                    bridge.transmitEvent(bridgePath, cryptNetworkContainer);
+                    log.info("[OutController] [LL] Bridge transmit via {}", cxPath.bridge);
+                } else {
+                    log.info("[OutController] [LL] No bridge provider for {}", cxPath.bridge);
+                }
+            }
+        } else if (out.ne.p != null && out.ne.p.scope != null) {
             if (out.ne.p.scope.equalsIgnoreCase("CXS")) {
                 // Drop immediately if the target is ourselves - no loopback routing
                 if (out.ne.p.cxID != null && out.ne.p.cxID.equals(connectXAPI.getOwnID())) {
-                    System.err.println("[OutController] Dropping event " + out.ne.eT + " - target cxID is self");
+                    log.info("[OutController] Dropping event " + out.ne.eT + " - target cxID is self");
                     return;
                 }
 
@@ -133,7 +163,7 @@ public class OutConnectionController {
                             String bridgeProtocol = parts[0];
                             String bridgeEndpoint = parts[1];
 
-                            System.out.println("[ROUTE-TRY " + routeAttempts + "/" + addresses.size() + "] " +
+                            log.info("[ROUTE-TRY " + routeAttempts + "/" + addresses.size() + "] " +
                                 out.ne.p.cxID.substring(0, 8) + " via Bridge: " + bridgeProtocol);
 
                             BridgeProvider bridge =
@@ -144,7 +174,7 @@ public class OutConnectionController {
                                 bridge.transmitEvent(bridgePath, cryptNetworkContainer);
                                 sentViaAnyRoute = true;
                                 routesUsed.append(bridgeProtocol).append("+");
-                                System.out.println("[ROUTE-SUCCESS] " + out.ne.p.cxID.substring(0, 8) +
+                                log.info("[ROUTE-SUCCESS] " + out.ne.p.cxID.substring(0, 8) +
                                     " via " + bridgeProtocol);
                                 break; // Success - stop trying
                             } else {
@@ -152,7 +182,7 @@ public class OutConnectionController {
                             }
                         } else {
                             // Direct/LAN address (IP:port)
-                            System.out.println("[ROUTE-TRY " + routeAttempts + "/" + addresses.size() + "] " +
+                            log.info("[ROUTE-TRY " + routeAttempts + "/" + addresses.size() + "] " +
                                 out.ne.p.cxID.substring(0, 8) + " via LAN-Direct: " + address);
 
                             String[] addr = address.split(":");
@@ -161,7 +191,7 @@ public class OutConnectionController {
                             s.close();
                             sentViaAnyRoute = true;
                             routesUsed.append("LAN-Direct+");
-                            System.out.println("[ROUTE-SUCCESS] " + out.ne.p.cxID.substring(0, 8) +
+                            log.info("[ROUTE-SUCCESS] " + out.ne.p.cxID.substring(0, 8) +
                                 " via LAN-Direct: " + address);
 
                             // Deprioritize any failed routes that came before this successful one
@@ -175,7 +205,7 @@ public class OutConnectionController {
                         // This route failed - log and try next one
                         String routeDesc = address.contains("://") ? address.split(":")[0] : address;
                         failedRoutes.append(routeDesc).append("(").append(e.getMessage()).append("),");
-                        System.out.println("[ROUTE-FAIL] " + out.ne.p.cxID.substring(0, 8) +
+                        log.info("[ROUTE-FAIL] " + out.ne.p.cxID.substring(0, 8) +
                             " via " + routeDesc + ": " + e.getMessage());
                         continue;
                     }
@@ -183,7 +213,7 @@ public class OutConnectionController {
 
                 // Log all failed routes if transmission failed completely
                 if (!sentViaAnyRoute && failedRoutes.length() > 0) {
-                    System.out.println("[ROUTE-ALL-FAILED] " + out.ne.p.cxID.substring(0, 8) +
+                    log.info("[ROUTE-ALL-FAILED] " + out.ne.p.cxID.substring(0, 8) +
                         " - Tried " + routeAttempts + " routes: " + failedRoutes);
                 }
 
@@ -211,7 +241,7 @@ public class OutConnectionController {
                     routesUsed.setLength(routesUsed.length() - 1);
                 }
                 String cxidDisplay = (out.ne.p.cxID != null && out.ne.p.cxID.length() >= 8) ? out.ne.p.cxID.substring(0, 8) : (out.ne.p.cxID != null ? out.ne.p.cxID : "NULL");
-                System.out.println("[Multi-Path] Sent to " + cxidDisplay + " via: " + routesUsed);
+                log.info("[Multi-Path] Sent to " + cxidDisplay + " via: " + routesUsed);
             }
             if (out.ne.p.scope.equalsIgnoreCase("CXN")) {
                 // CXN scope: Network transmission with TransmitPref support
@@ -301,11 +331,11 @@ public class OutConnectionController {
 
                             // Log results for this peer
                             if (sentToThisPeer) {
-                                System.out.println("[Multi-Path CXN] ✓ " + n.cxID.substring(0, 8) + " via: " + routes);
+                                log.info("[Multi-Path CXN] ✓ " + n.cxID.substring(0, 8) + " via: " + routes);
                                 successfulPeers++;
                             } else {
                                 // ALL routes failed for this peer - log warning but CONTINUE to next peer
-                                System.out.println("[Multi-Path CXN] ✗ " + n.cxID.substring(0, 8) + " UNREACHABLE (tried " + addresses.size() + " routes)");
+                                log.info("[Multi-Path CXN] ✗ " + n.cxID.substring(0, 8) + " UNREACHABLE (tried " + addresses.size() + " routes)");
                                 failedPeers++;
                             }
                         }
@@ -315,7 +345,7 @@ public class OutConnectionController {
                     if (totalPeers > 0) {
                         String eventType = (out.ne != null && out.ne.eT != null) ? out.ne.eT : "UNKNOWN";
                         String eventId = (out.ne != null && out.ne.iD != null) ? out.ne.iD.substring(0, 8) : "UNKNOWN";
-                        System.out.println("[CXN Broadcast] " + eventType + " (" + eventId + "...) sent to " +
+                        log.info("[CXN Broadcast] " + eventType + " (" + eventId + "...) sent to " +
                             successfulPeers + "/" + totalPeers + " peers (" + failedPeers + " unreachable)");
                     }
                 }
@@ -328,7 +358,7 @@ public class OutConnectionController {
         CXPath cxPath = CXPath.getPathFromString(out.n.addr);
         if (CXPath.isSocket(cxPath)) {
             try {
-                System.out.println("[OutController] Attempting direct transmission to " + out.n.addr + " (" + cryptNetworkContainer.length + " bytes)");
+                log.info("[OutController] Attempting direct transmission to " + out.n.addr + " (" + cryptNetworkContainer.length + " bytes)");
                 String[] addr = out.n.addr.split(":");
                 Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
                 java.io.OutputStream os = s.getOutputStream();
@@ -337,10 +367,10 @@ public class OutConnectionController {
                 // Wait for receiver to read data before closing (receiver timeout is 400ms)
                 Thread.sleep(500);
                 s.close();
-                System.out.println("[OutController] Direct transmission SUCCESS to " + out.n.addr);
+                log.info("[OutController] Direct transmission SUCCESS to " + out.n.addr);
             } catch (Exception e) {
                 // Failed to send (normal for discovery - host may not be ConnectX peer)
-                System.out.println("[OutController] Direct transmission FAILED to " + out.n.addr + ": " + e.getMessage());
+                log.info("[OutController] Direct transmission FAILED to " + out.n.addr + ": " + e.getMessage());
             }
         } else {
             //TODO Duplicate code, consider centralizing method
@@ -352,17 +382,17 @@ public class OutConnectionController {
                     CXPath bridgePath = new CXPath();
                     bridgePath.bridgeArg = cxPath.bridgeArg;
                     bridge.transmitEvent(bridgePath, cryptNetworkContainer);
-                    System.out.println("[NodeMesh] Direct bridge " + cxPath.address +
+                    log.info("[NodeMesh] Direct bridge " + cxPath.address +
                             " via " + cxPath.bridge);
                 } else {
-                    System.out.println("[OutController] Could not transmit event bridge direct. Event type: " + out.ne.eT);
+                    log.info("[OutController] Could not transmit event bridge direct. Event type: " + out.ne.eT);
                 }
             }
         }
         } else {
             // No routing info - log for debugging
             if (out.ne != null && out.ne.eT != null && (out.ne.eT.equals("CXHELLO") || out.ne.eT.equals("CXHELLO_RESPONSE"))) {
-                System.out.println("[OutController] WARNING: No routing for " + out.ne.eT +
+                log.info("[OutController] WARNING: No routing for " + out.ne.eT +
                     " - Permission: " + (out.ne.p != null ? out.ne.p.scope : "null") +
                     ", Node: " + (out.n != null && out.n.addr != null ? out.n.addr : "null"));
             }

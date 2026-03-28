@@ -21,6 +21,9 @@ import org.pgpainless.decryption_verification.MessageMetadata;
 import us.anvildevelopment.util.tools.permissions.BasicEntry;
 import us.anvildevelopment.util.tools.permissions.Entry;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -32,6 +35,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 
 public class NodeMesh {
+    private static final Logger log = LoggerFactory.getLogger(NodeMesh.class);
     // Global static fields for security (shared across all peers)
     public static ConcurrentHashMap<String, Integer> timeout = new ConcurrentHashMap<>();
     public static ConcurrentHashMap<String, String> blacklist = new ConcurrentHashMap<>();
@@ -158,18 +162,27 @@ public class NodeMesh {
 
         // Deserialize UNVERIFIED container to extract transmitter ID
         try {
+            log.debug("[NodeMesh] [STEP-1] Stripped outer container ({} raw bytes), deserializing", signedContainerBytes.size());
+            log.debug("[NodeMesh] [STEP-1b] unverifiedContainerJson length={}, preview='{}'",
+                unverifiedContainerJson.length(),
+                unverifiedContainerJson.length() > 120 ? unverifiedContainerJson.substring(0, 120) : unverifiedContainerJson);
             NetworkContainer unverifiedContainer = (NetworkContainer) ConnectX.deserialize("cxJSON1", unverifiedContainerJson, NetworkContainer.class);
+            log.debug("[NodeMesh] [STEP-2] Deserialized container: iD={}, se={}, nc.e={}",
+                unverifiedContainer.iD, unverifiedContainer.se,
+                (unverifiedContainer.e != null ? unverifiedContainer.e.length + " bytes" : "null"));
 
             if (unverifiedContainer.iD == null) {
                 // No transmitter ID - check if this is an unauthenticated message (CXHELLO/NewNode)
                 // These are the ONLY messages allowed without pre-known sender identity
                 // We'll handle verification after importing the public key below
                 Analytics.addData(AnalyticData.Tear, "NetworkContainer missing transmitter ID");
+                log.info("NetworkContainer missing transmitter ID");
                 throw new DecryptionFailureException();
             }
 
             ConnectX.checkSafety(unverifiedContainer.iD);
 
+            log.debug("[NodeMesh] [STEP-3] Self-check: ownID={}, transmitterID={}", connectX.getOwnID(), unverifiedContainer.iD);
             // Self-rejection: drop any message claiming to be from our own cxID
             if (connectX.getOwnID().equals(unverifiedContainer.iD)) {
                 if (socket != null) {
@@ -187,7 +200,9 @@ public class NodeMesh {
             }
 
             // Step 3: Check if we have the transmitter's public key
+            log.debug("[NodeMesh] [STEP-4] Checking public key for transmitter {}", unverifiedContainer.iD);
             boolean hasPublicKey = connectX.encryptionProvider.cacheCert(unverifiedContainer.iD, false, false, connectX);
+            log.debug("[NodeMesh] [STEP-5] hasPublicKey={} for {}", hasPublicKey, unverifiedContainer.iD);
 
             if (!hasPublicKey) {
                 // Unknown sender - ONLY CXHELLO and NewNode are allowed from unknown senders
@@ -200,23 +215,25 @@ public class NodeMesh {
                 eventPeekStream.close();
                 eventPeekBaos.close();
 
+                log.debug("[NodeMesh] [STEP-6] Peeked inner event type: {}", peekedEvent.eT);
                 if (peekedEvent.eT == null || !(peekedEvent.eT.equals("NewNode") || peekedEvent.eT.equals("CXHELLO") || peekedEvent.eT.equals("CXHELLO_RESPONSE") || peekedEvent.eT.equals("SEED_REQUEST") || peekedEvent.eT.equals("PeerFinding"))) {
                     // NOT a bootstrap message from unknown sender - REJECT
                     if (socket != null) socket.close();
                     Analytics.addData(AnalyticData.Tear, "Message from unknown sender " + unverifiedContainer.iD +
                                     " (event: " + peekedEvent.eT + ") - only CXHELLO/NewNode allowed");
-                    System.err.println("[SECURITY] Rejected " + peekedEvent.eT + " from unknown sender " +
+                    log.info("[SECURITY] Rejected " + peekedEvent.eT + " from unknown sender " +
                                      unverifiedContainer.iD.substring(0, 8));
                     return;
                 }
 
                 // This IS a CXHELLO or NewNode - extract and import public key BEFORE verification
-                System.out.println("[NodeMesh] Processing " + peekedEvent.eT + " from unknown sender (will import key first)");
+                log.info("[NodeMesh] Processing " + peekedEvent.eT + " from unknown sender (will import key first)");
                 // NOTE: Key import and verification happens below in the NewNode/CXHELLO handling section
                 // For now, we skip container verification and process the event
                 // The event handler will import the key and THEN verify the container signature
 
                 // Use the unverified container for now (will be verified after key import)
+                log.debug("[NodeMesh] [STEP-7] Unknown sender path accepted, nc.iD={}", unverifiedContainer.iD);
                 nc = unverifiedContainer;
                 baos.close();
             } else {
@@ -230,7 +247,7 @@ public class NodeMesh {
                     // Signature verification FAILED - transmitter ID is SPOOFED
                     if (socket != null) socket.close();
                     Analytics.addData(AnalyticData.Tear, "NetworkContainer signature verification FAILED for " + unverifiedContainer.iD);
-                    System.err.println("[SECURITY] NetworkContainer signature verification FAILED - rejecting message from " +
+                    log.info("[SECURITY] NetworkContainer signature verification FAILED - rejecting message from " +
                                      unverifiedContainer.iD.substring(0, 8));
                     throw new DecryptionFailureException();
                 }
@@ -241,8 +258,9 @@ public class NodeMesh {
                 verifiedBaos.close();
                 baos.close();
 
-                System.out.println("[SECURITY] ✓ NetworkContainer signature VERIFIED for " + nc.iD.substring(0, 8));
+                log.info("[SECURITY] ✓ NetworkContainer signature VERIFIED for " + nc.iD.substring(0, 8));
             }
+            log.debug("[NodeMesh] [STEP-8] nc.e={}, nc.s={}", (nc.e != null ? nc.e.length + " bytes" : "null"), nc.s);
             bais = new ByteArrayInputStream(nc.e);
             Object o1;
             if (nc.s) {
@@ -277,19 +295,20 @@ public class NodeMesh {
             /// we will create it now so we can implement new features of InputBundle
             ib = new InputBundle(parsedEvent, nc);
 
+                log.debug("[NodeMesh] [STEP-9] Stripped inner event, parsedEvent.eT={}", parsedEvent.eT);
                 // Check if this is a NewNode or CXHELLO event (both need public key import before verification)
                 if (parsedEvent.eT != null && (parsedEvent.eT.equals("NewNode") || parsedEvent.eT.equals("CXHELLO"))) {
                     if (nc.iD.equals(connectX.getOwnID())) {
-                        System.out.println("[NodeMesh] Rejecting peer finding from self");
+                        log.info("[NodeMesh] Rejecting peer finding from self");
                         ownAddresses.add(socket.getLocalSocketAddress().toString());
                         return;
                     }
                     // Guard: prevent two concurrent IOThreads from importing the same peer simultaneously
                     if (inFlightImports.putIfAbsent(nc.iD, Boolean.TRUE) != null) {
-                        System.out.println("[NodeMesh] Skipping duplicate in-flight import for " + nc.iD.substring(0, 8));
+                        log.info("[NodeMesh] Skipping duplicate in-flight import for " + nc.iD.substring(0, 8));
                         return;
                     }
-                    System.out.println("[NodeMesh] Processing " + parsedEvent.eT + " event from " + nc.iD);
+                    log.info("[NodeMesh] Processing " + parsedEvent.eT + " event from " + nc.iD);
 
                     // Import node BEFORE verification (we need the public key)
                     Node importedNode = null;
@@ -299,6 +318,7 @@ public class NodeMesh {
                             Node newNode;
 
                             // Extract Node from payload based on event type
+                            log.debug("[NodeMesh] [STEP-10] Entering {}-specific payload processing", parsedEvent.eT);
                             if (parsedEvent.eT.equals("CXHELLO")) {
                                 // CXHELLO payload is SIGNED - strip signature before deserializing
                                 ByteArrayInputStream signedCXHelloInput = new ByteArrayInputStream(parsedEvent.d);
@@ -339,9 +359,9 @@ public class NodeMesh {
                                     // Save signed blob for .cxi persistence AND later verification
                                     signedNodeBlobForPersistence = signedNodeBlob;
 
-                                    System.out.println("[NodeMesh] CXHELLO: Extracted Node from unknown peer (will verify after import)");
+                                    log.info("[NodeMesh] CXHELLO: Extracted Node from unknown peer (will verify after import)");
                                 } else {
-                                    System.err.println("[NodeMesh] CXHELLO missing signedNode for " + nc.iD.substring(0, 8));
+                                    log.info("[NodeMesh] CXHELLO missing signedNode for " + nc.iD.substring(0, 8));
                                     newNode = null;
                                 }
                             } else {
@@ -349,7 +369,7 @@ public class NodeMesh {
                                 String originSender = parsedEvent.p != null ? parsedEvent.p.oCXID : null;
 
                                 if (originSender == null) {
-                                    System.err.println("[NodeMesh] NewNode missing oCXID in path");
+                                    log.info("[NodeMesh] NewNode missing oCXID in path");
                                     throw new DecryptionFailureException();
                                 }
 
@@ -364,12 +384,13 @@ public class NodeMesh {
                                     Object verifyResult = connectX.encryptionProvider.verifyAndStrip(
                                         signedPayloadStream, strippedPayloadStream, originSender);
 
-                                    if (verifyResult == null) {
-                                        System.err.println("[NodeMesh] NewNode payload signature verification FAILED for " + originSender);
+                                    // verifyResult holds a Boolean (auto-boxed from boolean return). Cast to unbox.
+                                    if (!((Boolean) verifyResult)) {
+                                        log.info("[NodeMesh] NewNode payload signature verification FAILED for " + originSender);
                                         throw new DecryptionFailureException();
                                     }
                                 } else {
-                                    System.out.println("[NodeMesh] Processing NewNode from unknown sender (will import key first)");
+                                    log.info("[NodeMesh] Processing NewNode from unknown sender (will import key first)");
                                     // Unknown sender: strip signature WITHOUT verification (we'll verify container signature after import)
                                     connectX.encryptionProvider.stripSignature(signedPayloadStream, strippedPayloadStream);
                                 }
@@ -388,45 +409,53 @@ public class NodeMesh {
 
                             // SECURITY: Validate node data
                             if (newNode.cxID == null || newNode.publicKey == null) {
-                                System.err.println("[NodeMesh] NewNode missing cxID or publicKey");
+                                log.info("[NodeMesh] NewNode missing cxID or publicKey");
                                 throw new DecryptionFailureException();
                             }
 
                             // SECURITY: Verify transmitter matches the node being added
                             if (!newNode.cxID.equals(nc.iD)) {
-                                System.err.println("[NodeMesh] NewNode cxID mismatch: " + newNode.cxID + " vs " + nc.iD);
+                                log.info("[NodeMesh] NewNode cxID mismatch: " + newNode.cxID + " vs " + nc.iD);
                                 throw new DecryptionFailureException();
                             }
 
                             // SECURITY: Reject if node's public key matches our own (self or key theft)
                             String ownPubKey = connectX.encryptionProvider.getPublicKey();
                             if (ownPubKey != null && ownPubKey.equals(newNode.publicKey)) {
-                                System.err.println("[NodeMesh] Rejecting node with same public key as self: " + newNode.cxID.substring(0, 8));
+                                log.info("[NodeMesh] Rejecting node with same public key as self: " + newNode.cxID.substring(0, 8));
                                 throw new DecryptionFailureException();
                             }
 
+                            log.debug("[NodeMesh] [STEP-11] Node extracted: cxID={}, hasPublicKey={}, signedBlob={}",
+                                (newNode != null ? newNode.cxID : "null"),
+                                (newNode != null ? (newNode.publicKey != null) : false),
+                                (signedNodeBlobForPersistence != null ? signedNodeBlobForPersistence.length + " bytes" : "null"));
                             // Import the node with signed blob for CXHELLO persistence
                             if (signedNodeBlobForPersistence != null) {
                                 peerDirectory.addNode(newNode, signedNodeBlobForPersistence, connectX.cxRoot);
-                                System.out.println("[NodeMesh] Imported and PERSISTED CXHELLO node: " + newNode.cxID.substring(0, 8));
+                                log.info("[NodeMesh] Imported and PERSISTED CXHELLO node: " + newNode.cxID.substring(0, 8));
                             } else {
                                 peerDirectory.addNode(newNode);
-                                System.out.println("[NodeMesh] Imported NewNode: " + newNode.cxID.substring(0, 8));
+                                log.info("[NodeMesh] Imported NewNode: " + newNode.cxID.substring(0, 8));
                             }
                             importedNode = newNode;
 
+                            log.debug("[NodeMesh] [STEP-12] Node imported, verifying container signature for {}", nc.iD);
                             // Now VERIFY the signature using the imported public key
                             ByteArrayInputStream verifyBais = new ByteArrayInputStream(nc.e);
                             ByteArrayOutputStream verifyBaos = new ByteArrayOutputStream();
                             o1 = connectX.encryptionProvider.verifyAndStrip(verifyBais, verifyBaos, nc.iD);
 
-                            if (o1 == null) {
-                                System.err.println("[NodeMesh] NewNode/CXHELLO container signature verification FAILED for " + nc.iD);
+                            log.debug("[NodeMesh] [STEP-13] verifyAndStrip result={} for {}", o1, nc.iD);
+                            // o1 holds a Boolean (verifyAndStrip returns boolean, auto-boxed to Object).
+                            // Boolean.FALSE is never null, so the old "== null" check never triggered on failure.
+                            if (!((Boolean) o1)) {
+                                log.info("[NodeMesh] NewNode/CXHELLO container signature verification FAILED for " + nc.iD);
                                 // Rollback: Remove the imported node (memory AND filesystem)
                                 peerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
                                 throw new DecryptionFailureException();
                             }
-                            System.out.println("[NodeMesh] Container signature VERIFIED for " + newNode.cxID);
+                            log.info("[NodeMesh] Container signature VERIFIED for " + newNode.cxID);
                             verifyBais.close();
                             verifyBaos.close();
 
@@ -440,19 +469,18 @@ public class NodeMesh {
                                 signedBlobVerifyOutput.close();
 
                                 if (!blobVerified) {
-                                    System.err.println("[NodeMesh] CXHELLO signedNode verification FAILED for " + nc.iD);
+                                    log.info("[NodeMesh] CXHELLO signedNode verification FAILED for " + nc.iD);
                                     // Rollback: Remove the imported node (memory AND filesystem)
                                     peerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
                                     throw new DecryptionFailureException();
                                 }
-                                System.out.println("[NodeMesh] CXHELLO signedNode signature VERIFIED for " + newNode.cxID);
+                                log.info("[NodeMesh] CXHELLO signedNode signature VERIFIED for " + newNode.cxID);
                             }
 
                         } catch (DecryptionFailureException e) {
                             throw e;
                         } catch (Exception e) {
-                            e.printStackTrace();
-                            System.err.println("[NodeMesh] Failed to process NewNode: " + e.getMessage());
+                            log.error("[NodeMesh] Failed to process NewNode/CXHELLO", e);
                             if (importedNode != null) {
                                 // Rollback: Remove the imported node (memory AND filesystem)
                                 peerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
@@ -460,10 +488,11 @@ public class NodeMesh {
                             throw new DecryptionFailureException();
                         }
                     } else {
-                        System.err.println("[NodeMesh] NewNode event has no data");
+                        log.info("[NodeMesh] NewNode event has no data");
                         throw new DecryptionFailureException();
                     }
 
+                    log.debug("[NodeMesh] [STEP-14] CXHELLO/NewNode processing complete, handing off to event dispatch");
                     // Use the already parsed event
                     ne = parsedEvent;
                     networkEvent = strippedEventJson;
@@ -479,7 +508,7 @@ public class NodeMesh {
 
                     //Add o1 check
                     if (!(boolean) o1) {
-                        System.out.println("[NodeMesh] Signature verification failure, rejecting event. 003");
+                        log.info("[NodeMesh] Signature verification failure, rejecting event. 003");
                         return;
                     }
 
@@ -491,7 +520,7 @@ public class NodeMesh {
                     if (connectX.encryptionProvider.verifyAndStrip(baiss, strippedJSON, parsedEvent.p.oCXID)) {
                         ib.verifiedObjectBytes = strippedJSON.toByteArray();
                     } else {
-                        System.out.println("[NodeMesh] Internal event data verification failure, rejecting event. 004");
+                        log.info("[NodeMesh] Internal event data verification failure, rejecting event. 004");
                         return;
                     }
                     baiss.close();
@@ -516,13 +545,13 @@ public class NodeMesh {
                         if (senderCXID != null && originPub != null && o3.isVerifiedInlineSignedBy(originPub)) {
                             ib.verifiedObjectBytes = arr1;
                         } else {
-                            System.out.println("[NodeMesh] E2E Decryption validation failure, 005");
-                            System.out.println(senderCXID);
-                            System.out.println(originPub.getPublicKey().toString());
-                            System.out.println(o3.isVerifiedInlineSignedBy(originPub));
+                            log.info("[NodeMesh] E2E Decryption validation failure, 005");
+                            log.info(senderCXID);
+                            log.info(originPub.getPublicKey().toString());
+                            log.info(String.valueOf(o3.isVerifiedInlineSignedBy(originPub)));
                         }
                     } else {
-                        System.out.println("[NodeMesh] Internal event data verification failure, rejecting event. 006");
+                        log.info("[NodeMesh] Internal event data verification failure, rejecting event. 006");
                         return;
                     }
                     baiss.close();
@@ -570,7 +599,7 @@ public class NodeMesh {
             }
             // Release in-flight import guard if this exception came from a NewNode/CXHELLO path
             if (nc != null && nc.iD != null) inFlightImports.remove(nc.iD);
-            e.printStackTrace();
+            log.error("[NodeMesh] processNetworkInput unhandled exception from {}", socketAddress, e);
             if (!NodeConfig.devMode && socketAddress != null) {
                 if (NodeMesh.timeout.containsKey(socketAddress)) {
                     //NodeMesh.blacklist.put(socketAddress, "Protocol not respected");
@@ -633,12 +662,12 @@ public class NodeMesh {
                     if (socket != null) socket.close();
                     Analytics.addData(AnalyticData.Tear, "Whitelist rejection: " + nc.iD +
                                     " not registered to network " + ne.p.network);
-                    System.err.println("[WHITELIST] Rejected transmission from unregistered node " +
+                    log.info("[WHITELIST] Rejected transmission from unregistered node " +
                                      nc.iD + " to whitelist network " + ne.p.network);
                     return; // Drop the event - do not queue
                 }
                 // Node is registered - allow transmission
-                System.out.println("[WHITELIST] Accepted transmission from registered node " +
+                log.info("[WHITELIST] Accepted transmission from registered node " +
                                  nc.iD + " to network " + ne.p.network);
             }
         }
@@ -661,7 +690,7 @@ public class NodeMesh {
                 if (ib.object == null) {
                     /// Try new InputBundle features first
                 if (!ib.readyObject(CXHello.class, ib.nc.se, connectX)) {
-                    System.out.println("[NODEMESH] WARNING: Deprecated use of NodeMesh, Use new InputBundle features!");
+                    log.info("[NODEMESH] WARNING: Deprecated use of NodeMesh, Use new InputBundle features!");
                     // Both CXHELLO and CXHELLO_RESPONSE payloads are now PGP-signed
                     // Strip signature before deserializing
                     ByteArrayInputStream signedInput = new ByteArrayInputStream(ne.d);
@@ -696,14 +725,14 @@ public class NodeMesh {
                     if (socketAddress != null && requestPort > 0) {
                         String socketBasedAddress = socketAddress + ":" + requestPort;
                         connectX.dataContainer.recordLocalPeer(requestPeerID, socketBasedAddress, true);
-                        System.out.println("[processNetworkInput] " + et.name() + ": Recorded socket-based address " +
+                        log.info("[processNetworkInput] " + et.name() + ": Recorded socket-based address " +
                                 socketBasedAddress + " for " + requestPeerID.substring(0, 8));
                     }
 
                     // 2. Record peer-provided address (HIGHEST priority - will be at index 0)
                     if (peerProvidedAddress != null && !peerProvidedAddress.isEmpty()) {
                         connectX.dataContainer.recordLocalPeer(requestPeerID, peerProvidedAddress, true);
-                        System.out.println("[processNetworkInput] " + et.name() + ": Recorded PEER-PROVIDED address (highest priority) " +
+                        log.info("[processNetworkInput] " + et.name() + ": Recorded PEER-PROVIDED address (highest priority) " +
                                 peerProvidedAddress + " for " + requestPeerID.substring(0, 8));
                     }
                 }
@@ -729,12 +758,12 @@ public class NodeMesh {
                 if (ib.verifiedObjectBytes != null && ib.verifiedObjectBytes.length > 0) {
                     // IOThread already decrypted and verified this in processNetworkInput
                     eventData = ib.verifiedObjectBytes;
-                    System.out.println("[E2E] Received encrypted " + ib.ne.eT
+                    log.info("[E2E] Received encrypted " + ib.ne.eT
                         + " from " + (ib.nc != null ? ib.nc.iD : "unknown")
                         + " (" + eventData.length + " bytes decrypted by IOThread)");
                 } else {
                     try {
-                        System.out.println("[E2E] Decrypting " + ib.ne.eT
+                        log.info("[E2E] Decrypting " + ib.ne.eT
                             + " from " + (ib.nc != null ? ib.nc.iD : "unknown"));
                         ByteArrayInputStream encryptedInput = new ByteArrayInputStream(ib.ne.d);
                         ByteArrayOutputStream decryptedOutput = new ByteArrayOutputStream();
@@ -742,9 +771,9 @@ public class NodeMesh {
                         encryptedInput.close();
                         eventData = decryptedOutput.toByteArray();
                         decryptedOutput.close();
-                        System.out.println("[E2E] Decrypted " + ib.ne.eT + " (" + eventData.length + " bytes)");
+                        log.info("[E2E] Decrypted " + ib.ne.eT + " (" + eventData.length + " bytes)");
                     } catch (Exception e) {
-                        System.err.println("[E2E] Failed to decrypt " + ib.ne.eT + " (not intended for us): " + e.getMessage());
+                        log.info("[E2E] Failed to decrypt " + ib.ne.eT + " (not intended for us): " + e.getMessage());
                         e2eDecryptionFailed = true;
                         eventData = ib.ne.d;
                     }
@@ -768,7 +797,7 @@ public class NodeMesh {
                 //Verify input bundle CXPATH
                 if (ib.ne.p == null) {
                     Analytics.addData(AnalyticData.SecurityEvent, "Security failure, Missing CXPATH: " + ib.nc.oD + " Event Type: " + ib.ne.eT);
-                    System.out.println("Security failure, Missing CXPATH: " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                    log.info("Security failure, Missing CXPATH: " + ib.nc.oD + " Event Type: " + ib.ne.eT);
                     return;
                 }
 
@@ -778,7 +807,7 @@ public class NodeMesh {
                 //It is critcal that they match to enforce multilayer cryptography
                 if (!Objects.equals(ib.ne.p.oCXID, ib.nc.oD)) {
                     Analytics.addData(AnalyticData.SecurityEvent, "Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
-                    System.out.println("Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                    log.info("Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
                     return;
                 }
                 //VERIFY INTERNAL DATA PAYLOAD
@@ -794,7 +823,7 @@ public class NodeMesh {
                         ByteArrayOutputStream strippedOutput = new ByteArrayOutputStream();
                         if (!connectX.encryptionProvider.verifyAndStrip(signedInput, strippedOutput, ib.ne.p.oCXID)) {
                             Analytics.addData(AnalyticData.SecurityEvent, "Security failure, event payload data verification unsuccessful: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
-                            System.out.println("Security failure, event payload data verification unsuccessful: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                            log.info("Security failure, event payload data verification unsuccessful: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
                             return;
                         }
                         eventData = strippedOutput.toByteArray();
@@ -838,7 +867,7 @@ public class NodeMesh {
                             );
 
                             if (node == null || node.cxID == null) {
-                                System.err.println("[NodeMesh] NewNode verification failed - invalid signature");
+                                log.info("[NodeMesh] NewNode verification failed - invalid signature");
                                 return;
                             }
 
@@ -846,26 +875,26 @@ public class NodeMesh {
                             Node node1 = peerDirectory.lookup(node.cxID, true, true, connectX.cxRoot, connectX);
                             if (node1 != null) {
                                 connectX.encryptionProvider.cacheCert(node1.cxID, true, false, connectX);
-                                System.out.println("[NodeMesh] NewNode already exists: " + node.cxID.substring(0, 8));
+                                log.info("[NodeMesh] NewNode already exists: " + node.cxID.substring(0, 8));
                                 return;
                             }
 
                             // Add node WITH signed blob (preserves original signature for relay)
                             peerDirectory.addNode(node, signedNodeBlob, connectX.cxRoot);
-                            System.out.println("[NodeMesh] Imported NewNode: " + node.cxID.substring(0, 8));
-                            System.out.println("[NodeMesh] NewNode signature VERIFIED and SAVED for relay");
+                            log.info("[NodeMesh] Imported NewNode: " + node.cxID.substring(0, 8));
+                            log.info("[NodeMesh] NewNode signature VERIFIED and SAVED for relay");
                             break;
 
                         case CXHELLO:
                             // Node already verified and imported by processNetworkInput - look up and respond
-                            System.out.println("[" + connectX.getOwnID() + "] CXHELLO request received from " + ib.nc.iD);
+                            log.info("[" + connectX.getOwnID() + "] CXHELLO request received from " + ib.nc.iD);
                             if (ib.nc.iD.equals(connectX.getOwnID())) {
-                                System.err.println("[CXHELLO] Dropping CXHELLO from self in processEvent");
+                                log.info("[CXHELLO] Dropping CXHELLO from self in processEvent");
                                 return;
                             }
                             Node requesterNode = peerDirectory.lookup(ib.nc.iD, true, true);
                             if (requesterNode != null) {
-                                System.out.println("[CXHELLO] Peer discovered from " + ib.nc.iD.substring(0, 8));
+                                log.info("[CXHELLO] Peer discovered from " + ib.nc.iD.substring(0, 8));
 
                                 // Sign our Node for .cxi persistence on receiver
                                 String ourNodeJson = ConnectX.serialize("cxJSON1", connectX.getSelf());
@@ -889,6 +918,14 @@ public class NodeMesh {
                                 CXHello responsePayload =
                                     new CXHello(connectX.getOwnID(), listeningPort, ourSignedBlob, ourAddress);
 
+                                // Include NMI-signed bootstrap seed if the peer is requesting one
+                                CXHello incomingHello = (ib.object instanceof CXHello) ? (CXHello) ib.object : null;
+                                if (incomingHello != null && incomingHello.requestSeed
+                                        && connectX.signedBootstrapSeed != null) {
+                                    responsePayload.seedData = connectX.signedBootstrapSeed;
+                                    log.info("[CXHELLO] Including bootstrap seed in response to {}", ib.nc.iD.substring(0, 8));
+                                }
+
                                 String responsePayloadJson = ConnectX.serialize("cxJSON1", responsePayload);
 
                                 connectX.buildEvent(EventType.CXHELLO_RESPONSE, responsePayloadJson.getBytes("UTF-8"))
@@ -896,21 +933,21 @@ public class NodeMesh {
                                     .signData()
                                     .queue();
 
-                                System.out.println("[CXHELLO] Queued CXHELLO_RESPONSE to " + ib.nc.iD.substring(0, 8));
+                                log.info("[CXHELLO] Queued CXHELLO_RESPONSE to " + ib.nc.iD.substring(0, 8));
                             } else {
-                                System.err.println("[CXHELLO] Node not found after import for " + ib.nc.iD.substring(0, 8));
+                                log.info("[CXHELLO] Node not found after import for " + ib.nc.iD.substring(0, 8));
                             }
                             return; // Don't continue to fireEvent
 
                         case CXHELLO_RESPONSE:
                             // CXHELLO_RESPONSE payload: CXHello class with signed Node blob
-                            System.out.println("[" + connectX.getOwnID() + "] CXHELLO_RESPONSE received from " + ib.nc.iD);
+                            log.info("[" + connectX.getOwnID() + "] CXHELLO_RESPONSE received from " + ib.nc.iD);
                             CXHello responseData;
                             /// NEW InputBundle features handling
                             if (ib.object != null) {
                                 //Try new method first
                                 if (!ib.readyObject(CXHello.class, ib.nc.se, connectX)) {
-                                    System.out.println("[NodeMesh] Using depreciated method, use new InputBundle instead 002");
+                                    log.info("[NodeMesh] Using depreciated method, use new InputBundle instead 002");
                                     String responsePayloadJson = new String(eventData, "UTF-8");
                                     responseData =
                                             (CXHello) ConnectX.deserialize("cxJSON1", responsePayloadJson,
@@ -940,19 +977,24 @@ public class NodeMesh {
                                     Node existingNode = peerDirectory.lookup(responseNode.cxID, true, true, connectX.cxRoot, connectX);
                                     if (existingNode != null) {
                                         connectX.encryptionProvider.cacheCert(existingNode.cxID, true, false, connectX);
-                                        System.out.println("[CXHELLO_RESPONSE] Updated existing node: " + existingNode.cxID.substring(0, 8));
+                                        log.info("[CXHELLO_RESPONSE] Updated existing node: " + existingNode.cxID.substring(0, 8));
                                         return;
                                     }
                                     peerDirectory.addNode(responseNode, respSignedBlob, connectX.cxRoot);
-                                    System.out.println("[CXHELLO_RESPONSE] Imported and PERSISTED new node: " + responseNode.cxID.substring(0, 8));
+                                    log.info("[CXHELLO_RESPONSE] Imported and PERSISTED new node: " + responseNode.cxID.substring(0, 8));
                                 } else {
-                                    System.err.println("[CXHELLO_RESPONSE] Node signature verification FAILED for " + ib.nc.iD.substring(0, 8));
+                                    log.info("[CXHELLO_RESPONSE] Node signature verification FAILED for " + ib.nc.iD.substring(0, 8));
                                 }
+                            }
+                            // Apply NMI-signed bootstrap seed if included and we need one
+                            if (responseData != null && responseData.seedData != null && connectX.bootstrapSearch) {
+                                log.info("[CXHELLO_RESPONSE] Received bootstrap seed from {}, applying...", ib.nc.iD.substring(0, 8));
+                                connectX.applySignedSeed(responseData.seedData);
                             }
                             return; // Don't continue to fireEvent
                     }
                 } catch (Exception e) {
-                    System.out.println("[NodeMesh] Cryptography failure on event " + ib.ne.eT + " From peer: " + ib.nc.iD);
+                    log.info("[NodeMesh] Cryptography failure on event " + ib.ne.eT + " From peer: " + ib.nc.iD);
                     e.printStackTrace();
                     throw new DecryptionFailureException();
                 }
@@ -962,11 +1004,11 @@ public class NodeMesh {
                 if (!e2eDecryptionFailed) {
                     fireEvent(ib);
                 } else {
-                    System.out.println("[E2E] Skipping application layer for undecryptable E2E event, will relay");
+                    log.info("[E2E] Skipping application layer for undecryptable E2E event, will relay");
                 }
 
                 // DEBUG: Log auto-record attempt
-                System.out.println("[Auto-Record DEBUG] Event type: " + ib.ne.eT + ", r=" + ib.ne.r +
+                log.info("[Auto-Record DEBUG] Event type: " + ib.ne.eT + ", r=" + ib.ne.r +
                     ", nc=" + (ib.nc != null) + ", nc.iD=" + (ib.nc != null ? ib.nc.iD : "null") +
                     ", nc.oD=" + (ib.nc != null ? ib.nc.oD : "null"));
 
@@ -976,7 +1018,7 @@ public class NodeMesh {
                     //Additional verification after application layer
                     if (!ib.nc.oD.equals(ib.ne.p.oCXID)) {
                         Analytics.addData(AnalyticData.SecurityEvent, "Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
-                        System.out.println("Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD+ " Event Type: " + ib.ne.eT);
+                        log.info("Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD+ " Event Type: " + ib.ne.eT);
                         return;
                     }
                     String networkID = ib.ne.p != null ? ib.ne.p.network : null;
@@ -1007,13 +1049,13 @@ public class NodeMesh {
                                 if (ib.signedEventBytes != null) {
                                     boolean recorded = connectX.Event(ib.ne, senderID, ib.signedEventBytes);
                                     if (recorded) {
-                                        System.out.println("[Auto-Record] Event " + ib.ne.eT + " from " + senderID.substring(0, 8) + " recorded to chain " + chainID);
+                                        log.info("[Auto-Record] Event " + ib.ne.eT + " from " + senderID.substring(0, 8) + " recorded to chain " + chainID);
                                     }
                                 } else {
-                                    System.err.println("[Auto-Record] Cannot record event - missing signed bytes");
+                                    log.info("[Auto-Record] Cannot record event - missing signed bytes");
                                 }
                             } else {
-                                System.out.println("[Auto-Record] Event " + ib.ne.eT + " from " + senderID.substring(0, 8) + " NOT recorded - no permission");
+                                log.info("[Auto-Record] Event " + ib.ne.eT + " from " + senderID.substring(0, 8) + " NOT recorded - no permission");
                             }
                         }
                     }
@@ -1078,13 +1120,13 @@ public class NodeMesh {
 
                 if (!verified) {
                     String cxidDisplay = (ne.p.oCXID != null && ne.p.oCXID.length() >= 8) ? ne.p.oCXID.substring(0, 8) : (ne.p.oCXID != null ? ne.p.oCXID : "NULL");
-                    System.err.println("[SECURITY] Event signature verification FAILED for " + cxidDisplay + " - REJECTING EVENT");
+                    log.info("[SECURITY] Event signature verification FAILED for " + cxidDisplay + " - REJECTING EVENT");
                     return false; // Reject the event
                 }
                 String cxidDisplay = (ne.p.oCXID != null && ne.p.oCXID.length() >= 8) ? ne.p.oCXID.substring(0, 8) : (ne.p.oCXID != null ? ne.p.oCXID : "NULL");
-                System.out.println("[SECURITY] Event signature verified for " + cxidDisplay);
+                log.info("[SECURITY] Event signature verified for " + cxidDisplay);
             } catch (Exception e) {
-                System.err.println("[SECURITY] Error verifying event signature: " + e.getMessage());
+                log.info("[SECURITY] Error verifying event signature: " + e.getMessage());
                 return false; // Reject on error
             }
         }
@@ -1104,10 +1146,10 @@ public class NodeMesh {
                     case MESSAGE:
                         // Display received message
                         String message = new String(ib.verifiedObjectBytes, "UTF-8");
-                        System.out.println("\n[" + connectX.getOwnID() + "] RECEIVED MESSAGE: " + message);
+                        log.info("\n[" + connectX.getOwnID() + "] RECEIVED MESSAGE: " + message);
                         if (ne.p != null) {
-                            System.out.println("  From network: " + ne.p.network);
-                            System.out.println("  Scope: " + ne.p.scope);
+                            log.info("  From network: " + ne.p.network);
+                            log.info("  Scope: " + ne.p.scope);
                         }
                         handledLocally = true;
                         break;
@@ -1121,7 +1163,7 @@ public class NodeMesh {
 
                             if ("request".equals(pf.t)) {
                                 // Handle PeerFinding request - respond with our known peers
-                                System.out.println("[PeerFinding] Request from " + nc.iD.substring(0, 8) +
+                                log.info("[PeerFinding] Request from " + nc.iD.substring(0, 8) +
                                     (pf.network != null ? " for network: " + pf.network : ""));
 
                                 // Get network context (default to CXNET)
@@ -1153,7 +1195,7 @@ public class NodeMesh {
                                         }
                                     }
 
-                                    System.out.println("[PeerFinding] Responding with " + count + " signed peers");
+                                    log.info("[PeerFinding] Responding with " + count + " signed peers");
 
                                     // Populate peers field: 30% of seen peers, then 30% of their addresses (max 20)
                                     Set<String> allAddresses = new HashSet<>();
@@ -1180,7 +1222,7 @@ public class NodeMesh {
                                     //Set response
                                     response.peers.addAll(addressList);
 
-                                    System.out.println("[PeerFinding] Added " + selectedAddresses.size() + " peer addresses from " + seenPeerIDs.size() + " seen peers");
+                                    log.info("[PeerFinding] Added " + selectedAddresses.size() + " peer addresses from " + seenPeerIDs.size() + " seen peers");
 
                                     // Using new Event Builder API
 
@@ -1215,12 +1257,12 @@ public class NodeMesh {
                                             .queue();
 
                                 } else {
-                                    System.out.println("[PeerFinding] Network " + requestedNetwork + " not found");
+                                    log.info("[PeerFinding] Network " + requestedNetwork + " not found");
                                 }
 
                             } else if ("response".equals(pf.t)) {
                                 // Handle PeerFinding response - import discovered peers
-                                System.out.println("[PeerFinding] Response from " + nc.iD.substring(0, 8) +
+                                log.info("[PeerFinding] Response from " + nc.iD.substring(0, 8) +
                                     " with " + (pf.signedNodes != null ? pf.signedNodes.size() : 0) + " peers");
 
                                 if (pf.signedNodes != null) {
@@ -1266,13 +1308,13 @@ public class NodeMesh {
                                                 if (!verified) {
                                                     // Signature verification FAILED - rollback
                                                     peerDirectory.removeNode(discoveredPeer.cxID, connectX.cxRoot);
-                                                    System.err.println("[PeerFinding] Signature verification FAILED for " +
+                                                    log.error("[PeerFinding] Signature verification FAILED for " +
                                                         discoveredPeer.cxID.substring(0, 8) + " - rolled back");
                                                     continue;
                                                 }
 
                                                 imported++;
-                                                System.out.println("[PeerFinding]   + " + discoveredPeer.cxID.substring(0, 8) +
+                                                log.info("[PeerFinding]   + " + discoveredPeer.cxID.substring(0, 8) +
                                                     " (verified)");
 
                                                 // Send NewNode with SIGNED Node blob (receiver will save original signed blob for relay)
@@ -1283,38 +1325,38 @@ public class NodeMesh {
                                                     .queue();
                                             }
                                         } catch (Exception e) {
-                                            System.err.println("[PeerFinding] Failed to import peer: " + e.getMessage());
+                                            log.error("[PeerFinding] Failed to import peer: " + e.getMessage());
                                         }
                                     }
-                                    System.out.println("[PeerFinding] Imported " + imported + " new peers");
+                                    log.info("[PeerFinding] Imported " + imported + " new peers");
                                 }
                                 //TODO Security eval
                                 if (pf.peers != null && pf.peers.size() <= 20) {
                                     int added = 0;
                                     for (String peerAddr : pf.peers) {
                                         if (!connectX.isValidPeerAddress(peerAddr)) {
-                                            System.err.println("[PeerFinding] Rejected invalid address: " + peerAddr);
+                                            log.info("[PeerFinding] Rejected invalid address: " + peerAddr);
                                             continue;
                                         }
                                         if (connectX.isSelfAddress(peerAddr)) {
-                                            System.out.println("[PeerFinding] Skipped own address: " + peerAddr);
+                                            log.info("[PeerFinding] Skipped own address: " + peerAddr);
                                             continue;
                                         }
                                         connectX.dataContainer.waitingAddresses.add(peerAddr);
                                         added++;
                                     }
-                                    System.out.println("[PeerFinding] Imported " + added + "/" + pf.peers.size() + " addresses from " + ne.p.oCXID);
+                                    log.info("[PeerFinding] Imported " + added + "/" + pf.peers.size() + " addresses from " + ne.p.oCXID);
                                 }
 
                             }
                         } catch (Exception e) {
-                            System.err.println("[PeerFinding] Error: " + e.getMessage());
+                            log.info("[PeerFinding] Error: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
                         break;
                     case SEED_REQUEST:
-                        System.out.println("[" + connectX.getOwnID() + "] Seed request received from " + nc.iD);
+                        log.info("[" + connectX.getOwnID() + "] Seed request received from " + nc.iD);
                         try {
                             // Parse request to get network ID
                             String requestedNetwork = "CXNET";
@@ -1337,14 +1379,18 @@ public class NodeMesh {
                                 dynamicSeed.networks = new ArrayList<>();
                                 dynamicSeed.networks.add(network);
 
-                                // Try to load EPOCH's signed seed from disk
-                                Seed epochSeed = null;
-                                if (network.configuration != null && network.configuration.currentSeedID != null) {
-                                    File seedsDir = new File(connectX.cxRoot, "seeds");
-                                    File seedFile = new File(seedsDir, network.configuration.currentSeedID + ".cxn");
-
+                                // Try to get signed EPOCH seed blob (prefer in-RAM copy, fall back to disk)
+                                byte[] epochSeedBlob = connectX.signedBootstrapSeed;
+                                if (epochSeedBlob == null && network.configuration != null
+                                        && network.configuration.currentSeedID != null) {
+                                    File seedFile = new File(new File(connectX.cxRoot, "seeds"),
+                                            network.configuration.currentSeedID + ".cxn");
                                     if (seedFile.exists()) {
-                                        epochSeed = Seed.load(seedFile);
+                                        try {
+                                            epochSeedBlob = java.nio.file.Files.readAllBytes(seedFile.toPath());
+                                        } catch (Exception ex) {
+                                            log.warn("[SEED] Could not read seed blob from disk", ex);
+                                        }
                                     }
                                 }
 
@@ -1359,17 +1405,22 @@ public class NodeMesh {
                                     new SeedExchange();
                                 response.network = requestedNetwork;
                                 response.dynamicSeed = dynamicSeed;
-                                response.epochSeed = epochSeed;
+                                response.epochSeedBlob = epochSeedBlob;
                                 response.authoritative = isAuthoritative;
                                 response.senderID = connectX.getOwnID();
                                 response.c1 = network.c1.current != null ? network.c1.current.block : 0L;
                                 response.c2 = network.c2.current != null ? network.c2.current.block : 0L;
                                 response.c3 = network.c3.current != null ? network.c3.current.block : 0L;
 
-                                System.out.println("[SEED] Responding to " + nc.iD.substring(0, 8));
-                                System.out.println("[SEED]   Dynamic peers: " + dynamicSeed.hvPeers.size());
-                                System.out.println("[SEED]   EPOCH seed: " + (epochSeed != null ? "available" : "none"));
-                                System.out.println("[SEED]   Authoritative: " + isAuthoritative);
+                                if (epochSeedBlob != null && epochSeedBlob.length > 0) {
+                                    StringBuilder hex = new StringBuilder();
+                                    for (int i = 0; i < Math.min(16, epochSeedBlob.length); i++) hex.append(String.format("%02X ", epochSeedBlob[i]));
+                                    log.debug("[SEED] epochSeedBlob first bytes: {}", hex.toString().trim());
+                                }
+                                log.info("[SEED] Responding to {}: dynamic={} peers, epochBlob={}, authoritative={}",
+                                    nc.iD.substring(0, 8), dynamicSeed.hvPeers.size(),
+                                    epochSeedBlob != null ? epochSeedBlob.length + " bytes" : "none",
+                                    isAuthoritative);
 
                                 String responseJson = ConnectX.serialize("cxJSON1", response);
 
@@ -1387,16 +1438,16 @@ public class NodeMesh {
                                 eb.queue();
 
                             } else {
-                                System.out.println("[SEED] Network " + requestedNetwork + " not found");
+                                log.info("[SEED] Network " + requestedNetwork + " not found");
                             }
                         } catch (Exception e) {
-                            System.err.println("[SEED] Error: " + e.getMessage());
+                            log.info("[SEED] Error: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
                         break;
                     case SEED_RESPONSE:
-                        System.out.println("[" + connectX.getOwnID() + "] Seed response received from " + nc.iD);
+                        log.info("[" + connectX.getOwnID() + "] Seed response received from " + nc.iD);
                         try {
                             ib.readyObject(SeedExchange.class, ib.nc.se, connectX);
                             SeedExchange seedResp =
@@ -1405,7 +1456,7 @@ public class NodeMesh {
                             // Map wire object to consensus tracker
                             ConnectX.SeedResponseData responseData = new ConnectX.SeedResponseData();
                             responseData.dynamicSeed = seedResp.dynamicSeed;
-                            responseData.epochSeed = seedResp.epochSeed;
+                            responseData.epochSeedBlob = seedResp.epochSeedBlob;
                             responseData.authoritative = seedResp.authoritative != null && seedResp.authoritative;
                             responseData.senderID = nc.iD;
                             responseData.timestamp = System.currentTimeMillis();
@@ -1415,80 +1466,54 @@ public class NodeMesh {
                             chainHeights.put("c3", seedResp.c3 != null ? seedResp.c3 : 0L);
                             responseData.chainHeights = chainHeights;
 
-                            // Determine target network
-                            String targetNetwork = "CXNET";
-                            if (responseData.epochSeed != null && responseData.epochSeed.networkID != null) {
-                                targetNetwork = responseData.epochSeed.networkID;
-                            } else if (responseData.dynamicSeed != null && responseData.dynamicSeed.networkID != null) {
+                            // Determine target network from wire field (always present in SeedExchange)
+                            String targetNetwork = seedResp.network != null ? seedResp.network : "CXNET";
+                            if (targetNetwork.isBlank() && responseData.dynamicSeed != null
+                                    && responseData.dynamicSeed.networkID != null) {
                                 targetNetwork = responseData.dynamicSeed.networkID;
                             }
 
-                            System.out.println("[SEED CONSENSUS] Received response for " + targetNetwork);
-                            System.out.println("  From: " + nc.iD.substring(0, 8));
-                            System.out.println("  Authoritative (EPOCH): " + responseData.authoritative);
-                            System.out.println("  Has EPOCH seed: " + (responseData.epochSeed != null));
-                            System.out.println("  Has dynamic seed: " + (responseData.dynamicSeed != null));
+                            log.info("[SEED CONSENSUS] Response for {} from {} | authoritative={} epochBlob={} dynamicSeed={}",
+                                targetNetwork, nc.iD.substring(0, 8), responseData.authoritative,
+                                responseData.epochSeedBlob != null ? responseData.epochSeedBlob.length + "b" : "none",
+                                responseData.dynamicSeed != null);
 
-                            // PRIORITY 1: If this is EPOCH with signed seed, trust immediately
-                            if (responseData.authoritative && responseData.epochSeed != null) {
-                                System.out.println("[SEED CONSENSUS] ✓ EPOCH responded with signed seed - IMMEDIATE TRUST");
-                                applySeedConsensus(connectX, responseData.epochSeed, true,
-                                    "EPOCH signed seed (direct from NMI)", targetNetwork);
+                            // PRIORITY 1: If this is EPOCH or any peer with a signed blob, apply immediately
+                            if (responseData.epochSeedBlob != null) {
+                                log.info("[SEED CONSENSUS] Received signed seed blob ({} bytes) from {} -- applying",
+                                    responseData.epochSeedBlob.length,
+                                    responseData.authoritative ? "EPOCH (authoritative)" : "peer " + nc.iD.substring(0, 8));
+                                connectX.applySignedSeed(responseData.epochSeedBlob);
                                 handledLocally = true;
                                 break;
                             }
 
-                            // PRIORITY 2: If peer forwarded EPOCH's signed seed, trust it
-                            if (responseData.epochSeed != null) {
-                                System.out.println("[SEED CONSENSUS] ✓ Peer forwarded EPOCH signed seed - HIGH TRUST");
-                                applySeedConsensus(connectX, responseData.epochSeed, true,
-                                    "EPOCH signed seed (peer-forwarded by " + nc.iD.substring(0, 8) + ")", targetNetwork);
-                                handledLocally = true;
-                                break;
-                            }
-
-                            // PRIORITY 3: Multi-peer consensus for dynamic seeds
+                            // PRIORITY 2: Multi-peer consensus for dynamic seeds only
                             // Store response in consensus map
                             if (!connectX.seedConsensusMap.containsKey(targetNetwork)) {
                                 connectX.seedConsensusMap.put(targetNetwork, new ConcurrentHashMap<>());
                             }
                             connectX.seedConsensusMap.get(targetNetwork).put(nc.iD, responseData);
 
-                            System.out.println("[SEED CONSENSUS] Stored response from " + nc.iD.substring(0, 8));
-                            System.out.println("[SEED CONSENSUS] Responses collected: " +
-                                connectX.seedConsensusMap.get(targetNetwork).size());
-
-                            // Trigger consensus if we have enough responses (3) or if EPOCH responded
                             ConcurrentHashMap<String, ConnectX.SeedResponseData> responses =
                                 connectX.seedConsensusMap.get(targetNetwork);
 
-                            boolean hasEpochResponse = false;
-                            for (ConnectX.SeedResponseData r : responses.values()) {
-                                if (r.authoritative) {
-                                    hasEpochResponse = true;
-                                    break;
-                                }
-                            }
+                            log.info("[SEED CONSENSUS] Stored dynamic response from {} ({}/3)",
+                                nc.iD.substring(0, 8), responses.size());
 
-                            if (responses.size() >= 3 || hasEpochResponse) {
-                                System.out.println("[SEED CONSENSUS] Triggering consensus vote...");
+                            if (responses.size() >= 3) {
+                                log.info("[SEED CONSENSUS] Triggering consensus vote...");
                                 performSeedConsensus(connectX, targetNetwork, responses);
-
-                                // Clear consensus map after applying
                                 connectX.seedConsensusMap.remove(targetNetwork);
-                            } else {
-                                System.out.println("[SEED CONSENSUS] Waiting for more responses... (" +
-                                    responses.size() + "/3)");
                             }
 
                         } catch (Exception e) {
-                            System.err.println("[SEED CONSENSUS] Error: " + e.getMessage());
-                            e.printStackTrace();
+                            log.error("[SEED CONSENSUS] Error processing SEED_RESPONSE", e);
                         }
                         handledLocally = true;
                         break;
                     case CHAIN_STATUS_REQUEST:
-                        System.out.println("[" + connectX.getOwnID() + "] Chain status request received from " + nc.iD);
+                        log.info("[" + connectX.getOwnID() + "] Chain status request received from " + nc.iD);
                         try {
                             ib.readyObject(ChainStatus.class, ib.nc.se, connectX);
                             ChainStatus chainReq =
@@ -1513,30 +1538,30 @@ public class NodeMesh {
                                     .signData()
                                     .queue();
 
-                                System.out.println("[CHAIN_STATUS] Sent status for " + networkID +
+                                log.info("[CHAIN_STATUS] Sent status for " + networkID +
                                                  " (c1:" + response.c1 +
                                                  " c2:" + response.c2 +
                                                  " c3:" + response.c3 + ")");
                             } else {
-                                System.err.println("[CHAIN_STATUS] Network not found: " + networkID);
+                                log.info("[CHAIN_STATUS] Network not found: " + networkID);
                             }
                         } catch (Exception e) {
-                            System.err.println("[CHAIN_STATUS] Error handling request: " + e.getMessage());
+                            log.info("[CHAIN_STATUS] Error handling request: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
                         break;
                     case CHAIN_STATUS_RESPONSE:
-                        System.out.println("[" + connectX.getOwnID() + "] Chain status response received from " + nc.iD);
+                        log.info("[" + connectX.getOwnID() + "] Chain status response received from " + nc.iD);
                         try {
                             ib.readyObject(ChainStatus.class, ib.nc.se, connectX);
                             ChainStatus chainResp =
                                 (ChainStatus) ib.object;
 
-                            System.out.println("[CHAIN_STATUS] Remote chain heights for " + chainResp.network + " from " + nc.iD.substring(0, 8) + ":");
-                            System.out.println("  c1: " + chainResp.c1);
-                            System.out.println("  c2: " + chainResp.c2);
-                            System.out.println("  c3: " + chainResp.c3);
+                            log.info("[CHAIN_STATUS] Remote chain heights for " + chainResp.network + " from " + nc.iD.substring(0, 8) + ":");
+                            log.info("  c1: " + chainResp.c1);
+                            log.info("  c2: " + chainResp.c2);
+                            log.info("  c3: " + chainResp.c3);
 
                             // Store response for multipeer verification
                             CXNetwork network = connectX.getNetwork(chainResp.network);
@@ -1546,24 +1571,24 @@ public class NodeMesh {
                                                network.configuration.backendSet.contains(nc.iD);
 
                                 if (isNMI) {
-                                    System.out.println("[CHAIN_STATUS] Response from NMI/Backend - TRUSTED");
+                                    log.info("[CHAIN_STATUS] Response from NMI/Backend - TRUSTED");
                                     // NMI response is authoritative, initiate sync immediately
                                     initiateSyncFromPeer(connectX, network, chainResp.network, chainResp, nc.iD);
                                 } else {
                                     // Peer response - store for multipeer verification
-                                    System.out.println("[CHAIN_STATUS] Response from peer - storing for verification");
+                                    log.info("[CHAIN_STATUS] Response from peer - storing for verification");
                                     // TODO: Implement multipeer consensus mechanism
                                     // For now, skip peer-only responses (require NMI or multiple peer consensus)
                                 }
                             }
                         } catch (Exception e) {
-                            System.err.println("[CHAIN_STATUS] Error handling response: " + e.getMessage());
+                            log.info("[CHAIN_STATUS] Error handling response: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
                         break;
                     case BLOCK_REQUEST:
-                        System.out.println("[" + connectX.getOwnID() + "] Block request received from " + nc.iD);
+                        log.info("[" + connectX.getOwnID() + "] Block request received from " + nc.iD);
                         try {
                             ib.readyObject(BlockExchange.class, ib.nc.se, connectX);
                             BlockExchange blockReq =
@@ -1589,7 +1614,7 @@ public class NodeMesh {
                                         try {
                                             block = connectX.blockchainPersistence.loadBlock(networkID, chainID, blockID);
                                         } catch (Exception e) {
-                                            System.err.println("[BLOCK_REQUEST] Block not found on disk: " + e.getMessage());
+                                            log.info("[BLOCK_REQUEST] Block not found on disk: " + e.getMessage());
                                         }
                                     }
 
@@ -1614,39 +1639,39 @@ public class NodeMesh {
                                         }
                                         eb.queue();
 
-                                        System.out.println("[BLOCK_REQUEST] Sent block " + blockID + " from chain " + chainID +
+                                        log.info("[BLOCK_REQUEST] Sent block " + blockID + " from chain " + chainID +
                                                          " (" + block.networkEvents.size() + " events)");
                                     } else {
-                                        System.err.println("[BLOCK_REQUEST] Block not found: " + blockID);
+                                        log.info("[BLOCK_REQUEST] Block not found: " + blockID);
                                     }
                                 } else {
-                                    System.err.println("[BLOCK_REQUEST] Chain not found: " + chainID);
+                                    log.info("[BLOCK_REQUEST] Chain not found: " + chainID);
                                 }
                             } else {
-                                System.err.println("[BLOCK_REQUEST] Network not found: " + networkID);
+                                log.info("[BLOCK_REQUEST] Network not found: " + networkID);
                             }
                         } catch (Exception e) {
-                            System.err.println("[BLOCK_REQUEST] Error handling request: " + e.getMessage());
+                            log.info("[BLOCK_REQUEST] Error handling request: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
                         break;
                     case BLOCK_RESPONSE:
-                        System.out.println("[" + connectX.getOwnID() + "] Block response received from " + nc.iD);
+                        log.info("[" + connectX.getOwnID() + "] Block response received from " + nc.iD);
                         try {
                             ib.readyObject(BlockExchange.class, ib.nc.se, connectX);
                             BlockExchange blockResp =
                                 (BlockExchange) ib.object;
                             NetworkBlock block = blockResp.blockData;
 
-                            System.out.println("[BLOCK_RESPONSE] Received block " + block.block +
+                            log.info("[BLOCK_RESPONSE] Received block " + block.block +
                                              " (" + block.networkEvents.size() + " events)");
 
                             String networkID = blockResp.network;
                             Long chainID = blockResp.chain;
 
                             if (networkID == null) {
-                                System.err.println("[BLOCK_RESPONSE] Cannot determine network ID from event path");
+                                log.info("[BLOCK_RESPONSE] Cannot determine network ID from event path");
                                 handledLocally = true;
                                 break;
                             }
@@ -1654,7 +1679,7 @@ public class NodeMesh {
                             // Get network and determine which chain this block belongs to
                             CXNetwork network = connectX.getNetwork(networkID);
                             if (network == null) {
-                                System.err.println("[BLOCK_RESPONSE] Network not found: " + networkID);
+                                log.info("[BLOCK_RESPONSE] Network not found: " + networkID);
                                 handledLocally = true;
                                 break;
                             }
@@ -1669,7 +1694,7 @@ public class NodeMesh {
                             }
 
                             if (targetChain == null) {
-                                System.err.println("[BLOCK_RESPONSE] Cannot determine target chain for block");
+                                log.info("[BLOCK_RESPONSE] Cannot determine target chain for block");
                                 handledLocally = true;
                                 break;
                             }
@@ -1681,12 +1706,12 @@ public class NodeMesh {
 
                             if (isAuthoritative && !network.zT) {
                                 // EPOCH/NMI response in non-zero-trust mode - accept immediately as source of truth
-                                System.out.println("[BLOCK_RESPONSE] EPOCH/NMI source - accepting as authoritative");
+                                log.info("[BLOCK_RESPONSE] EPOCH/NMI source - accepting as authoritative");
                                 applyBlockToChain(connectX, network, targetChain, block, networkID, chainID, nc.iD);
 
                             } else {
                                 // Peer response OR zero trust mode - use consensus
-                                System.out.println("[BLOCK_RESPONSE] Using consensus" +
+                                log.info("[BLOCK_RESPONSE] Using consensus" +
                                                  (network.zT ? " (zero trust mode)" : " (peer response)"));
 
                                 // Create request key for this block
@@ -1705,7 +1730,7 @@ public class NodeMesh {
                                             connectX.blockConsensusTracker.getConsensusBlock(requestKey);
 
                                         if (consensusBlock != null) {
-                                            System.out.println("[BLOCK_CONSENSUS] Consensus reached for block " + consensusBlock.block);
+                                            log.info("[BLOCK_CONSENSUS] Consensus reached for block " + consensusBlock.block);
 
                                             // Apply consensus block
                                             applyBlockToChain(connectX, network, targetChain, consensusBlock, networkID, chainID, nc.iD);
@@ -1714,58 +1739,58 @@ public class NodeMesh {
                                             connectX.blockConsensusTracker.removeRequest(requestKey);
                                         }
                                     } else {
-                                        System.out.println("[BLOCK_CONSENSUS] Waiting for more responses...");
+                                        log.info("[BLOCK_CONSENSUS] Waiting for more responses...");
                                     }
                                 } else {
-                                    System.err.println("[BLOCK_RESPONSE] Failed to record response in consensus tracker");
+                                    log.info("[BLOCK_RESPONSE] Failed to record response in consensus tracker");
                                 }
                             }
 
                         } catch (Exception e) {
-                            System.err.println("[BLOCK_RESPONSE] Error handling response: " + e.getMessage());
+                            log.info("[BLOCK_RESPONSE] Error handling response: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
                         break;
                     case BLOCK_NODE:
-                        System.out.println("[" + connectX.getOwnID() + "] BLOCK_NODE event received from " + nc.iD);
+                        log.info("[" + connectX.getOwnID() + "] BLOCK_NODE event received from " + nc.iD);
                         try {
                             ib.readyObject(NodeModeration.class, ib.nc.se, connectX);
                             NodeModeration blockData =
                                 (NodeModeration) ib.object;
 
-                            System.out.println("[BLOCK_NODE] Blocking node " + blockData.nodeID + " on network " + blockData.network + " (reason: " + blockData.reason + ")");
+                            log.info("[BLOCK_NODE] Blocking node " + blockData.nodeID + " on network " + blockData.network + " (reason: " + blockData.reason + ")");
 
                             if ("CXNET".equals(blockData.network)) {
                                 connectX.blockNodeCXNET(blockData.nodeID, blockData.reason);
                             } else {
                                 connectX.dataContainer.blockNode(blockData.network, blockData.nodeID, blockData.reason);
-                                System.out.println("[BLOCK_NODE] Node " + blockData.nodeID + " blocked from network " + blockData.network);
+                                log.info("[BLOCK_NODE] Node " + blockData.nodeID + " blocked from network " + blockData.network);
                             }
 
                             ne.executeOnSync = true;
 
                         } catch (Exception e) {
-                            System.err.println("[BLOCK_NODE] Error handling event: " + e.getMessage());
+                            log.info("[BLOCK_NODE] Error handling event: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
                         break;
                     case UNBLOCK_NODE:
-                        System.out.println("[" + connectX.getOwnID() + "] UNBLOCK_NODE event received from " + nc.iD);
+                        log.info("[" + connectX.getOwnID() + "] UNBLOCK_NODE event received from " + nc.iD);
                         try {
                             ib.readyObject(NodeModeration.class, ib.nc.se, connectX);
                             NodeModeration unblockData =
                                 (NodeModeration) ib.object;
 
-                            System.out.println("[UNBLOCK_NODE] Unblocking node " + unblockData.nodeID + " from network " + unblockData.network);
+                            log.info("[UNBLOCK_NODE] Unblocking node " + unblockData.nodeID + " from network " + unblockData.network);
 
                             if ("CXNET".equals(unblockData.network)) {
                                 connectX.unblockNodeCXNET(unblockData.nodeID);
                             } else {
                                 String removedReason = connectX.dataContainer.unblockNode(unblockData.network, unblockData.nodeID);
                                 if (removedReason != null) {
-                                    System.out.println("[UNBLOCK_NODE] Node " + unblockData.nodeID + " unblocked from network " + unblockData.network +
+                                    log.info("[UNBLOCK_NODE] Node " + unblockData.nodeID + " unblocked from network " + unblockData.network +
                                                      " (was blocked for: " + removedReason + ")");
                                 }
                             }
@@ -1773,43 +1798,43 @@ public class NodeMesh {
                             ne.executeOnSync = true;
 
                         } catch (Exception e) {
-                            System.err.println("[UNBLOCK_NODE] Error handling event: " + e.getMessage());
+                            log.info("[UNBLOCK_NODE] Error handling event: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
                         break;
                     case REGISTER_NODE:
-                        System.out.println("[" + connectX.getOwnID() + "] REGISTER_NODE event received from " + nc.iD);
+                        log.info("[" + connectX.getOwnID() + "] REGISTER_NODE event received from " + nc.iD);
                         try {
                             ib.readyObject(NodeRegistration.class, ib.nc.se, connectX);
                             NodeRegistration registerData =
                                 (NodeRegistration) ib.object;
 
-                            System.out.println("[REGISTER_NODE] Registering node " + registerData.nodeID + " to network " + registerData.network +
+                            log.info("[REGISTER_NODE] Registering node " + registerData.nodeID + " to network " + registerData.network +
                                              " (approved by " + registerData.approver + ")");
 
                             connectX.dataContainer.networkRegisteredNodes.computeIfAbsent(registerData.network, k -> new HashSet<>()).add(registerData.nodeID);
-                            System.out.println("[REGISTER_NODE] Node " + registerData.nodeID + " registered to network " + registerData.network);
-                            System.out.println("[REGISTER_NODE] Total registered nodes: " +
+                            log.info("[REGISTER_NODE] Node " + registerData.nodeID + " registered to network " + registerData.network);
+                            log.info("[REGISTER_NODE] Total registered nodes: " +
                                 connectX.dataContainer.networkRegisteredNodes.get(registerData.network).size());
 
                             ne.executeOnSync = true;
 
                         } catch (Exception e) {
-                            System.err.println("[REGISTER_NODE] Error handling event: " + e.getMessage());
+                            log.info("[REGISTER_NODE] Error handling event: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
                         break;
                     case GRANT_PERMISSION:
-                        System.out.println("[" + connectX.getOwnID() + "] GRANT_PERMISSION event received from " + nc.iD);
+                        log.info("[" + connectX.getOwnID() + "] GRANT_PERMISSION event received from " + nc.iD);
                         try {
                             ib.readyObject(PermissionChange.class, ib.nc.se, connectX);
                             PermissionChange grantData =
                                 (PermissionChange) ib.object;
 
                             int priority = grantData.priority != null ? grantData.priority : 10;
-                            System.out.println("[GRANT_PERMISSION] Granting " + grantData.permission + " permission to node " + grantData.nodeID +
+                            log.info("[GRANT_PERMISSION] Granting " + grantData.permission + " permission to node " + grantData.nodeID +
                                              " on network " + grantData.network + " chain " + grantData.chain + " (priority: " + priority + ")");
 
                             CXNetwork network = connectX.getNetwork(grantData.network);
@@ -1820,27 +1845,27 @@ public class NodeMesh {
                                 Map<String, Entry> nodePerms =
                                     network.networkPermissions.permissionSet.computeIfAbsent(grantData.nodeID, k -> new HashMap<>());
                                 nodePerms.put(permKey, entry);
-                                System.out.println("[GRANT_PERMISSION] Permission granted successfully");
+                                log.info("[GRANT_PERMISSION] Permission granted successfully");
                             } else {
-                                System.err.println("[GRANT_PERMISSION] Network not found: " + grantData.network);
+                                log.info("[GRANT_PERMISSION] Network not found: " + grantData.network);
                             }
 
                             ne.executeOnSync = true;
 
                         } catch (Exception e) {
-                            System.err.println("[GRANT_PERMISSION] Error handling event: " + e.getMessage());
+                            log.info("[GRANT_PERMISSION] Error handling event: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
                         break;
                     case REVOKE_PERMISSION:
-                        System.out.println("[" + connectX.getOwnID() + "] REVOKE_PERMISSION event received from " + nc.iD);
+                        log.info("[" + connectX.getOwnID() + "] REVOKE_PERMISSION event received from " + nc.iD);
                         try {
                             ib.readyObject(PermissionChange.class, ib.nc.se, connectX);
                             PermissionChange revokeData =
                                 (PermissionChange) ib.object;
 
-                            System.out.println("[REVOKE_PERMISSION] Revoking " + revokeData.permission + " permission from node " + revokeData.nodeID +
+                            log.info("[REVOKE_PERMISSION] Revoking " + revokeData.permission + " permission from node " + revokeData.nodeID +
                                              " on network " + revokeData.network + " chain " + revokeData.chain);
 
                             CXNetwork network = connectX.getNetwork(revokeData.network);
@@ -1853,31 +1878,31 @@ public class NodeMesh {
                                     if (nodePerms.isEmpty()) {
                                         network.networkPermissions.permissionSet.remove(revokeData.nodeID);
                                     }
-                                    System.out.println("[REVOKE_PERMISSION] Permission revoked successfully");
+                                    log.info("[REVOKE_PERMISSION] Permission revoked successfully");
                                 } else {
-                                    System.out.println("[REVOKE_PERMISSION] Node had no permissions to revoke");
+                                    log.info("[REVOKE_PERMISSION] Node had no permissions to revoke");
                                 }
                             } else {
-                                System.err.println("[REVOKE_PERMISSION] Network not found: " + revokeData.network);
+                                log.info("[REVOKE_PERMISSION] Network not found: " + revokeData.network);
                             }
 
                             ne.executeOnSync = true;
 
                         } catch (Exception e) {
-                            System.err.println("[REVOKE_PERMISSION] Error handling event: " + e.getMessage());
+                            log.info("[REVOKE_PERMISSION] Error handling event: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
                         break;
                     case ZERO_TRUST_ACTIVATION:
-                        System.out.println("[" + connectX.getOwnID() + "] ZERO_TRUST_ACTIVATION event received from " + nc.iD);
+                        log.info("[" + connectX.getOwnID() + "] ZERO_TRUST_ACTIVATION event received from " + nc.iD);
                         try {
                             ib.readyObject(ZeroTrustActivation.class, ib.nc.se, connectX);
                             ZeroTrustActivation ztData =
                                 (ZeroTrustActivation) ib.object;
 
-                            System.out.println("[ZERO_TRUST_ACTIVATION] Activating zero trust mode for network " + ztData.network);
-                            System.out.println("[ZERO_TRUST_ACTIVATION] WARNING: This operation is IRREVERSIBLE");
+                            log.info("[ZERO_TRUST_ACTIVATION] Activating zero trust mode for network " + ztData.network);
+                            log.info("[ZERO_TRUST_ACTIVATION] WARNING: This operation is IRREVERSIBLE");
 
                             // Get the network
                             CXNetwork network = connectX.getNetwork(ztData.network);
@@ -1889,26 +1914,26 @@ public class NodeMesh {
                                                network.configuration.backendSet.get(0).equals(nc.iD);
 
                                 if (!isNMI) {
-                                    System.err.println("[ZERO_TRUST_ACTIVATION] Rejected: sender " + nc.iD.substring(0, 8) + " is not NMI");
+                                    log.info("[ZERO_TRUST_ACTIVATION] Rejected: sender " + nc.iD.substring(0, 8) + " is not NMI");
                                     handledLocally = true;
                                     break;
                                 }
 
                                 // Check if already in zero trust mode
                                 if (network.zT) {
-                                    System.out.println("[ZERO_TRUST_ACTIVATION] Network already in zero trust mode, ignoring duplicate activation");
+                                    log.info("[ZERO_TRUST_ACTIVATION] Network already in zero trust mode, ignoring duplicate activation");
                                     handledLocally = true;
                                     break;
                                 }
 
                                 // Activate zero trust mode
                                 network.zT = true;
-                                System.out.println("[ZERO_TRUST_ACTIVATION] Set network.zT = true");
-                                System.out.println("[ZERO_TRUST_ACTIVATION] Seed zT flag: " + ztData.zT);
+                                log.info("[ZERO_TRUST_ACTIVATION] Set network.zT = true");
+                                log.info("[ZERO_TRUST_ACTIVATION] Seed zT flag: " + ztData.zT);
 
-                                System.out.println("[ZERO_TRUST_ACTIVATION] Zero trust mode activated for " + ztData.network);
-                                System.out.println("[ZERO_TRUST_ACTIVATION] NMI permissions are now blocked");
-                                System.out.println("[ZERO_TRUST_ACTIVATION] Network is fully decentralized");
+                                log.info("[ZERO_TRUST_ACTIVATION] Zero trust mode activated for " + ztData.network);
+                                log.info("[ZERO_TRUST_ACTIVATION] NMI permissions are now blocked");
+                                log.info("[ZERO_TRUST_ACTIVATION] Network is fully decentralized");
 
                                 // Persist network configuration
                                 try {
@@ -1916,17 +1941,17 @@ public class NodeMesh {
                                         connectX.blockchainPersistence.saveChainMetadata(network.c1, ztData.network);
                                         connectX.blockchainPersistence.saveChainMetadata(network.c2, ztData.network);
                                         connectX.blockchainPersistence.saveChainMetadata(network.c3, ztData.network);
-                                        System.out.println("[ZERO_TRUST_ACTIVATION] Network configuration persisted");
+                                        log.info("[ZERO_TRUST_ACTIVATION] Network configuration persisted");
                                     }
                                 } catch (Exception persistEx) {
-                                    System.err.println("[ZERO_TRUST_ACTIVATION] Failed to persist configuration: " + persistEx.getMessage());
+                                    log.info("[ZERO_TRUST_ACTIVATION] Failed to persist configuration: " + persistEx.getMessage());
                                 }
 
                                 // TODO: Trigger blockchain re-sync using zero trust consensus protocols
                                 // This will be implemented when multi-peer block querying and reconciliation are ready
 
                             } else {
-                                System.err.println("[ZERO_TRUST_ACTIVATION] Network not found: " + ztData.network);
+                                log.info("[ZERO_TRUST_ACTIVATION] Network not found: " + ztData.network);
                             }
 
                             // This is a state-modifying event that should be recorded to c1 (Admin) chain
@@ -1934,20 +1959,20 @@ public class NodeMesh {
                             ne.executeOnSync = true;
 
                         } catch (Exception e) {
-                            System.err.println("[ZERO_TRUST_ACTIVATION] Error handling event: " + e.getMessage());
+                            log.info("[ZERO_TRUST_ACTIVATION] Error handling event: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
                         break;
                     case PEER_LIST_REQUEST:
-                        System.out.println("[" + connectX.getOwnID() + "] PEER_LIST_REQUEST received from " + nc.iD);
+                        log.info("[" + connectX.getOwnID() + "] PEER_LIST_REQUEST received from " + nc.iD);
                         try {
                             // Get requester's IP address (from socket if available)
                             String requesterIP = nc.iD; // TODO: Extract actual IP from socket/connection context
 
                             // Check rate limiting: 3 requests per IP per hour
                             if (isPeerRequestRateLimited(requesterIP)) {
-                                System.out.println("[PEER_LIST_REQUEST] Rate limit exceeded for IP " + requesterIP + " (3 per hour)");
+                                log.info("[PEER_LIST_REQUEST] Rate limit exceeded for IP " + requesterIP + " (3 per hour)");
                                 handledLocally = true;
                                 break;
                             }
@@ -1982,7 +2007,7 @@ public class NodeMesh {
                             response.put("ips", peerIPs);
                             String responseJson = ConnectX.serialize("cxJSON1", response);
 
-                            System.out.println("[PEER_LIST_REQUEST] Sending " + peerIPs.size() + " peer IPs to " + nc.iD);
+                            log.info("[PEER_LIST_REQUEST] Sending " + peerIPs.size() + " peer IPs to " + nc.iD);
 
                             // Send response using EventBuilder pattern
                             ConnectX.EventBuilder eb = connectX.buildEvent(EventType.PEER_LIST_RESPONSE, responseJson.getBytes("UTF-8"))
@@ -1997,13 +2022,13 @@ public class NodeMesh {
                                 eb.queue();
 
                         } catch (Exception e) {
-                            System.err.println("[PEER_LIST_REQUEST] Error handling request: " + e.getMessage());
+                            log.info("[PEER_LIST_REQUEST] Error handling request: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
                         break;
                     case PEER_LIST_RESPONSE:
-                        System.out.println("[" + connectX.getOwnID() + "] PEER_LIST_RESPONSE received from " + nc.iD);
+                        log.info("[" + connectX.getOwnID() + "] PEER_LIST_RESPONSE received from " + nc.iD);
                         try {
                             // Parse response: {ips: ["192.168.1.100:49152", ...]}
                             String responseJson = new String(eventPayload, "UTF-8");
@@ -2012,7 +2037,7 @@ public class NodeMesh {
 
                             List<String> peerIPs = (List<String>) response.get("ips");
 
-                            System.out.println("[PEER_LIST_RESPONSE] Received " + peerIPs.size() + " peer IPs");
+                            log.info("[PEER_LIST_RESPONSE] Received " + peerIPs.size() + " peer IPs");
 
                             // TODO: Contact each IP for Node info/seed
                             // For each IP:
@@ -2021,12 +2046,12 @@ public class NodeMesh {
                             //   3. Receive Node info and add to PeerDirectory
                             //   4. Cache certificate
                             for (String ipPort : peerIPs) {
-                                System.out.println("[PEER_LIST_RESPONSE] Received peer: " + ipPort);
+                                log.info("[PEER_LIST_RESPONSE] Received peer: " + ipPort);
                                 // TODO: Implement actual connection logic
                             }
 
                         } catch (Exception e) {
-                            System.err.println("[PEER_LIST_RESPONSE] Error handling response: " + e.getMessage());
+                            log.info("[PEER_LIST_RESPONSE] Error handling response: " + e.getMessage());
                             e.printStackTrace();
                         }
                         handledLocally = true;
@@ -2055,7 +2080,7 @@ public class NodeMesh {
                         // Use signedEventBytes to preserve original NetworkEvent signature
                         OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
                         connectX.queueEvent(relayBundle);
-                        System.out.println("[" + connectX.getOwnID() + "] Relaying event to: " + ne.p.cxID);
+                        log.info("[" + connectX.getOwnID() + "] Relaying event to: " + ne.p.cxID);
                         return true;
                     }
                 } catch (Exception e) {
@@ -2088,7 +2113,7 @@ public class NodeMesh {
                     // Record with original sender's signature (never re-sign)
                     connectX.Event(ne, ne.p.cxID, nc.e);
                 } catch (Exception e) {
-                    System.err.println("[PeerProxy] Error recording event: " + e.getMessage());
+                    log.info("[PeerProxy] Error recording event: " + e.getMessage());
                 }
             }
 
@@ -2114,7 +2139,7 @@ public class NodeMesh {
 
         // Step 4c: Handle peerBroad mode - global cross-network transmission
         if (tP.peerBroad) {
-            //System.out.println("[RELAY DEBUG] peerBroad=true, broadcasting to " + peerDirectory.hv.size() + " peers");
+            //log.info("[RELAY DEBUG] peerBroad=true, broadcasting to " + peerDirectory.hv.size() + " peers");
             // Broadcast to all peers across all networks
             for (Node peer : peerDirectory.hv.values()) {
                 if (!peer.cxID.equals(connectX.getOwnID()) && !peer.cxID.equals(transmitterID)) {
@@ -2142,7 +2167,7 @@ public class NodeMesh {
             String eventType = (ne.eT != null) ? ne.eT : "UNKNOWN";
             String originalSender = (nc.oD != null) ? nc.oD.substring(0, 8) : "UNKNOWN";
             String transmitter = (transmitterID != null) ? transmitterID.substring(0, 8) : "UNKNOWN";
-            System.out.println("[CXN Relay] Received " + eventType + " from " + transmitter +
+            log.info("[CXN Relay] Received " + eventType + " from " + transmitter +
                 " (original: " + originalSender + ") - preparing relay...");
 
             CXNetwork cxn = connectX.getNetwork(ne.p.network);
@@ -2250,7 +2275,7 @@ public class NodeMesh {
                 }
 
                 // Log relay summary
-                System.out.println("[CXN Relay] Queued " + eventType + " for relay to " + sentTo.size() + " peers");
+                log.info("[CXN Relay] Queued " + eventType + " for relay to " + sentTo.size() + " peers");
             }
         }
 
@@ -2284,20 +2309,20 @@ public class NodeMesh {
         try {
             // Add block to local blockchain in memory
             targetChain.blockMap.put(block.block, block);
-            System.out.println("[BLOCK_APPLY] Added block " + block.block + " to chain " + chainID + " in memory");
+            log.info("[BLOCK_APPLY] Added block " + block.block + " to chain " + chainID + " in memory");
 
             // Update current block pointer if this is the latest block
             if (targetChain.current == null || block.block > targetChain.current.block) {
                 targetChain.current = block;
-                System.out.println("[BLOCK_APPLY] Updated current block to " + block.block);
+                log.info("[BLOCK_APPLY] Updated current block to " + block.block);
             }
 
             // Save block to disk for persistence
             try {
                 connectX.blockchainPersistence.saveBlock(networkID, chainID, block);
-                System.out.println("[BLOCK_APPLY] Saved block " + block.block + " to disk");
+                log.info("[BLOCK_APPLY] Saved block " + block.block + " to disk");
             } catch (Exception e) {
-                System.err.println("[BLOCK_APPLY] Failed to save block to disk: " + e.getMessage());
+                log.info("[BLOCK_APPLY] Failed to save block to disk: " + e.getMessage());
             }
 
             // Prepare block: verify and deserialize all events
@@ -2319,21 +2344,21 @@ public class NodeMesh {
                     connectX.eventQueue.add(ib);
 
                     stateEvents++;
-                    System.out.println("[BLOCK_SYNC] Queued state event: " + event.eT);
+                    log.info("[BLOCK_SYNC] Queued state event: " + event.eT);
                 } else {
                     // Skip ephemeral events (messages, pings, etc.)
                     skippedEvents++;
                 }
             }
 
-            System.out.println("[BLOCK_SYNC] Block " + block.block + " processed:");
-            System.out.println("  - Added to chain " + chainID);
-            System.out.println("  - Saved to disk");
-            System.out.println("  - Queued " + stateEvents + " state events");
-            System.out.println("  - Skipped " + skippedEvents + " ephemeral events");
+            log.info("[BLOCK_SYNC] Block " + block.block + " processed:");
+            log.info("  - Added to chain " + chainID);
+            log.info("  - Saved to disk");
+            log.info("  - Queued " + stateEvents + " state events");
+            log.info("  - Skipped " + skippedEvents + " ephemeral events");
 
         } catch (Exception e) {
-            System.err.println("[BLOCK_APPLY] Error applying block: " + e.getMessage());
+            log.info("[BLOCK_APPLY] Error applying block: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -2349,40 +2374,40 @@ public class NodeMesh {
             long localC2 = network.c2.current != null ? network.c2.current.block : -1;
             long localC3 = network.c3.current != null ? network.c3.current.block : -1;
 
-            System.out.println("[CHAIN_SYNC] Local chain heights:");
-            System.out.println("  c1: " + localC1);
-            System.out.println("  c2: " + localC2);
-            System.out.println("  c3: " + localC3);
+            log.info("[CHAIN_SYNC] Local chain heights:");
+            log.info("  c1: " + localC1);
+            log.info("  c2: " + localC2);
+            log.info("  c3: " + localC3);
 
             Node remotePeer = peerDirectory.lookup(peerID, true, true);
             if (remotePeer == null) {
-                System.err.println("[CHAIN_SYNC] Cannot sync - peer not found: " + peerID);
+                log.info("[CHAIN_SYNC] Cannot sync - peer not found: " + peerID);
                 return;
             }
 
             // Sync c1 (Admin chain) first - most critical for state
             if (remoteC1 > localC1) {
-                System.out.println("[CHAIN_SYNC] c1 is behind, requesting " + (remoteC1 - localC1) + " blocks");
+                log.info("[CHAIN_SYNC] c1 is behind, requesting " + (remoteC1 - localC1) + " blocks");
                 requestMissingBlocks(connectX, networkID, network.networkDictionary.c1, localC1 + 1, remoteC1, remotePeer);
             }
 
             // Sync c2 (Resources chain)
             if (remoteC2 > localC2) {
-                System.out.println("[CHAIN_SYNC] c2 is behind, requesting " + (remoteC2 - localC2) + " blocks");
+                log.info("[CHAIN_SYNC] c2 is behind, requesting " + (remoteC2 - localC2) + " blocks");
                 requestMissingBlocks(connectX, networkID, network.networkDictionary.c2, localC2 + 1, remoteC2, remotePeer);
             }
 
             // Sync c3 (Events chain)
             if (remoteC3 > localC3) {
-                System.out.println("[CHAIN_SYNC] c3 is behind, requesting " + (remoteC3 - localC3) + " blocks");
+                log.info("[CHAIN_SYNC] c3 is behind, requesting " + (remoteC3 - localC3) + " blocks");
                 requestMissingBlocks(connectX, networkID, network.networkDictionary.c3, localC3 + 1, remoteC3, remotePeer);
             }
 
             if (remoteC1 <= localC1 && remoteC2 <= localC2 && remoteC3 <= localC3) {
-                System.out.println("[CHAIN_SYNC] Local chains are up to date!");
+                log.info("[CHAIN_SYNC] Local chains are up to date!");
             }
         } catch (Exception e) {
-            System.err.println("[CHAIN_SYNC] Error initiating sync: " + e.getMessage());
+            log.info("[CHAIN_SYNC] Error initiating sync: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -2405,10 +2430,10 @@ public class NodeMesh {
                 eb.getPath().network = networkID;
                 eb.queue();
 
-                System.out.println("[CHAIN_SYNC] Requested block " + blockNum + " from chain " + chainID);
+                log.info("[CHAIN_SYNC] Requested block " + blockNum + " from chain " + chainID);
             }
         } catch (Exception e) {
-            System.err.println("[CHAIN_SYNC] Error requesting blocks: " + e.getMessage());
+            log.info("[CHAIN_SYNC] Error requesting blocks: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -2420,29 +2445,14 @@ public class NodeMesh {
     private void applySeedConsensus(ConnectX connectX, Seed seed,
                                           boolean isEpochSeed, String consensusReason, String targetNetwork) {
         try {
-            System.out.println("[SEED CONSENSUS] Applying seed: " + seed.seedID);
-            System.out.println("[SEED CONSENSUS] Reason: " + consensusReason);
-            System.out.println("[SEED CONSENSUS] Networks: " + seed.networks.size());
-            System.out.println("[SEED CONSENSUS] Peers: " + seed.hvPeers.size());
-            System.out.println("[SEED CONSENSUS] Certificates: " + seed.certificates.size());
-
-            // Save EPOCH signed seeds to disk so this peer can forward them
-            if (isEpochSeed) {
-                File seedsDir = new File(connectX.cxRoot, "seeds");
-                if (!seedsDir.exists()) {
-                    seedsDir.mkdirs();
-                }
-                File seedFile = new File(seedsDir, seed.seedID + ".cxn");
-                seed.save(seedFile);
-                System.out.println("[SEED CONSENSUS] ✓ Saved EPOCH seed: " + seedFile.getName());
-                System.out.println("[SEED CONSENSUS] ✓ This peer can now forward EPOCH seed to others!");
-            }
+            log.info("[SEED CONSENSUS] Applying seed: {} | reason: {} | networks={} peers={} certs={}",
+                seed.seedID, consensusReason, seed.networks.size(), seed.hvPeers.size(), seed.certificates.size());
 
             // Add peers to directory (skip self by cxID or public key)
             int peersAdded = 0;
             for (Node peer : seed.hvPeers) {
                 if (connectX.isSelfNode(peer)) {
-                    System.out.println("[SEED CONSENSUS] Skipped self in hvPeers: " + peer.cxID);
+                    log.info("[SEED CONSENSUS] Skipped self in hvPeers: " + peer.cxID);
                     continue;
                 }
                 try {
@@ -2452,11 +2462,10 @@ public class NodeMesh {
                     // Ignore duplicate peer errors
                 }
             }
-            System.out.println("[SEED CONSENSUS] ✓ Added " + peersAdded + " peers to directory");
+            log.info("[SEED CONSENSUS] ✓ Added " + peersAdded + " peers to directory");
 
             // Apply seed to ConnectX (registers networks)
             seed.apply(connectX);
-            System.out.println("[SEED CONSENSUS] ✓ Networks registered");
 
             // Cache certificates
             int certsAdded = 0;
@@ -2468,12 +2477,10 @@ public class NodeMesh {
                     // Ignore cert errors
                 }
             }
-            System.out.println("[SEED CONSENSUS] ✓ Cached " + certsAdded + " certificates");
-            System.out.println("[SEED CONSENSUS] ✓✓✓ Network " + targetNetwork + " is READY!");
+            log.info("[SEED CONSENSUS] Network {} ready: {} certs cached", targetNetwork, certsAdded);
 
         } catch (Exception e) {
-            System.err.println("[SEED CONSENSUS] Error applying seed: " + e.getMessage());
-            e.printStackTrace();
+            log.error("[SEED CONSENSUS] Error applying seed", e);
         }
     }
 
@@ -2485,13 +2492,12 @@ public class NodeMesh {
     private static void performSeedConsensus(ConnectX connectX, String targetNetwork,
                                             ConcurrentHashMap<String, ConnectX.SeedResponseData> responses) {
         try {
-            System.out.println("[SEED CONSENSUS] === MULTI-PEER VOTING ===");
-            System.out.println("[SEED CONSENSUS] Responses: " + responses.size());
+            log.info("[SEED CONSENSUS] Multi-peer voting for {} with {} responses", targetNetwork, responses.size());
 
-            // Priority 1: Check if EPOCH responded (always trust EPOCH)
+            // Priority 1: Check if EPOCH responded with a dynamic seed (authoritative)
             for (ConnectX.SeedResponseData r : responses.values()) {
                 if (r.authoritative && r.dynamicSeed != null) {
-                    System.out.println("[SEED CONSENSUS] ✓ EPOCH dynamic seed found - TRUSTING");
+                    log.info("[SEED CONSENSUS] EPOCH authoritative dynamic seed -- applying");
                     connectX.nodeMesh.applySeedConsensus(connectX, r.dynamicSeed, false,
                         "EPOCH dynamic seed (authoritative)", targetNetwork);
                     return;
@@ -2502,7 +2508,6 @@ public class NodeMesh {
             Map<String, Integer> heightVotes = new HashMap<>();
             for (ConnectX.SeedResponseData r : responses.values()) {
                 if (r.chainHeights != null) {
-                    // Create signature from chain heights
                     String heightSig = "c1:" + r.chainHeights.get("c1") +
                                      ",c2:" + r.chainHeights.get("c2") +
                                      ",c3:" + r.chainHeights.get("c3");
@@ -2510,12 +2515,6 @@ public class NodeMesh {
                 }
             }
 
-            System.out.println("[SEED CONSENSUS] Chain height voting:");
-            for (Map.Entry<String, Integer> vote : heightVotes.entrySet()) {
-                System.out.println("[SEED CONSENSUS]   " + vote.getKey() + " → " + vote.getValue() + " votes");
-            }
-
-            // Find majority consensus (>50% agreement)
             String majorityHeights = null;
             int maxVotes = 0;
             for (Map.Entry<String, Integer> vote : heightVotes.entrySet()) {
@@ -2525,15 +2524,11 @@ public class NodeMesh {
                 }
             }
 
-            double consensusPercent = (double) maxVotes / responses.size();
-            System.out.println("[SEED CONSENSUS] Majority: " + maxVotes + "/" + responses.size() +
-                             " (" + String.format("%.0f%%", consensusPercent * 100) + ")");
+            double consensusPercent = responses.isEmpty() ? 0.0 : (double) maxVotes / responses.size();
+            log.info("[SEED CONSENSUS] Majority: {}/{} ({}%)", maxVotes, responses.size(),
+                String.format("%.0f", consensusPercent * 100));
 
             if (consensusPercent >= 0.51) {
-                // Majority consensus achieved - use seed from majority peer
-                System.out.println("[SEED CONSENSUS] ✓ CONSENSUS REACHED (" +
-                                 String.format("%.0f%%", consensusPercent * 100) + " agreement)");
-
                 for (ConnectX.SeedResponseData r : responses.values()) {
                     if (r.chainHeights != null) {
                         String heightSig = "c1:" + r.chainHeights.get("c1") +
@@ -2548,41 +2543,28 @@ public class NodeMesh {
                     }
                 }
             } else {
-                // No consensus - conflict detected
-                System.out.println("[SEED CONSENSUS] ✗ CONSENSUS FAILED - Peer conflict detected");
-                System.out.println("[SEED CONSENSUS] No majority agreement (only " +
-                                 String.format("%.0f%%", consensusPercent * 100) + "%)");
-                System.out.println("[SEED CONSENSUS] → Requesting authoritative seed from EPOCH...");
-
-                // TODO: Send SEED_REQUEST directly to EPOCH as tiebreaker
-                // For now, use fallback: load signed EPOCH seed from disk if available
+                // No consensus -- fall back to local signed seed blob if available
+                log.warn("[SEED CONSENSUS] Consensus failed ({}%) -- trying local seed blob fallback",
+                    String.format("%.0f", consensusPercent * 100));
                 File seedsDir = new File(connectX.cxRoot, "seeds");
                 if (seedsDir.exists()) {
                     File[] seedFiles = seedsDir.listFiles((dir, name) -> name.endsWith(".cxn"));
                     if (seedFiles != null && seedFiles.length > 0) {
-                        // Load most recent seed
                         File latestSeed = seedFiles[0];
                         for (File f : seedFiles) {
-                            if (f.lastModified() > latestSeed.lastModified()) {
-                                latestSeed = f;
-                            }
+                            if (f.lastModified() > latestSeed.lastModified()) latestSeed = f;
                         }
-                        System.out.println("[SEED CONSENSUS] Using fallback: Signed EPOCH seed from disk");
-                        Seed epochSeed =
-                            Seed.load(latestSeed);
-                        connectX.nodeMesh.applySeedConsensus(connectX, epochSeed, true,
-                            "EPOCH signed seed (disk fallback - peer conflict)", targetNetwork);
+                        log.info("[SEED CONSENSUS] Loading local seed blob: {}", latestSeed.getName());
+                        byte[] blob = java.nio.file.Files.readAllBytes(latestSeed.toPath());
+                        connectX.applySignedSeed(blob);
                         return;
                     }
                 }
-
-                System.err.println("[SEED CONSENSUS] ✗ Cannot resolve - no EPOCH seed available");
-                System.err.println("[SEED CONSENSUS] Network may be compromised or EPOCH offline");
+                log.error("[SEED CONSENSUS] Cannot resolve -- no local seed blob available");
             }
 
         } catch (Exception e) {
-            System.err.println("[SEED CONSENSUS] Voting error: " + e.getMessage());
-            e.printStackTrace();
+            log.error("[SEED CONSENSUS] Voting error", e);
         }
     }
 }

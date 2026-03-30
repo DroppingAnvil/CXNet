@@ -82,7 +82,7 @@ public class ConnectX {
     private transient Node self;
     public int listeningPort = 0;
     private final ConcurrentHashMap<String, CXPlugin> plugins = new ConcurrentHashMap<>();
-    private static transient List<String> reserved = Arrays.asList("SYSTEM", "CX", "cxJSON1", "CXNET");
+    private static final transient List<String> reserved = Arrays.asList("SYSTEM", "CX", "cxJSON1", "CXNET");
 
     /**
      * CXNET-level blocked nodes (global blocks across all networks)
@@ -274,14 +274,14 @@ public class ConnectX {
     public Object getSignedObject(String cxID, InputStream is, Class<?> clazz, String method) throws Exception {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         if (encryptionProvider.verifyAndStrip(is, baos, cxID)) {
-            return deserialize(method, baos.toString("UTF-8"), clazz);
+            return deserialize(method, baos.toString(StandardCharsets.UTF_8), clazz);
         }
         return null;
     }
     public Object getSignedObjectNoVerify(InputStream is, Class<?> clazz, String method) throws Exception {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         encryptionProvider.stripSignature(is, baos);
-        return deserialize(method, baos.toString("UTF-8"), clazz);
+        return deserialize(method, baos.toString(StandardCharsets.UTF_8), clazz);
     }
 
     public ByteArrayOutputStream signObject(Object o, Class<?> clazz, String method) throws Exception {
@@ -315,13 +315,11 @@ public class ConnectX {
     public void queueEvent(OutputBundle bundle) {
         // Debug logging for CXHELLO
         if (bundle != null && bundle.ne != null && bundle.ne.eT != null && bundle.ne.eT.contains("HELLO")) {
-            System.out.println("[queueEvent-DEBUG] Queuing " + bundle.ne.eT +
-                " to peer " + getOwnID().substring(0, 8) +
-                ", queue size before: " + outputQueue.size());
+            log.info("[queueEvent-DEBUG] Queuing {} to peer {}, queue size before: {}", bundle.ne.eT, getOwnID().substring(0, 8), outputQueue.size());
         }
         outputQueue.add(bundle);
         if (bundle != null && bundle.ne != null && bundle.ne.eT != null && bundle.ne.eT.contains("HELLO")) {
-            System.out.println("[queueEvent-DEBUG] Queue size after: " + outputQueue.size());
+            log.info("[queueEvent-DEBUG] Queue size after: " + outputQueue.size());
         }
     }
 
@@ -874,7 +872,7 @@ public class ConnectX {
                     connectX.encryptionProvider.encrypt(dataInput, encryptedOutput, encryptionRecipients);
                     this.event.d = encryptedOutput.toByteArray();
                     this.event.e2e = true;
-                    System.out.println("[E2E] Encrypted event data for " + encryptionRecipients.size() + " recipients");
+                    log.info("[E2E] Encrypted event data for " + encryptionRecipients.size() + " recipients");
                 }
             } catch (Exception e) {
                 throw new RuntimeException("Failed to prepare event data", e);
@@ -979,10 +977,7 @@ public class ConnectX {
 
     private void purgeSelfFromMap(java.util.concurrent.ConcurrentHashMap<String, Node> map) {
         if (map == null) return;
-        java.util.Iterator<java.util.Map.Entry<String, Node>> it = map.entrySet().iterator();
-        while (it.hasNext()) {
-            if (isSelfNode(it.next().getValue())) it.remove();
-        }
+        map.entrySet().removeIf(stringNodeEntry -> isSelfNode(stringNodeEntry.getValue()));
     }
 
     public Node getSelf() {
@@ -1046,12 +1041,12 @@ public class ConnectX {
      * Set the public bridge address for this node
      * Used when node is behind NAT/firewall and accessible via HTTP bridge
      * @param bridgeProtocol Bridge protocol (e.g., "cxHTTP1")
-     * @param bridgeEndpoint Public endpoint (e.g., "https://cx1.anvildevelopment.us/cx")
+     * @param bridgeEndpoint Public endpoint (e.g., "<a href="https://cx1.anvildevelopment.us/cx">...</a>")
      */
     public void setPublicBridgeAddress(String bridgeProtocol, String bridgeEndpoint) {
         if (self != null) {
             self.addr = bridgeProtocol + ":" + bridgeEndpoint;
-            System.out.println("[ConnectX] Updated public address: " + self.addr);
+            log.info("[ConnectX] Updated public address: " + self.addr);
             nodeMesh.ownAddresses.add(self.addr);
         }
     }
@@ -1322,10 +1317,10 @@ public class ConnectX {
      * @throws Exception if application fails
      */
     private void applySeed(Seed seed) throws Exception {
-        log.info("[Seed] Applying seed " + seed.seedID);
-        log.info("[Seed]   Networks: " + seed.networks.size());
-        log.info("[Seed]   HV Peers: " + seed.hvPeers.size());
-        log.info("[Seed]   Certificates: " + seed.certificates.size());
+        log.info("[Seed] Applying seed {}", seed.seedID);
+        log.info("[Seed]   Networks: {}", seed.networks.size());
+        log.info("[Seed]   HV Peers: {}", seed.hvPeers.size());
+        log.info("[Seed]   Certificates: {}", seed.certificates.size());
 
         // IMPORTANT: Extract and save NMI public key (cx.asc) first
         // This allows nodes to initialize crypto before connecting
@@ -1346,34 +1341,34 @@ public class ConnectX {
         // Add hv peers to directory (skip self by cxID or public key)
         for (Node peer : seed.hvPeers) {
             if (isSelfNode(peer)) {
-                log.info("[Seed] Skipped self in hvPeers: " + peer.cxID);
+                log.info("[Seed] Skipped self in hvPeers: {}", peer.cxID);
                 continue;
             }
             nodeMesh.peerDirectory.addNode(peer);
-            log.info("[Seed] Added peer: " + peer.cxID);
+            log.info("[Seed] Added peer: {}", peer.cxID);
         }
 
         // Import networks using shared registration logic
         for (CXNetwork network : seed.networks) {
             String networkID = network.configuration.netID;
-            log.info("[Seed] Importing network: " + networkID);
+            log.info("[Seed] Importing network: {}", networkID);
 
             try {
                 // Use shared network registration (handles persistence, replay, sync)
                 registerNetwork(network);
             } catch (Exception e) {
-                log.error("[Seed] Failed to register network " + networkID + ": " + e.getMessage());
-                e.printStackTrace();
+                log.error("[Seed] Failed to register network {}: {}", networkID, e.getMessage());
             }
         }
 
         // Cache certificates
+        assert seed.certificates != null;
         for (java.util.Map.Entry<String, String> cert : seed.certificates.entrySet()) {
             try {
                 encryptionProvider.cacheCert(cert.getKey(), false, false, this);
-                log.info("[Seed] Cached certificate: " + cert.getKey());
+                log.info("[Seed] Cached certificate: {}", cert.getKey());
             } catch (Exception e) {
-                log.error("[Seed] Failed to cache certificate for " + cert.getKey() + ": " + e.getMessage());
+                log.error("[Seed] Failed to cache certificate for {}: {}", cert.getKey(), e.getMessage());
             }
         }
 
@@ -1400,6 +1395,7 @@ public class ConnectX {
                 log.debug("[Bootstrap] signedBlob length={}, first bytes: {}", signedBlob.length, hexPreview.toString().trim());
             }
 
+            assert signedBlob != null;
             ByteArrayInputStream signedInput = new ByteArrayInputStream(signedBlob);
             ByteArrayOutputStream strippedOutput = new ByteArrayOutputStream();
 
@@ -1441,7 +1437,7 @@ public class ConnectX {
      */
     private void requestSeedFromEpoch() {
         try {
-            System.out.println("[Bootstrap] Contacting EPOCH at " + EPOCH_BRIDGE_ADDRESS);
+            log.info("[Bootstrap] Contacting EPOCH at " + EPOCH_BRIDGE_ADDRESS);
 
             // Step 1: Create hardcoded EPOCH node with bridge address for bootstrap
             Node epochNode = new Node();
@@ -1452,49 +1448,48 @@ public class ConnectX {
             // Add EPOCH to peer directory so we can reach it
             try {
                 nodeMesh.peerDirectory.addNode(epochNode);
-                System.out.println("[Bootstrap] Added EPOCH to peer directory");
+                log.info("[Bootstrap] Added EPOCH to peer directory");
             } catch (SecurityException e) {
                 // EPOCH already exists - this is fine
-                System.out.println("[Bootstrap] EPOCH already in peer directory");
+                log.info("[Bootstrap] EPOCH already in peer directory");
             }
 
             // Step 2: Introduce ourselves to EPOCH via NewNode event
             // This allows EPOCH to cache our certificate and encrypt responses for us
             if (self != null && self.publicKey != null) {
-                System.out.println("[Bootstrap] Introducing ourselves to EPOCH...");
+                log.info("[Bootstrap] Introducing ourselves to EPOCH...");
 
                 // Serialize our node information as the event payload
                 String selfJson = serialize("cxJSON1", self);
 
                 // Send NewNode using EventBuilder pattern with signature
                 String[] bridgeParts = EPOCH_BRIDGE_ADDRESS.split(":", 2);
-                buildEvent(EventType.NewNode, selfJson.getBytes("UTF-8"))
+                buildEvent(EventType.NewNode, selfJson.getBytes(StandardCharsets.UTF_8))
                     .toPeer(EPOCH_UUID)
                     .viaBridge(bridgeParts[0], bridgeParts[1])
                     .signData()
                     .queue();
 
-                System.out.println("[Bootstrap] NewNode introduction queued");
+                log.info("[Bootstrap] NewNode introduction queued");
             }
 
             // Step 3: Send SEED_REQUEST to EPOCH
-            System.out.println("[Bootstrap] Requesting CXNET seed...");
+            log.info("[Bootstrap] Requesting CXNET seed...");
 
             // Send SEED_REQUEST using EventBuilder pattern with signature
             String[] bridgeParts2 = EPOCH_BRIDGE_ADDRESS.split(":", 2);
             buildEvent(EventType.SEED_REQUEST,
-                serialize("cxJSON1", new SeedExchange("CXNET")).getBytes("UTF-8"))
+                serialize("cxJSON1", new SeedExchange("CXNET")).getBytes(StandardCharsets.UTF_8))
                 .toPeer(EPOCH_UUID)
                 .viaBridge(bridgeParts2[0], bridgeParts2[1])
                 .signData()
                 .queue();
 
-            System.out.println("[Bootstrap] SEED_REQUEST queued for EPOCH");
-            System.out.println("[Bootstrap] Waiting for SEED_RESPONSE via HTTP bridge...");
+            log.info("[Bootstrap] SEED_REQUEST queued for EPOCH");
+            log.info("[Bootstrap] Waiting for SEED_RESPONSE via HTTP bridge...");
 
         } catch (Exception e) {
-            System.err.println("[Bootstrap] Failed to request seed from EPOCH: " + e.getMessage());
-            e.printStackTrace();
+            log.error("[Bootstrap] Failed to request seed from EPOCH ", e);
         }
     }
 
@@ -1505,7 +1500,7 @@ public class ConnectX {
      */
     private void initiateP2PDiscovery() {
         try {
-            System.out.println("[P2P Discovery] Contacting " + nodeMesh.peerDirectory.hv.size() + " peers from seed...");
+            log.info("[P2P Discovery] Contacting {} peers from seed...", nodeMesh.peerDirectory.hv.size());
 
             int contactAttempts = 0;
             for (Node peer : nodeMesh.peerDirectory.hv.values()) {
@@ -1515,21 +1510,21 @@ public class ConnectX {
 
                 try {
                     // Send NewNode with SIGNED Node blob (receiver will save original signed blob for relay)
-                    System.out.println("[P2P Discovery] Sending NewNode to " + peer.cxID.substring(0, 8));
+                    log.info("[P2P Discovery] Sending NewNode to {}", peer.cxID.substring(0, 8));
                     String selfJson = serialize("cxJSON1", self);
-                    buildEvent(EventType.NewNode, selfJson.getBytes("UTF-8"))
+                    buildEvent(EventType.NewNode, selfJson.getBytes(StandardCharsets.UTF_8))
                         .signData()  // Sign Node JSON to create signed blob (preserves sender signature)
                         .toPeer(peer.cxID)
                         .queue();
 
                     // Send PeerFinding request to discover more peers
-                    System.out.println("[P2P Discovery] Sending PeerFinding to " + peer.cxID.substring(0, 8));
+                    log.info("[P2P Discovery] Sending PeerFinding to {}", peer.cxID.substring(0, 8));
                     PeerFinding peerFindingReq =
                         new PeerFinding();
                     peerFindingReq.t = "request";
                     peerFindingReq.network = "CXNET"; // Request CXNET peers
                     String peerFindingJson = serialize("cxJSON1", peerFindingReq);
-                    buildEvent(EventType.PeerFinding, peerFindingJson.getBytes("UTF-8"))
+                    buildEvent(EventType.PeerFinding, peerFindingJson.getBytes(StandardCharsets.UTF_8))
                         .toPeer(peer.cxID)
                         .signData()
                         .queue();
@@ -1537,13 +1532,13 @@ public class ConnectX {
                     contactAttempts++;
 
                 } catch (Exception e) {
-                    System.out.println("[P2P Discovery] Failed to contact " + peer.cxID.substring(0, 8) + ": " + e.getMessage());
+                    log.error("[P2P Discovery] Failed to contact {}: {}", peer.cxID.substring(0, 8), e.getMessage());
                 }
             }
 
-            System.out.println("[P2P Discovery] Initial discovery requests queued to " + contactAttempts + " peers");
+            log.info("[P2P Discovery] Initial discovery requests queued to {} peers", contactAttempts);
         } catch (Exception e) {
-            System.err.println("[P2P Discovery] Discovery failed: " + e.getMessage());
+            log.error("[P2P Discovery] Discovery failed ", e);
         }
     }
 
@@ -1571,7 +1566,7 @@ public class ConnectX {
                 // Wait for socket to be ready
                 Thread.sleep(10000); // Wait 10 seconds for network to stabilize and peers to bootstrap
 
-                System.out.println("[LAN Scanner] Starting periodic LAN discovery (every 5 minutes)");
+                log.info("[LAN Scanner] Starting periodic LAN discovery (every 5 minutes)");
 
                 while (true) {
                     try {
@@ -1579,26 +1574,25 @@ public class ConnectX {
                         if (nodeMesh != null && nodeMesh.in != null && nodeMesh.in.serverSocket != null &&
                             nodeMesh.in.serverSocket.isBound() && !nodeMesh.in.serverSocket.isClosed()) {
 
-                            System.out.println("[LAN Scanner] Starting LAN scan...");
+                            log.info("[LAN Scanner] Starting LAN scan...");
                             LANScanner scanner =
                                 new LANScanner(this, port);
                             scanner.scanNetwork();
-                            System.out.println("[LAN Scanner] Scan complete, next scan in 5 minutes");
+                            log.info("[LAN Scanner] Scan complete, next scan in 5 minutes");
                         } else {
-                            System.err.println("[LAN Scanner] Socket not ready, skipping scan");
+                            log.error("[LAN Scanner] Socket not ready, skipping scan");
                         }
                     } catch (Exception e) {
-                        System.err.println("[LAN Scanner] Scan failed: " + e.getMessage());
+                        log.error("[LAN Scanner] Scan failed: ", e);
                     }
 
                     // Wait 5 minutes before next scan (matches peer discovery cycle)
                     Thread.sleep(300000); // 5 minutes = 300,000 ms
                 }
             } catch (InterruptedException e) {
-                System.out.println("[LAN Scanner] Thread interrupted, stopping periodic scans");
+                log.info("[LAN Scanner] Thread interrupted, stopping periodic scans");
             } catch (Exception e) {
-                System.err.println("[LAN Scanner] Fatal error: " + e.getMessage());
-                e.printStackTrace();
+                log.error("[LAN Scanner] Fatal error: ", e);
             }
         });
         lanScanThread.setName("LAN-Scanner-Periodic");
@@ -1611,9 +1605,9 @@ public class ConnectX {
                 // Wait for CXHELLO handshake to complete before starting persistence
                 Thread.sleep(5000);
 
-                System.out.println("[Persistence] Starting periodic save and discovery thread");
-                System.out.println("[Persistence] - Blockchain saves: every 30 seconds");
-                System.out.println("[Persistence] - Peer discovery: every 5 minutes");
+                log.info("[Persistence] Starting periodic save and discovery thread");
+                log.info("[Persistence] - Blockchain saves: every 30 seconds");
+                log.info("[Persistence] - Peer discovery: every 5 minutes");
 
                 int cycleCount = 0; // Track cycles for peer discovery timing
 
@@ -1632,7 +1626,7 @@ public class ConnectX {
                                     blockchainPersistence.saveBlock(networkID, network.c1.chainID, network.c1.current);
                                     blockchainPersistence.saveChainMetadata(network.c1, networkID);
                                 } catch (Exception e) {
-                                    System.err.println("[Persistence] Failed to save c1 for " + networkID + ": " + e.getMessage());
+                                    log.error("[Persistence] Failed to save c1 for {}: {}", networkID, e.getMessage());
                                 }
                             }
 
@@ -1642,7 +1636,7 @@ public class ConnectX {
                                     blockchainPersistence.saveBlock(networkID, network.c2.chainID, network.c2.current);
                                     blockchainPersistence.saveChainMetadata(network.c2, networkID);
                                 } catch (Exception e) {
-                                    System.err.println("[Persistence] Failed to save c2 for " + networkID + ": " + e.getMessage());
+                                    log.error("[Persistence] Failed to save c2 for {}: {}", networkID, e.getMessage());
                                 }
                             }
 
@@ -1652,7 +1646,7 @@ public class ConnectX {
                                     blockchainPersistence.saveBlock(networkID, network.c3.chainID, network.c3.current);
                                     blockchainPersistence.saveChainMetadata(network.c3, networkID);
                                 } catch (Exception e) {
-                                    System.err.println("[Persistence] Failed to save c3 for " + networkID + ": " + e.getMessage());
+                                    log.error("[Persistence] Failed to save c3 for {}: {}", networkID, e.getMessage());
                                 }
                             }
                         }
@@ -1671,12 +1665,12 @@ public class ConnectX {
                             cycleCount = 0;
 
                             /// Send CXHELLO's to addresses waiting
-                        System.out.println("[ConnectX] Sending CXHELLO to " + dataContainer.waitingAddresses.size() + " addresses");
+                            log.info("[ConnectX] Sending CXHELLO to {} addresses", dataContainer.waitingAddresses.size());
                         for (String s : dataContainer.waitingAddresses) {
                             if (isValidPeerAddress(s) && !isSelfAddress(s)) {
                                 //TODO Store static self node blob locally, no need to generate it each time for ALL events
                                 String nodeJson = ConnectX.serialize("cxJSON1", getSelf());
-                                java.io.ByteArrayInputStream nodeInput = new java.io.ByteArrayInputStream(nodeJson.getBytes("UTF-8"));
+                                java.io.ByteArrayInputStream nodeInput = new java.io.ByteArrayInputStream(nodeJson.getBytes(StandardCharsets.UTF_8));
                                 java.io.ByteArrayOutputStream signedNodeOutput = new java.io.ByteArrayOutputStream();
                                 encryptionProvider.sign(nodeInput, signedNodeOutput);
                                 nodeInput.close();
@@ -1692,7 +1686,7 @@ public class ConnectX {
                                 String payloadJson = ConnectX.serialize("cxJSON1", helloPayload);
 
                                 // Sign the CXHELLO payload for consistency with CXHELLO_RESPONSE
-                                java.io.ByteArrayInputStream payloadInput = new java.io.ByteArrayInputStream(payloadJson.getBytes("UTF-8"));
+                                java.io.ByteArrayInputStream payloadInput = new java.io.ByteArrayInputStream(payloadJson.getBytes(StandardCharsets.UTF_8));
                                 java.io.ByteArrayOutputStream signedPayloadOutput = new java.io.ByteArrayOutputStream();
                                 encryptionProvider.sign(payloadInput, signedPayloadOutput);
                                 payloadInput.close();
@@ -1718,9 +1712,9 @@ public class ConnectX {
                                 // Create OutputBundle directly (bypassing buildEvent) - follows NEWNODE pattern
                                 OutputBundle bundle = new OutputBundle(helloEvent, targetNode, null, null, nc);
                                 queueEvent(bundle);
-                                System.out.println("[ConnectX] Queued CXHELLO to " + s);
+                                log.info("[ConnectX] Queued CXHELLO to {}", s);
                             } else {
-                                System.out.println("[ConnectX] Skipped CXHELLO target (self or invalid): " + s);
+                                log.info("[ConnectX] Skipped CXHELLO target (self or invalid): {}", s);
                             }
                         }
                         //Clear after
@@ -1728,7 +1722,7 @@ public class ConnectX {
                             dataContainer.waitingAddresses.clear();
 
                             try {
-                                System.out.println("[Peer Discovery] Sending PeerFinding requests to known peers...");
+                                log.info("[Peer Discovery] Sending PeerFinding requests to known peers...");
 
                                 // Send PeerFinding to a subset of known peers to discover new nodes/bridges
                                 int peersSent = 0;
@@ -1757,35 +1751,32 @@ public class ConnectX {
 
                                             peersSent++;
                                         } catch (Exception e) {
-                                            System.err.println("[Peer Discovery] Failed to send to " +
-                                                (peer.cxID.length() >= 8 ? peer.cxID.substring(0, 8) : peer.cxID) +
-                                                ": " + e.getMessage());
+                                            log.error("[Peer Discovery] Failed to send to {}: {}", peer.cxID.length() >= 8 ? peer.cxID.substring(0, 8) : peer.cxID, e.getMessage());
                                         }
                                     }
 
                                     if (peersSent > 0) {
-                                        System.out.println("[Peer Discovery] Sent PeerFinding requests to " + peersSent + " peers");
+                                        log.info("[Peer Discovery] Sent PeerFinding requests to {} peers", peersSent);
                                     } else {
-                                        System.out.println("[Peer Discovery] No peers available for discovery");
+                                        log.info("[Peer Discovery] No peers available for discovery");
                                     }
                                 }
                             } catch (Exception e) {
-                                System.err.println("[Peer Discovery] Error during peer discovery: " + e.getMessage());
+                                log.error("[Peer Discovery] Error during peer discovery: {}", e.getMessage());
                             }
                         }
 
                     } catch (Exception e) {
-                        System.err.println("[Persistence] Error during periodic save: " + e.getMessage());
+                        log.error("[Persistence] Error during periodic save: {}", e.getMessage());
                     }
 
                     // Wait 30 seconds before next cycle
                     Thread.sleep(30000);
                 }
             } catch (InterruptedException e) {
-                System.out.println("[Persistence] Thread interrupted, stopping periodic saves");
+                log.info("[Persistence] Thread interrupted, stopping periodic saves");
             } catch (Exception e) {
-                System.err.println("[Persistence] Fatal error in persistence thread: " + e.getMessage());
-                e.printStackTrace();
+                log.error("[Persistence] Fatal error in persistence thread: {}", e.getMessage());
             }
         });
         persistenceThread.setName("Persistence-Discovery-Thread");
@@ -1924,10 +1915,9 @@ public class ConnectX {
             blockchainPersistence.saveChainMetadata(network.c2, networkID);
             blockchainPersistence.saveChainMetadata(network.c3, networkID);
 
-            System.out.println("[Blockchain] Network " + networkID + " persisted to disk");
+            log.info("[Blockchain] Network {} persisted to disk", networkID);
         } catch (Exception e) {
-            System.err.println("[Blockchain] Failed to persist network " + networkID + ": " + e.getMessage());
-            e.printStackTrace();
+            log.error("[Blockchain] Failed to persist network {}: {}", networkID, e.getMessage());
         }
 
         return network;
@@ -1971,8 +1961,8 @@ public class ConnectX {
             throw new IllegalAccessException("Network " + networkID + " is already in zero trust mode");
         }
 
-        System.out.println("[Zero Trust] Activating zero trust mode for network " + networkID);
-        System.out.println("[Zero Trust] WARNING: This operation is IRREVERSIBLE");
+        log.info("[Zero Trust] Activating zero trust mode for network {}", networkID);
+        log.info("[Zero Trust] WARNING: This operation is IRREVERSIBLE");
 
         // Set zT flag in network configuration
         network.zT = true;
@@ -1982,28 +1972,27 @@ public class ConnectX {
                 networkID, System.currentTimeMillis(), network.configuration.nmiPub);
 
         String payloadJson = serialize("cxJSON1", payload);
-        System.out.println("[Zero Trust] Created ZERO_TRUST_ACTIVATION event payload");
+        log.info("[Zero Trust] Created ZERO_TRUST_ACTIVATION event payload");
 
         // Build and queue ZERO_TRUST_ACTIVATION event
         // Record to c1 (Admin chain) and distribute to all network participants
-        buildEvent(EventType.ZERO_TRUST_ACTIVATION, payloadJson.getBytes("UTF-8"))
+        buildEvent(EventType.ZERO_TRUST_ACTIVATION, payloadJson.getBytes(StandardCharsets.UTF_8))
             .withRecordFlag(true)  // Enable automatic recording
             .toNetwork(networkID, network.networkDictionary.c1)  // Record to c1 (Admin chain)
             .queue();
 
-        System.out.println("[Zero Trust] ZERO_TRUST_ACTIVATION event queued for network " + networkID);
-        System.out.println("[Zero Trust] NMI permissions will be blocked after event is processed");
-        System.out.println("[Zero Trust] Network is now in zero trust mode");
+        log.info("[Zero Trust] ZERO_TRUST_ACTIVATION event queued for network {}", networkID);
+        log.info("[Zero Trust] NMI permissions will be blocked after event is processed");
+        log.info("[Zero Trust] Network is now in zero trust mode");
 
         // Persist updated network configuration
         try {
             blockchainPersistence.saveChainMetadata(network.c1, networkID);
             blockchainPersistence.saveChainMetadata(network.c2, networkID);
             blockchainPersistence.saveChainMetadata(network.c3, networkID);
-            System.out.println("[Zero Trust] Network configuration persisted");
+            log.info("[Zero Trust] Network configuration persisted");
         } catch (Exception e) {
-            System.err.println("[Zero Trust] Failed to persist network configuration: " + e.getMessage());
-            e.printStackTrace();
+            log.error("[Zero Trust] Failed to persist network configuration: {}", e.getMessage());
         }
     }
 
@@ -2054,7 +2043,7 @@ public class ConnectX {
         try (FileInputStream fis = new FileInputStream(importFile)) {
             encryptionProvider.decrypt(fis, baos);
         }
-        String networkContainer = baos.toString("UTF-8");
+        String networkContainer = baos.toString(StandardCharsets.UTF_8);
 
         // Step 2: Deserialize NetworkContainer from decrypted JSON
         NetworkContainer nc =
@@ -2075,7 +2064,7 @@ public class ConnectX {
         }
 
         // Step 4: Deserialize the inner CXNetwork
-        CXNetwork network = (CXNetwork) deserialize(nc.se, networkBaos.toString("UTF-8"), CXNetwork.class);
+        CXNetwork network = (CXNetwork) deserialize(nc.se, networkBaos.toString(StandardCharsets.UTF_8), CXNetwork.class);
 
         if (network == null) {
             throw new IllegalAccessException("Network deserialization failed");
@@ -2114,7 +2103,7 @@ public class ConnectX {
         // Try to load persisted blockchain data from disk
         try {
             if (blockchainPersistence.exists(networkID)) {
-                System.out.println("[Blockchain] Loading persisted chains for network " + networkID);
+                log.info("[Blockchain] Loading persisted chains for network {}", networkID);
 
                 // Load chains (lazy loading - only current blocks initially)
                 NetworkRecord c1 = blockchainPersistence.loadChain(networkID, 1L, false);
@@ -2124,19 +2113,19 @@ public class ConnectX {
                 // Apply loaded chains if they exist
                 if (c1 != null) {
                     network.c1 = c1;
-                    System.out.println("[Blockchain] Loaded chain c1 (" + c1.blockMap.size() + " blocks in memory)");
+                    log.info("[Blockchain] Loaded chain c1 ({} blocks in memory)", c1.blockMap.size());
                 }
                 if (c2 != null) {
                     network.c2 = c2;
-                    System.out.println("[Blockchain] Loaded chain c2 (" + c2.blockMap.size() + " blocks in memory)");
+                    log.info("[Blockchain] Loaded chain c2 ({} blocks in memory)", c2.blockMap.size());
                 }
                 if (c3 != null) {
                     network.c3 = c3;
-                    System.out.println("[Blockchain] Loaded chain c3 (" + c3.blockMap.size() + " blocks in memory)");
+                    log.info("[Blockchain] Loaded chain c3 ({} blocks in memory)", c3.blockMap.size());
                 }
             } else {
-                System.out.println("[Blockchain] No persisted blockchain found for network " + networkID);
-                System.out.println("[Blockchain] Persisting genesis blocks from network configuration...");
+                log.info("[Blockchain] No persisted blockchain found for network {}", networkID);
+                log.info("[Blockchain] Persisting genesis blocks from network configuration...");
 
                 // Persist the genesis blocks that came with the network configuration
                 // This ensures peers have blockchain data on disk for future restarts
@@ -2153,13 +2142,13 @@ public class ConnectX {
                         blockchainPersistence.saveBlock(networkID, 3L, network.c3.current);
                         blockchainPersistence.saveChainMetadata(network.c3, networkID);
                     }
-                    System.out.println("[Blockchain] Genesis blocks persisted to disk");
+                    log.info("[Blockchain] Genesis blocks persisted to disk");
                 } catch (Exception saveEx) {
-                    System.err.println("[Blockchain] Failed to persist genesis blocks: " + saveEx.getMessage());
+                    log.error("[Blockchain] Failed to persist genesis blocks: {}", saveEx.getMessage());
                 }
             }
         } catch (Exception e) {
-            System.err.println("[Blockchain] Failed to load persisted chains for " + networkID + ": " + e.getMessage());
+            log.error("[Blockchain] Failed to load persisted chains for {}: {}", networkID, e.getMessage());
             // Not fatal - network can still function with in-memory chains
         }
 
@@ -2229,7 +2218,7 @@ public class ConnectX {
      */
     public void blockNodeCXNET(String nodeID, String reason) {
         cxnetBlockedNodes.put(nodeID, reason);
-        System.out.println("[CXNET] Blocked node globally: " + nodeID + " (reason: " + reason + ")");
+        log.info("[CXNET] Blocked node globally: {} (reason: {})", nodeID, reason);
     }
 
     /**
@@ -2240,7 +2229,7 @@ public class ConnectX {
     public void unblockNodeCXNET(String nodeID) {
         String reason = cxnetBlockedNodes.remove(nodeID);
         if (reason != null) {
-            System.out.println("[CXNET] Unblocked node globally: " + nodeID + " (was blocked for: " + reason + ")");
+            log.info("[CXNET] Unblocked node globally: " + nodeID + " (was blocked for: " + reason + ")");
         }
     }
 
@@ -2272,7 +2261,7 @@ public class ConnectX {
                     return plugin.handleEvent(ib.ne);
             }
         } catch (Exception e) {
-            System.err.println("[Plugin] Error dispatching event to plugin '" + eventType + "': " + e.getMessage());
+            log.error("[Plugin] Error dispatching event to plugin '{}': {}", eventType, e.getMessage());
             return false;
         }
     }
@@ -2392,28 +2381,28 @@ public class ConnectX {
      */
     public boolean Event(NetworkEvent ne, String senderID, byte[] signedBlob) {
         if (ne == null || ne.p == null || signedBlob == null) {
-            System.err.println("[Blockchain-Debug] Event() null check failed: ne=" + (ne != null) + ", ne.p=" + (ne != null && ne.p != null) + ", signedBlob=" + (signedBlob != null));
+            log.error("[Blockchain-Debug] Event() null check failed: ne={}, ne.p={}, signedBlob={}", ne != null, ne != null && ne.p != null, signedBlob != null);
             return false;
         }
 
         // Get network ID from CXPath
         String networkID = ne.p.network;
         if (networkID == null || networkID.isEmpty()) {
-            System.err.println("[Blockchain-Debug] Event() networkID check failed: networkID=" + networkID);
+            log.error("[Blockchain-Debug] Event() networkID check failed: networkID={}", networkID);
             return false;
         }
 
         // Get the network
         CXNetwork network = networkMap.get(networkID);
         if (network == null) {
-            System.err.println("[Blockchain-Debug] Event() network not found: networkID=" + networkID + ", available networks=" + networkMap.keySet());
+            log.error("[Blockchain-Debug] Event() network not found: networkID={}, available networks={}", networkID, networkMap.keySet());
             return false;
         }
 
         // Get chain ID from CXPath (now stored in path instead of inferred from event type)
         Long chainID = ne.p.chainID;
         if (chainID == null) {
-            System.err.println("[Blockchain] Event missing chain ID in path");
+            log.error("[Blockchain] Event missing chain ID in path");
             return false;
         }
 
@@ -2428,13 +2417,13 @@ public class ConnectX {
         }
 
         if (targetChain == null) {
-            System.err.println("[Blockchain] Invalid chain ID: " + chainID + " (c1=" + network.networkDictionary.c1 + ", c2=" + network.networkDictionary.c2 + ", c3=" + network.networkDictionary.c3 + ")");
+            log.error("[Blockchain] Invalid chain ID: {} (c1={}, c2={}, c3={})", chainID, network.networkDictionary.c1, network.networkDictionary.c2, network.networkDictionary.c3);
             return false;
         }
 
         // Check if sender has permission to record to this chain
         if (!network.checkChainPermission(senderID, Permission.Record.name(), chainID)) {
-            System.err.println("[Blockchain-Debug] Event() permission check failed: senderID=" + (senderID != null ? senderID.substring(0, 8) : "null") + ", chainID=" + chainID);
+            log.error("[Blockchain-Debug] Event() permission check failed: senderID={}, chainID={}", senderID != null ? senderID.substring(0, 8) : "null", chainID);
             return false;
         }
 
@@ -2456,8 +2445,7 @@ public class ConnectX {
                     blockchainPersistence.saveBlock(networkID, chainID, currentBlock);
                     blockchainPersistence.saveChainMetadata(targetChain, networkID);
                 } catch (Exception e) {
-                    System.err.println("[Blockchain] Failed to persist block " + currentBlock.block +
-                                     " for chain " + chainID + ": " + e.getMessage());
+                    log.error("[Blockchain] Failed to persist block {} for chain {}: {}", currentBlock.block, chainID, e.getMessage());
                 }
 
                 // Create new block
@@ -2475,7 +2463,7 @@ public class ConnectX {
             // Add event to current block with signed blob
             int eventIndex = currentBlock.networkEvents.size();
             if (!currentBlock.addEvent(eventIndex, signedBlob, this)) {
-                System.err.println("[Blockchain] Failed to add event to block");
+                log.error("[Blockchain] Failed to add event to block");
                 return false;
             }
         }
@@ -2489,7 +2477,7 @@ public class ConnectX {
      */
     @Deprecated
     public boolean Event(NetworkEvent ne, String senderID) {
-        System.err.println("[Blockchain] DEPRECATED: Event(ne, senderID) called - use Event(ne, senderID, signedBlob) at transmission time");
+        log.error("[Blockchain] DEPRECATED: Event(ne, senderID) called - use Event(ne, senderID, signedBlob) at transmission time");
         return false;
     }
 
@@ -2519,7 +2507,7 @@ public class ConnectX {
                     Node n = (Node) getSignedObject(getOwnID(), f.toURL().openStream(), Node.class, "cxJSON1");
                     nodeMesh.peerDirectory.lan.put(n.cxID, n);
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    log.error("Error in loadlan ", e);
                 }
             }
         }
@@ -2630,18 +2618,18 @@ public class ConnectX {
      */
     public void replayBlockchain(CXNetwork network) {
         if (network == null) {
-            System.err.println("[Blockchain Replay] Network is null, skipping");
+            log.error("[Blockchain Replay] Network is null, skipping");
             return;
         }
 
         String networkID = network.configuration.netID;
-        System.out.println("[Blockchain Replay] Starting replay for network: " + networkID);
+        log.info("[Blockchain Replay] Starting replay for network: {}", networkID);
 
         try {
             // Check if blockchain exists on disk
             File blockchainDir = new File(cxRoot, "blockchain/" + networkID);
             if (!blockchainDir.exists()) {
-                System.out.println("[Blockchain Replay] No blockchain data on disk for " + networkID);
+                log.info("[Blockchain Replay] No blockchain data on disk for {}", networkID);
                 return;
             }
 
@@ -2657,13 +2645,12 @@ public class ConnectX {
             // Replay c3 (Events) chain - mostly ephemeral, but may have state events
             totalEventsReplayed += replayChain(network, network.networkDictionary.c3, "c3 (Events)");
 
-            System.out.println("[Blockchain Replay] Complete for " + networkID);
-            System.out.println("[Blockchain Replay]   Events replayed: " + totalEventsReplayed);
-            System.out.println("[Blockchain Replay]   Events skipped (ephemeral): " + totalEventsSkipped);
+            log.info("[Blockchain Replay] Complete for {}", networkID);
+            log.info("[Blockchain Replay]   Events replayed: {}", totalEventsReplayed);
+            log.info("[Blockchain Replay]   Events skipped (ephemeral): {}", totalEventsSkipped);
 
         } catch (Exception e) {
-            System.err.println("[Blockchain Replay] Error replaying blockchain for " + networkID + ": " + e.getMessage());
-            e.printStackTrace();
+            log.error("[Blockchain Replay] Error replaying blockchain for {}: {}", networkID, e.getMessage());
         }
     }
 
@@ -2676,17 +2663,17 @@ public class ConnectX {
         String networkID = network.configuration.netID;
 
         try {
-            System.out.println("[Blockchain Replay] Loading " + chainName + "...");
+            log.info("[Blockchain Replay] Loading {}...", chainName);
 
             // Load chain from disk (load all blocks)
             NetworkRecord chain = blockchainPersistence.loadChain(networkID, chainID, true);
 
             if (chain == null || chain.blockMap.isEmpty()) {
-                System.out.println("[Blockchain Replay]   No blocks found in " + chainName);
+                log.info("[Blockchain Replay]   No blocks found in {}", chainName);
                 return 0;
             }
 
-            System.out.println("[Blockchain Replay]   Found " + chain.blockMap.size() + " blocks");
+            log.info("[Blockchain Replay]   Found {} blocks", chain.blockMap.size());
 
             // Process blocks in order (0, 1, 2, ...)
             for (long blockNum = 0; blockNum < chain.blockMap.size(); blockNum++) {
@@ -2717,19 +2704,19 @@ public class ConnectX {
                             eventsReplayed++;
 
                             if (eventsReplayed <= 5 || eventsReplayed % 10 == 0) {
-                                System.out.println("[Blockchain Replay]     Queued " + event.eT + " event (ID: " + event.iD + ")");
+                                log.info("[Blockchain Replay]     Queued {} event (ID: {})", event.eT, event.iD);
                             }
                         } catch (Exception e) {
-                            System.err.println("[Blockchain Replay]     Failed to queue event " + event.iD + ": " + e.getMessage());
+                            log.error("[Blockchain Replay]     Failed to queue event {}: {}", event.iD, e.getMessage());
                         }
                     }
                 }
             }
 
-            System.out.println("[Blockchain Replay]   " + chainName + " complete: " + eventsReplayed + " events replayed");
+            log.info("[Blockchain Replay]   {} complete: {} events replayed", chainName, eventsReplayed);
 
         } catch (Exception e) {
-            System.err.println("[Blockchain Replay] Error loading " + chainName + ": " + e.getMessage());
+            log.error("[Blockchain Replay] Error loading {}: {}", chainName, e.getMessage());
         }
 
         return eventsReplayed;
@@ -2749,7 +2736,7 @@ public class ConnectX {
         try {
             // Check if network has NMI/Backend configured
             if (network.configuration.backendSet == null || network.configuration.backendSet.isEmpty()) {
-                System.out.println("[Auto-Sync] No NMI configured for network " + networkID + ", skipping auto-sync");
+                log.info("[Auto-Sync] No NMI configured for network {}, skipping auto-sync", networkID);
                 return;
             }
 
@@ -2758,11 +2745,11 @@ public class ConnectX {
             Node nmiNode = nodeMesh.peerDirectory.lookup(nmiID, true, true);
 
             if (nmiNode == null) {
-                System.out.println("[Auto-Sync] NMI " + nmiID + " not found in peer directory, cannot request sync");
+                log.info("[Auto-Sync] NMI {} not found in peer directory, cannot request sync", nmiID);
                 return;
             }
 
-            System.out.println("[Auto-Sync] Requesting chain status from NMI " + nmiID.substring(0, 8) + "...");
+            log.info("[Auto-Sync] Requesting chain status from NMI {}...", nmiID.substring(0, 8));
 
             // Create CHAIN_STATUS_REQUEST
             String requestJson = serialize("cxJSON1", new ChainStatus(networkID));
@@ -2770,16 +2757,15 @@ public class ConnectX {
             // Send request using EventBuilder pattern with automatic signature
             EventBuilder eb = buildEvent(
                 EventType.CHAIN_STATUS_REQUEST,
-                requestJson.getBytes("UTF-8")
+                requestJson.getBytes(StandardCharsets.UTF_8)
             ).toPeer(nmiID).signData();
             eb.getPath().network = networkID;
             eb.queue();
 
-            System.out.println("[Auto-Sync] Chain status request queued for NMI");
+            log.info("[Auto-Sync] Chain status request queued for NMI");
 
         } catch (Exception e) {
-            System.err.println("[Auto-Sync] Error requesting chain status: " + e.getMessage());
-            e.printStackTrace();
+            log.error("[Auto-Sync] Error requesting chain status: {}", e.getMessage());
         }
     }
 
@@ -2825,7 +2811,7 @@ public class ConnectX {
             dataContainer = (DataContainer) deserialize(
                 "cxJSON1", fis, DataContainer.class);
         } catch (Exception e) {
-            System.err.println("[DataContainer] Failed to load data.cxd: " + e.getMessage());
+            log.error("[DataContainer] Failed to load data.cxd: {}", e.getMessage());
             // Create new container on error
             dataContainer = new DataContainer();
         }

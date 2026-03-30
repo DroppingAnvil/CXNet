@@ -5,6 +5,7 @@
 
 package us.anvildevelopment.cxnet.network;
 
+import org.slf4j.LoggerFactory;
 import us.anvildevelopment.cxnet.Configuration;
 import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.State;
@@ -99,7 +100,7 @@ public class CXNetwork {
         // Zero Trust Mode: Block NMI from using permissions
         // After zT activation, NMI is treated as a regular node
         if (zT && isCurrentNMI(deviceID)) {
-            LoggerFactory.getLogger(CXNetwork.class).info("[ZT-Blocked] NMI " + deviceID.substring(0, 8) + " blocked from chain permission: " + permission + "-" + chainID);
+            LoggerFactory.getLogger(CXNetwork.class).info("[ZT-Blocked] NMI {} blocked from chain permission: {}-{}", deviceID.substring(0, 8), permission, chainID);
             return false;
         }
 
@@ -113,7 +114,7 @@ public class CXNetwork {
 
         // Zero Trust Mode: Block NMI from using permissions
         if (zT && isCurrentNMI(deviceID)) {
-            LoggerFactory.getLogger(CXNetwork.class).info("[ZT-Blocked] NMI " + deviceID.substring(0, 8) + " blocked from network permission: " + permission);
+            LoggerFactory.getLogger(CXNetwork.class).info("[ZT-Blocked] NMI {} blocked from network permission: {}", deviceID.substring(0, 8), permission);
             return false;
         }
 

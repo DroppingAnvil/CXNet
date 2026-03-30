@@ -106,7 +106,7 @@ public class NodeMesh {
 
         // Start multiple OutputProcessor threads for parallel event processing
         // This significantly improves CXHELLO discovery timing by processing events concurrently
-        System.out.println("[NodeMesh] Starting " + NodeConfig.outputProcessorThreads + " OutputProcessor threads");
+        log.info("[NodeMesh] Starting " + NodeConfig.outputProcessorThreads + " OutputProcessor threads");
         for (int i = 0; i < NodeConfig.outputProcessorThreads; i++) {
             Thread outputProcessor = new Thread(new OutputProcessor(outController));
             outputProcessor.setName("OutputProcessor-" + i);
@@ -783,9 +783,9 @@ public class NodeMesh {
                 eventData = ib.ne.d;
             }
 
-            System.out.print(ib.nc);
-            System.out.print(ib.ne);
-            System.out.print(ib.signedEventBytes);
+            log.debug(ib.nc.toString());
+            log.debug(ib.ne.toString());
+            log.debug(ib.signedEventBytes.toString());
             EventType et = null;
 
             //ADDITIONAL VALIDATIONS
@@ -839,7 +839,7 @@ public class NodeMesh {
             } catch (Exception ignored) {}
             if (et == null & !connectX.sendPluginEvent(ib, ib.ne.eT)) {
                 Analytics.addData(AnalyticData.Tear, "Unsupported event - "+ib.ne.eT);
-                System.out.print("UNABLE TO PROCESS UNKNOWN EVENT");
+                log.info("UNABLE TO PROCESS UNKNOWN EVENT");
                 if (NodeConfig.supportUnavailableServices) {
                     // Record unsupported events using the ORIGIN ID from NetworkEvent
                     if (ib.nc != null && ib.nc.iD != null && ib.signedEventBytes != null) {

@@ -99,7 +99,7 @@ public class CXNetwork {
         // Zero Trust Mode: Block NMI from using permissions
         // After zT activation, NMI is treated as a regular node
         if (zT && isCurrentNMI(deviceID)) {
-            System.out.println("[ZT-Blocked] NMI " + deviceID.substring(0, 8) + " blocked from chain permission: " + permission + "-" + chainID);
+            LoggerFactory.getLogger(CXNetwork.class).info("[ZT-Blocked] NMI " + deviceID.substring(0, 8) + " blocked from chain permission: " + permission + "-" + chainID);
             return false;
         }
 
@@ -113,7 +113,7 @@ public class CXNetwork {
 
         // Zero Trust Mode: Block NMI from using permissions
         if (zT && isCurrentNMI(deviceID)) {
-            System.out.println("[ZT-Blocked] NMI " + deviceID.substring(0, 8) + " blocked from network permission: " + permission);
+            LoggerFactory.getLogger(CXNetwork.class).info("[ZT-Blocked] NMI " + deviceID.substring(0, 8) + " blocked from network permission: " + permission);
             return false;
         }
 

@@ -5,6 +5,7 @@
 
 package us.anvildevelopment.cxnet.edge;
 
+import org.slf4j.LoggerFactory;
 import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.network.events.NetworkEvent;
 import us.anvildevelopment.util.tools.database.annotations.MemoryOnly;
@@ -130,8 +131,8 @@ public class NetworkBlock implements Serializable {
                 prepared++;
             }
         }
-        System.out.println("[NetworkBlock] Prepared " + prepared + "/" + networkEvents.size() +
-            " events for block " + block);
+        LoggerFactory.getLogger(NetworkBlock.class).info("[NetworkBlock] Prepared " + prepared + "/" + networkEvents.size() +
+                " events for block " + block);
         return prepared;
     }
 
@@ -167,7 +168,7 @@ public class NetworkBlock implements Serializable {
             verifyStream.close();
 
             if (!verified) {
-                System.err.println("[NetworkBlock] Event " + index + " verification FAILED");
+                LoggerFactory.getLogger(NetworkBlock.class).error("[NetworkBlock] Event {} verification FAILED", index);
                 return false;
             }
 
@@ -182,7 +183,7 @@ public class NetworkBlock implements Serializable {
 
             return false;
         } catch (Exception e) {
-            System.err.println("[NetworkBlock] Error preparing event " + index + ": " + e.getMessage());
+            LoggerFactory.getLogger(NetworkBlock.class).error("[NetworkBlock] Error preparing event {}: {}", index, e.getMessage());
             return false;
         }
     }
@@ -214,10 +215,10 @@ public class NetworkBlock implements Serializable {
                 return unverifiedEvent.p.oCXID;
             }
 
-            System.err.println("[NetworkBlock] Security failure: Event missing oCXID (origin sender ID)");
+            LoggerFactory.getLogger(NetworkBlock.class).error("[NetworkBlock] Security failure: Event missing oCXID (origin sender ID)");
             return null;
         } catch (Exception e) {
-            System.err.println("[NetworkBlock] Error peeking sender: " + e.getMessage());
+            LoggerFactory.getLogger(NetworkBlock.class).error("[NetworkBlock] Error peeking sender: {}", e.getMessage());
             return null;
         }
     }

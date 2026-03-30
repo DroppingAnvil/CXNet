@@ -1,5 +1,3 @@
-package us.anvildevelopment.cxnet.test;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import us.anvildevelopment.cxnet.ConnectX;
@@ -161,13 +159,12 @@ public class BootstrapServerTest {
             // Add CXNET network to seed
             seed.addNetwork(cxnet);
 
-            // Add EPOCH as bootstrap peer (hv peer and peer finding node)
-            Node epochNode = new Node();
-            epochNode.cxID = SERVER_ID;
-            epochNode.publicKey = serverPubKey;
-            epochNode.addr = "cxHTTP1:https://CXNET.AnvilDevelopment.US/cx";
-            seed.addHvPeer(epochNode);
-            seed.addPeerFindingNode(epochNode);
+            // Add EPOCH as bootstrap peer -- sign self node blob (same format as CXHELLO)
+            byte[] signedEpochBlob = server.signSelfNode();
+            if (signedEpochBlob != null) {
+                seed.addHvPeer(signedEpochBlob);
+                seed.addPeerFindingNode(signedEpochBlob);
+            }
 
             // Create seeds/ directory
             java.io.File seedsDir = new java.io.File(server.cxRoot, "seeds");
@@ -211,8 +208,8 @@ public class BootstrapServerTest {
             log.info("    Seed ID: " + seed.seedID);
             log.info("    Timestamp: " + seed.timestamp);
             log.info("    Networks: " + seed.networks.size() + " (CXNET)");
-            log.info("    HV Peers: " + seed.hvPeers.size() + " (EPOCH)");
-            log.info("    Peer Finding: " + seed.peerFindingNodes.size() + " (EPOCH)");
+            log.info("    HV Peers: " + seed.hvPeerBlobs.size() + " (EPOCH)");
+            log.info("    Peer Finding: " + seed.peerFindingNodeBlobs.size() + " (EPOCH)");
             log.info("    Certificates: " + seed.certificates.size() + " (EPOCH)");
             log.info("    File: seeds/" + seed.seedID + ".cxn");
 
@@ -222,48 +219,6 @@ public class BootstrapServerTest {
 
         } else {
             log.info("  ✓ CXNET already loaded in memory");
-        }
-
-        // Create TESTNET for blockchain replication testing
-        log.info("\nStep 3b: Setting up TESTNET (blockchain replication test network)...");
-        CXNetwork testnet = server.getNetwork("TESTNET");
-
-        if (testnet == null) {
-            testnet = server.createNetwork("TESTNET");
-
-            // Disable whitelist mode for blockchain replication testing
-            testnet.configuration.whitelistMode = false;
-            testnet.configuration.publicSeed = false;
-            testnet.configuration.syncIntervalSeconds = 30; // Testing mode
-
-            log.info("  ✓ TESTNET created for blockchain replication testing");
-            log.info("    Whitelist mode: DISABLED (allows all peers for testing)");
-            log.info("    Backend/NMI: EPOCH");
-            log.info("    Sync interval: 30 seconds (testing mode)");
-
-            // Create TESTNET seed
-            Seed testnetSeed = new Seed();
-            testnetSeed.seedID = java.util.UUID.randomUUID().toString();
-            testnetSeed.timestamp = System.currentTimeMillis();
-            testnetSeed.networkID = "TESTNET";
-            testnetSeed.addNetwork(testnet);
-
-            // Add EPOCH as bootstrap peer for TESTNET too
-            Node epochNode = new Node();
-            epochNode.cxID = SERVER_ID;
-            epochNode.publicKey = serverPubKey;
-            epochNode.addr = "cxHTTP1:https://CXNET.AnvilDevelopment.US/cx";
-            testnetSeed.addHvPeer(epochNode);
-            testnetSeed.addPeerFindingNode(epochNode);
-
-            // Save TESTNET seed
-            java.io.File seedsDir = new java.io.File(server.cxRoot, "seeds");
-            java.io.File testnetSeedFile = new java.io.File(seedsDir, "testnet_" + testnetSeed.seedID + ".cxn");
-            testnetSeed.save(testnetSeedFile);
-
-            log.info("  ✓ TESTNET seed created: testnet_" + testnetSeed.seedID + ".cxn");
-        } else {
-            log.info("  ✓ TESTNET already loaded in memory");
         }
 
         // Initialize P2P mesh (for direct CX protocol connections)
@@ -309,11 +264,10 @@ public class BootstrapServerTest {
         // Register event handler for testing
         registerTestEventHandler(server);
 
-        // Create test events for blockchain sync testing on both networks
+        // Create test events for blockchain sync testing
         if (messages) {
             log.info("\nCreating test blockchain events for sync testing...");
             createTestBlockchainEvents(server, cxnet);
-            createTestBlockchainEvents(server, testnet);
         } else {
             log.info("Skipping messages/blockchain test, this reduces network noise during initialization test");
         }

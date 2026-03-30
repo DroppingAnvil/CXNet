@@ -1405,8 +1405,8 @@ public class NodeMesh {
                                     for (int i = 0; i < Math.min(16, epochSeedBlob.length); i++) hex.append(String.format("%02X ", epochSeedBlob[i]));
                                     log.debug("[SEED] epochSeedBlob first bytes: {}", hex.toString().trim());
                                 }
-                                log.info("[SEED] Responding to {}: dynamic={} peers, epochBlob={}, authoritative={}",
-                                    nc.iD.substring(0, 8), dynamicSeed.hvPeers.size(),
+                                log.info("[SEED] Responding to {}: dynamic={} peer blobs, epochBlob={}, authoritative={}",
+                                    nc.iD.substring(0, 8), dynamicSeed.hvPeerBlobs.size(),
                                     epochSeedBlob != null ? epochSeedBlob.length + " bytes" : "none",
                                     isAuthoritative);
 
@@ -2398,21 +2398,42 @@ public class NodeMesh {
     private void applySeedConsensus(ConnectX connectX, Seed seed,
                                           boolean isEpochSeed, String consensusReason, String targetNetwork) {
         try {
-            log.info("[SEED CONSENSUS] Applying seed: {} | reason: {} | networks={} peers={} certs={}",
-                seed.seedID, consensusReason, seed.networks.size(), seed.hvPeers.size(), seed.certificates.size());
+            log.info("[SEED CONSENSUS] Applying seed: {} | reason: {} | networks={} blobs={} certs={}",
+                seed.seedID, consensusReason, seed.networks.size(), seed.hvPeerBlobs.size(), seed.certificates.size());
 
-            // Add peers to directory (skip self by cxID or public key)
+            // Ingest hv peers: verify each signed blob against the node's own key before adding
             int peersAdded = 0;
-            for (Node peer : seed.hvPeers) {
-                if (connectX.isSelfNode(peer)) {
-                    log.info("[SEED CONSENSUS] Skipped self in hvPeers: " + peer.cxID);
-                    continue;
-                }
+            for (byte[] blob : seed.hvPeerBlobs) {
+                if (blob == null) continue;
                 try {
-                    peerDirectory.addNode(peer);
+                    java.io.ByteArrayInputStream bais = new java.io.ByteArrayInputStream(blob);
+                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                    connectX.encryptionProvider.stripSignature(bais, baos);
+                    bais.close();
+                    String nodeJson = baos.toString(java.nio.charset.StandardCharsets.UTF_8);
+                    baos.close();
+
+                    Node peer = (Node) ConnectX.deserialize("cxJSON1", nodeJson, Node.class);
+                    if (peer == null || peer.cxID == null || peer.publicKey == null) continue;
+                    if (connectX.isSelfNode(peer)) {
+                        log.debug("[SEED CONSENSUS] Skipped self blob");
+                        continue;
+                    }
+
+                    us.anvildevelopment.cxnet.crypt.pgpainless.PainlessCryptProvider pcp =
+                        (us.anvildevelopment.cxnet.crypt.pgpainless.PainlessCryptProvider) connectX.encryptionProvider;
+                    if (!pcp.cacheKeyFromString(peer.cxID, peer.publicKey)) continue;
+
+                    java.io.ByteArrayInputStream verifyIn = new java.io.ByteArrayInputStream(blob);
+                    java.io.ByteArrayOutputStream verifyOut = new java.io.ByteArrayOutputStream();
+                    connectX.encryptionProvider.verifyAndStrip(verifyIn, verifyOut, peer.cxID);
+                    verifyIn.close();
+                    verifyOut.close();
+
+                    peerDirectory.addNode(peer, blob, connectX.cxRoot);
                     peersAdded++;
                 } catch (Exception e) {
-                    // Ignore duplicate peer errors
+                    log.warn("[SEED CONSENSUS] Rejected peer blob -- verification failed: {}", e.getMessage());
                 }
             }
             log.info("[SEED CONSENSUS] ✓ Added " + peersAdded + " peers to directory");

@@ -3,8 +3,6 @@
  * All Rights Reserved
  */
 
-package us.anvildevelopment.cxnet.test;
-
 import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.network.events.EventType;
 import us.anvildevelopment.cxnet.network.events.NodeModeration;

@@ -60,13 +60,15 @@ peer.buildEvent(EventType.MESSAGE, "Hello peer1!".getBytes()).toPeer("00000000-0
 
 ```java
 peer.addPlugin(new CXMessagePlugin() {
-    public void onMessage(String from, String message) {
-        System.out.println(from + ": " + message);
+    public void onMessage(String senderID, CXMessage message) {
+        System.out.println(senderID + ": " + message.text);
     }
 });
 ```
 
 The constructor handles key generation, filesystem setup, HTTP bridge registration, and network connection automatically. The `buildEvent` fluent API covers signing, routing, and queuing in a single chain.
+
+**Note:** MESSAGE payloads must be serialized as `CXMessage` and the event data must be signed or encrypted -- use `.signData()` for signed broadcast or `.encrypt(recipientID)` for E2E delivery. Raw byte payloads are rejected by NodeMesh signature verification.
 
 ---
 
@@ -277,6 +279,42 @@ peer.updateHTTPBridgePort(8081);                  // HTTP bridge on 8081
 ## Protocol Documentation
 
 See [`CX-PROTOCOL.md`](CX-PROTOCOL.md) for the full protocol specification covering encryption layers, blockchain structure, event types, permission system, Zero Trust mode, and consensus mechanism.
+
+---
+
+## Recent Changes
+
+### Security hardening -- seed and peer ingestion
+
+**Seed peer blobs** (`Seed.hvPeers`/`peerFindingNodes` as raw `Node` objects) replaced entirely with signed blobs (`hvPeerBlobs`/`peerFindingNodeBlobs` as `List<byte[]>`). Each blob is a node signed by its own key -- the same format used in CXHELLO. Seeds built via `signAndPublishNetworkSeed` and `initEpochBootstrap` now call `signSelfNode()` to produce the blob. `Seed.fromCurrentPeers` pulls from `PeerDirectory.signedNodeCache` so only nodes with verified signed entries are relayed.
+
+On ingestion (`applySeed`, `applySeedConsensus`) each blob is verified: strip signature, deserialize node, cache key via `cacheKeyFromString` (never replaces existing), verify signature, then `addNode(node, blob, cxRoot)`. Blobs that fail verification are dropped.
+
+**`cacheKeyFromString`** added to `PainlessCryptProvider` -- parses a base64 PGP key and caches it with `putIfAbsent`. `cacheEpochKeyFromFile` also fixed to use `putIfAbsent` (was `put`, could silently overwrite a trusted key).
+
+**`NetworkDictionary.dynamicSeed`** flag added. `false` (default) -- seed must be NMI/backendSet signed. `true` -- any known peer can sign and distribute the seed. The flag is embedded in the signed seed so relayers cannot forge it.
+
+### Plugin system -- sender identity at all data levels
+
+`CXPlugin` now has `handleEvent(Object data, String senderCxID)` alongside the existing `handleEvent(Object data)`. The default implementation delegates to the single-arg overload so existing plugins are unaffected. `sendPluginEvent` resolves the origin sender from `ne.p.oCXID` (survives relay) with fallback to `nc.iD`, and calls the sender-aware overload at all three data levels (`NETWORK_EVENT`, `INPUT_BUNDLE`, `OBJECT`).
+
+### `CXMessagePlugin` and `CXMessage`
+
+`CXMessage` is the new typed payload for `MESSAGE` events (`text` + `timestamp`, serialized as cxJSON1). `CXMessagePlugin` switched from `DataLevel.NETWORK_EVENT` to `DataLevel.OBJECT` with `type = CXMessage.class`. The `onMessage(String senderID, CXMessage message)` callback now receives both the typed object and the verified origin sender cxID.
+
+This also fixes a silent delivery failure: NodeMesh always calls `verifyAndStrip(ne.d)` -- events sent without `.signData()` or `.encrypt()` were being rejected before reaching any plugin. The `CXMessage` + `.signData()` path goes through proper signature verification and sets `verifiedObjectBytes` for `readyObject()`.
+
+### Network join API
+
+`ConnectX.joinNetworkFromPeers(String networkID)` -- sends `SEED_REQUEST` to EPOCH first (authoritative), then to all other HV peers. Used for joining non-CXNET networks without NMI-level bootstrap.
+
+`Seed.fetchOfficial(ConnectX)` -- tries `joinNetworkFromPeers("CXNET")` first, falls back to `https://anvildevelopment.us/downloads/cxnet-bootstrap.cxn` via OkHttp.
+
+### Bootstrap stability
+
+`AtomicBoolean bootstrapStarted` guards `attemptCXNETBootstrap` -- prevents concurrent duplicate bootstrap calls that previously caused BouncyCastle `LongDigest` (SHA-512) thread-safety crashes. Reset on failure so retries work.
+
+`PeerDirectory.addNode` changed from throwing `IllegalStateException` on invalid nodes to logging a warning and returning -- prevents bootstrap failures from propagating as uncaught exceptions.
 
 ---
 

@@ -30,9 +30,9 @@ public class Node implements Serializable {
     public String pr;
 
     public static boolean validate(Node node) {
-        assert node.cxID != null;
+        if (node.cxID == null) return false;
         if (node.cxID.length() > 36) return false;
-        assert node.publicKey != null;
+        if (node.publicKey == null) return false;
         return true;
     }
 }

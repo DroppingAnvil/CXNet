@@ -1,7 +1,7 @@
 # ConnectX
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=DroppingAnvil_CXNet&metric=alert_status)](https://sonarcloud.io/project/overview?id=DroppingAnvil_CXNet)
-[![Maven](https://img.shields.io/badge/maven-0.3-blue)](https://repo.anvildevelopment.us/repository/maven-releases/)
+[![Maven](https://img.shields.io/badge/maven-0.4-blue)](https://repo.anvildevelopment.us/repository/maven-releases/)
 
 > **Early Development - Work in Progress**
 > The core networking, encryption, and event API are functional and tested. Many subsystems (blockchain sync, Zero Trust activation, LAN discovery, resource management, login, remote directory) are partially or not yet implemented.
@@ -26,7 +26,7 @@ Add the Anvil Development repository and dependency to your `pom.xml`:
   <dependency>
     <groupId>us.anvildevelopment</groupId>
     <artifactId>ConnectX</artifactId>
-    <version>0.3</version>
+    <version>0.4</version>
   </dependency>
 </dependencies>
 ```
@@ -39,7 +39,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'us.anvildevelopment:ConnectX:0.3'
+    implementation 'us.anvildevelopment:ConnectX:0.4'
 }
 ```
 

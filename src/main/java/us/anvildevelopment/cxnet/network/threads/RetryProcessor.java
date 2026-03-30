@@ -63,9 +63,7 @@ public class RetryProcessor implements Runnable {
                     }
 
                     // Requeue bundles not ready for retry
-                    for (RetryBundle b : toRequeue) {
-                        outController.connectXAPI.retryQueue.add(b);
-                    }
+                outController.connectXAPI.retryQueue.addAll(toRequeue);
 
                     // Log retry queue status periodically
                     if (NodeConfig.DEBUG && queueSize > 0) {
@@ -95,7 +93,7 @@ public class RetryProcessor implements Runnable {
                                 outController.connectXAPI.nodeMesh.peerDirectory.lookup(targetPeerID, true, true);
                             } catch (Exception lookupEx) {
                                 log.error("[CXS->CXN-LOOKUP] Could not resolve peer {}: {}",
-                                    (targetPeerID != null && targetPeerID.length() >= 8 ? targetPeerID.substring(0, 8) : "UNKNOWN"),
+                                        (targetPeerID != null && targetPeerID.length() >= 8 ? targetPeerID.substring(0, 8) : "UNKNOWN"),
                                     lookupEx.getMessage());
                                 // Continue anyway - cert may already be cached or lookup partial
                             }

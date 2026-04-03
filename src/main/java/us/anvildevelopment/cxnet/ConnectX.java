@@ -1869,13 +1869,9 @@ public class ConnectX {
                                     CXHello helloPayload = new CXHello(getOwnID(), listeningPort, signedNodeBlob,
                                         getSelf() != null ? getSelf().addr : null);
                                     String payloadJson = ConnectX.serialize("cxJSON1", helloPayload);
-                                    java.io.ByteArrayOutputStream signedOut = new java.io.ByteArrayOutputStream();
-                                    encryptionProvider.sign(new java.io.ByteArrayInputStream(
-                                        payloadJson.getBytes(StandardCharsets.UTF_8)), signedOut);
-                                    byte[] signedPayload = signedOut.toByteArray();
-                                    signedOut.close();
-                                    buildEvent(EventType.CXHELLO, signedPayload)
+                                    buildEvent(EventType.CXHELLO, payloadJson.getBytes(StandardCharsets.UTF_8))
                                         .lowLevel(s)
+                                        .signData()
                                         .queue();
                                     log.info("[ConnectX] Queued CXHELLO to {}", s);
                                 } catch (Exception e) {

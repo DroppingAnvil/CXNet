@@ -1,8 +1,48 @@
 # ConnectX (CX) Protocol Documentation
 
-**Version:** 3.4
-**Last Updated:** 2026-03-24 (Event Delivery Lifecycle, TTL and CXS-to-CXN fallback)
+**Version:** 3.5
+**Last Updated:** 2026-04-03 (Seed security, CXMessage, plugin sender identity, lowLevel() address dispatch)
 **Status:** Early Development. Core networking and event API are functional; many subsystems are incomplete or in progress.
+
+---
+
+## Recent Updates (v3.5)
+
+### Seed Peer Ingestion Security
+
+`Seed.hvPeers` and `peerFindingNodes` (raw `Node` objects) replaced entirely with `hvPeerBlobs` and `peerFindingNodeBlobs` (`List<byte[]>`). Each blob is a node signed by its own key -- the same format as the `signedNode` field in `CXHello`. Seeds built via `signAndPublishNetworkSeed` and `initEpochBootstrap` call `signSelfNode()` to produce the self-signed blob. `Seed.fromCurrentPeers` pulls only from `PeerDirectory.signedNodeCache` so only verified, previously-ingested nodes are relayed.
+
+On ingestion (`applySeed`, `applySeedConsensus`) each blob goes through: strip signature, deserialize `Node`, cache key via `cacheKeyFromString` (immutable -- `putIfAbsent`), verify signature, then `addNode(node, blob, cxRoot)`. Blobs failing verification are dropped with a log warning.
+
+`Seed.fetchOfficial(ConnectX)` tries `joinNetworkFromPeers("CXNET")` first, falling back to `https://anvildevelopment.us/downloads/cxnet-bootstrap.cxn` via OkHttp.
+
+### Key Cache Immutability
+
+`PainlessCryptProvider.cacheKeyFromString` added -- parses a base64 PGP key and inserts with `putIfAbsent`. `cacheEpochKeyFromFile` fixed from `put` to `putIfAbsent`. Key and cert cache entries are immutable once established: the first observed key for a given cxID is the only key that will ever be trusted for that ID.
+
+### PeerDirectory Node Replacement Policy
+
+`PeerDirectory.addNode` allows replacing an existing entry when the incoming node's public key matches the stored key. A node re-announcing itself with an updated address or port produces a valid signed blob from the same identity -- that update is accepted. Replacing with a different public key is rejected with `SecurityException` ("UUID spoofing"). Key/cert cache entries are immutable via `putIfAbsent`; node entries in `PeerDirectory` are mutable only by their own signer.
+
+### Plugin Sender Identity at All Data Levels
+
+`CXPlugin` gains `handleEvent(Object data, String senderCxID)`. The default implementation delegates to the single-arg overload so all existing plugins are unaffected. `sendPluginEvent` resolves the origin sender from `ne.p.oCXID` (survives relay) with fallback to `nc.iD`, then calls the sender-aware overload at all three data levels (`NETWORK_EVENT`, `INPUT_BUNDLE`, `OBJECT`).
+
+### CXMessage Typed Payload
+
+`CXMessage` (`text`, `timestamp`) is the typed payload for `MESSAGE` events, serialized as cxJSON1. `CXMessagePlugin` switched from `DataLevel.NETWORK_EVENT` to `DataLevel.OBJECT` with `type = CXMessage.class`. `onMessage(String senderID, CXMessage message)` receives the verified typed object and the origin sender cxID.
+
+This also closed a silent delivery failure: NodeMesh always calls `verifyAndStrip(ne.d)` -- events sent without `.signData()` or `.encrypt()` were silently rejected before reaching any plugin. `CXMessage` + `.signData()` goes through proper verification and populates `verifiedObjectBytes` for `readyObject()`.
+
+### lowLevel() -- Only Supported Address-Only Dispatch Path
+
+`buildEvent().lowLevel(address)` is the only supported way to send an event to a known address without a peer ID (scope `CXS`, routes directly to `out.n.addr`). `.signData()` is required on all events including CXHELLO -- NodeMesh uses `stripSignature` (no verification) on the CXHELLO payload since the sender is unknown at receive time, but the signing is still required for protocol consistency. Manual `OutputBundle` construction for originating events is eliminated. `.encrypt(recipientID)` is also supported alongside `.signData()` for E2E delivery.
+
+Manual `OutputBundle` construction is now internal protocol mechanics only: relay uses it to preserve the original `signedEventBytes` without re-signing. Application code and persistence threads must use `buildEvent()`.
+
+### Bootstrap Stability
+
+`AtomicBoolean bootstrapStarted` guards `attemptCXNETBootstrap` -- prevents concurrent duplicate bootstrap calls that caused BouncyCastle `LongDigest` (SHA-512) thread-safety crashes. Reset on failure so retries work. `PeerDirectory.addNode` changed from throwing `IllegalStateException` on invalid nodes to logging a warning and returning.
 
 ---
 
@@ -1449,10 +1489,11 @@ connectX.buildEvent(EventType.CHAIN_STATUS_REQUEST, data)
 
 **USE MANUAL CONSTRUCTION ONLY FOR:**
 1. **Bootstrap events (NEWNODE)** - Introducing to unknown peer (EPOCH) before network membership
-2. **LAN discovery (CXHELLO)** - Discovering peers without knowing their peer ID
-3. **Direct transmission fallback** - When you have address but NO peer ID
+2. **Relay** - Internal protocol mechanics preserving original `signedEventBytes` (NodeMesh only, never application code)
 
 **⚠️ Manual construction bypasses CX protocol safeguards. Use with extreme caution.**
+
+**LAN discovery (CXHELLO) and all other address-only originating events use `buildEvent().lowLevel(address)` -- NOT manual `OutputBundle` construction.** The persistence thread CXHELLO loop was updated to this pattern. `lowLevel()` sets scope `CXS` and routes directly to `out.n.addr` without requiring a peer ID in the routing table.
 
 ### Manual Construction Pattern (NEWNODE Example)
 
@@ -1503,59 +1544,35 @@ queueEvent(newNodeBundle);
 - We manually set CXPath with bridge info
 - OutConnectionController uses CXS routing (lines 76-251)
 
-### Manual Construction Pattern (CXHELLO Example)
+### Address-Only Dispatch Pattern (CXHELLO / lowLevel Example)
 
-**Used in:** LAN Discovery (LANScanner.java:204-240)
+**Used in:** LAN Discovery, Persistence thread CXHELLO loop
+
+`buildEvent().lowLevel(address)` is the only supported path for sending to a known address without a peer ID. It sets scope `CXS` and routes directly to `out.n.addr` without a routing table lookup.
 
 ```java
-// Step 1: Sign our Node object for .cxi persistence on receiver
-String nodeJson = ConnectX.serialize("cxJSON1", connectX.getSelf());
-ByteArrayOutputStream signedNodeOutput = new ByteArrayOutputStream();
-connectX.encryptionProvider.sign(new ByteArrayInputStream(nodeJson.getBytes("UTF-8")), signedNodeOutput);
-byte[] signedNodeBlob = signedNodeOutput.toByteArray();
-
-// Step 2: Build CXHello payload object
+// Step 1: Build CXHello payload (signedNode blob is signed by own key inside the payload)
+byte[] signedNodeBlob = connectX.signSelfNode();
 CXHello helloPayload = new CXHello(
     connectX.getOwnID(),
     primaryPort,
     signedNodeBlob,
-    connectX.getSelf().addr  // preferred reachable address (null = derive from socket)
+    connectX.getSelf() != null ? connectX.getSelf().addr : null
 );
 String payloadJson = ConnectX.serialize("cxJSON1", helloPayload);
 
-// Step 3: PGP-sign the entire CXHello payload
-ByteArrayOutputStream signedPayloadOutput = new ByteArrayOutputStream();
-connectX.encryptionProvider.sign(new ByteArrayInputStream(payloadJson.getBytes("UTF-8")), signedPayloadOutput);
-byte[] signedPayload = signedPayloadOutput.toByteArray();
-
-// Step 4: Manually create NetworkEvent (signed bytes as payload)
-NetworkEvent helloEvent = new NetworkEvent(EventType.CXHELLO, signedPayload);
-helloEvent.eT = EventType.CXHELLO.name();
-helloEvent.iD = UUID.randomUUID().toString();
-// DON'T set event.p - leave null for direct transmission fallback
-
-// Step 5: Create target node with address only (NO peer ID)
-Node targetNode = new Node();
-targetNode.addr = targetIP + ":" + targetPort;  // e.g., "192.168.1.100:49152"
-// targetNode.cxID = null (unknown - that's the point of discovery!)
-
-// Step 6: Manually create NetworkContainer
-NetworkContainer nc = new NetworkContainer();
-nc.se = "cxJSON1";
-nc.s = false;   // Not E2E encrypted (no shared key yet)
-nc.iD = connectX.getSelf().cxID;  // Sender ID (like NewNode pattern)
-
-// Step 7: Create OutputBundle and queue
-OutputBundle bundle = new OutputBundle(helloEvent, targetNode, null, null, nc);
-connectX.queueEvent(bundle);
+// Step 2: Dispatch via lowLevel + signData
+connectX.buildEvent(EventType.CXHELLO, payloadJson.getBytes(StandardCharsets.UTF_8))
+    .lowLevel("192.168.1.100:49152")
+    .signData()
+    .queue();
 ```
 
-**Why This Works for CXHELLO:**
-- We DON'T know the peer's ID (discovering them!). `event.p` is null.
-- We DO know their address (from LAN scan). Set on `targetNode.addr`.
-- The null `event.p` triggers the direct transmission fallback in `OutConnectionController`
-- The payload is PGP-signed so the receiver can verify sender identity before key import
-- The embedded `signedNode` lets the receiver persist our identity without a prior key exchange
+**Why lowLevel() + signData() replaces manual construction here:**
+- We don't know the peer's ID -- `lowLevel(address)` handles address-only routing internally
+- `.signData()` is required; NodeMesh uses `stripSignature` (not `verifyAndStrip`) on the CXHELLO payload since the sender is unknown at receive time -- the signing is still required for protocol consistency and the key is verified later via the embedded `signedNode` blob
+- `buildEvent` correctly sets up the event ID, protocol fields, and output pipeline
+- Manual `OutputBundle` construction for originating events is no longer supported; it bypassed protocol setup and is now reserved for relay mechanics only (preserving `signedEventBytes`)
 
 ### Routing Logic in OutConnectionController
 
@@ -3750,36 +3767,52 @@ Service names matching reserved types (`SYSTEM`, `CX`, `cxJSON1`, `CXNET`) are r
 
 ### DataLevel
 
-The `DataLevel` field on `CXPlugin` controls what data is passed to `handleEvent(Object)`:
+The `DataLevel` field on `CXPlugin` controls what data is passed to `handleEvent`:
 
-| Level           | `handleEvent` receives                                     |
-|-----------------|------------------------------------------------------------|
-| `NETWORK_EVENT` | `NetworkEvent` - raw event with type, sender ID, payload   |
-| `INPUT_BUNDLE`  | `InputBundle` - signed bytes, verified bytes, container    |
-| `OBJECT`        | Deserialized object of `plugin.type` via `nc.se` provider  |
+| Level           | `handleEvent` receives                                     | Requires        |
+|-----------------|------------------------------------------------------------|-----------------|
+| `NETWORK_EVENT` | `NetworkEvent` - raw event with type, sender ID, payload   | --              |
+| `INPUT_BUNDLE`  | `InputBundle` - signed bytes, verified bytes, container    | --              |
+| `OBJECT`        | Deserialized object of `plugin.type` via `nc.se` provider  | `.signData()` or `.encrypt()` on the event |
 
-Default (null) falls back to `NETWORK_EVENT`.
+Default (null) falls back to `NETWORK_EVENT`. `OBJECT` requires `verifiedObjectBytes` to be populated, which only happens when the event data layer was signed or encrypted -- events sent without `.signData()` or `.encrypt()` are rejected at NodeMesh verification before reaching any plugin.
+
+The sender cxID is available at all three levels via `handleEvent(Object data, String senderCxID)`. The origin sender is resolved from `ne.p.oCXID` (survives relay) with fallback to `nc.iD` (transmitter). Override the two-arg form in your plugin; the default delegates to the single-arg overload for backwards compatibility.
 
 ### CXMessagePlugin
 
-A prebuilt abstract base for `MESSAGE` events. Override `onMessage(String senderID, String message)`:
+A prebuilt abstract base for `MESSAGE` events using `DataLevel.OBJECT` with `type = CXMessage.class`. Override `onMessage(String senderID, CXMessage message)`:
 
 ```java
 peer.addPlugin(new CXMessagePlugin() {
-    public void onMessage(String from, String message) {
-        System.out.println(from + ": " + message);
+    public void onMessage(String senderID, CXMessage message) {
+        System.out.println(senderID + ": " + message.text);
     }
 });
 ```
+
+Sending a `MESSAGE` event:
+
+```java
+CXMessage msg = new CXMessage("Hello network");
+String json = ConnectX.serialize("cxJSON1", msg);
+peer.buildEvent(EventType.MESSAGE, json.getBytes())
+    .toNetwork("MYNET")
+    .signData()
+    .queue();
+```
+
+`.signData()` is required -- raw byte payloads are rejected by NodeMesh signature verification before reaching any plugin.
 
 ### Dispatch Flow
 
 ```
 NodeMesh receives event
   → connectX.sendPluginEvent(ib, eventType)
-      → if OBJECT: ib.readyObject(type, nc.se, connectX) then handleEvent(ib.object)
-      → if INPUT_BUNDLE: handleEvent(ib)
-      → if NETWORK_EVENT: handleEvent(ib.ne)
+      → resolve senderCxID from ne.p.oCXID (fallback: nc.iD)
+      → if OBJECT: ib.readyObject(type, nc.se, connectX) then handleEvent(ib.object, senderCxID)
+      → if INPUT_BUNDLE: handleEvent(ib, senderCxID)
+      → if NETWORK_EVENT: handleEvent(ib.ne, senderCxID)
   → if no plugin handled it, NodeMesh processes known EventTypes internally
 ```
 

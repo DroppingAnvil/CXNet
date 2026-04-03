@@ -292,6 +292,8 @@ On ingestion (`applySeed`, `applySeedConsensus`) each blob is verified: strip si
 
 **`cacheKeyFromString`** added to `PainlessCryptProvider` -- parses a base64 PGP key and caches it with `putIfAbsent`. `cacheEpochKeyFromFile` also fixed to use `putIfAbsent` (was `put`, could silently overwrite a trusted key).
 
+**PeerDirectory node replacement policy:** `PeerDirectory.addNode` allows replacing an existing entry when the incoming node's public key matches the stored key. This is intentional -- a node can re-announce itself with updated address or port data, and that update is valid because it is signed by the same identity. What is not allowed is replacing a node with a different public key (`SecurityException`). Key and cert cache entries in `CryptProvider` are always `putIfAbsent` -- immutable once established. Node entries in `PeerDirectory` are mutable by their own signer.
+
 **`NetworkDictionary.dynamicSeed`** flag added. `false` (default) -- seed must be NMI/backendSet signed. `true` -- any known peer can sign and distribute the seed. The flag is embedded in the signed seed so relayers cannot forge it.
 
 ### Plugin system -- sender identity at all data levels
@@ -343,17 +345,19 @@ Full coverage report: [`ConnectXBackend/optimizationCoverage/index.html`](Connec
 ## Project Structure
 
 ```
-ConnectXBackend/          Main framework (Maven)
-  src/main/java/dev/droppinganvil/v3/
-    ConnectX.java         Core API entry point
-    api/                  Plugin interfaces (CXPlugin, CXMessagePlugin, DataLevel)
-    network/              CXNetwork, InputBundle, event system
-    network/nodemesh/     NodeMesh, PeerDirectory, bridges
-    crypt/                CryptProvider abstraction + PGPainless implementation
-    edge/                 DataContainer, ConnectXClient
-    test/                 CXPeer1-3Test, HTTPBridgeTest, MultiPeerTest
-ConnectX-EPOCH/           EPOCH NMI node data (local, not committed)
-ConnectX-Peer{1-5}/       Test peer runtime directories
+src/main/java/us/anvildevelopment/cxnet/
+  ConnectX.java             Core API entry point
+  api/                      Plugin interfaces (CXPlugin, CXMessagePlugin, DataLevel)
+  network/                  CXNetwork, InputBundle, Seed, event system
+  network/nodemesh/         NodeMesh, PeerDirectory, bridges
+  network/events/           Typed event payloads (CXMessage, CXHello, PeerFinding, ...)
+  crypt/                    CryptProvider abstraction + PGPainless implementation
+  edge/                     DataContainer, ConnectXClient
+src/test/java/
+  MultiPeerTest.java        Full multi-peer integration test
+  BootstrapServerTest.java  EPOCH bootstrap + CXNET seed test
+ConnectX-EPOCH/             EPOCH NMI node data (local, not committed)
+ConnectX-Peer{1-5}/         Test peer runtime directories
 ```
 
 ---

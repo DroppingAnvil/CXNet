@@ -37,14 +37,13 @@ public class PeerDirectory implements Serializable {
     public File peers;
     @MemoryOnly
     public ConnectX connectX = null;
-
     public PeerDirectory(ConnectX cx) {
         if (connectX == null) {
             connectX = cx;
         }
     }
     //TODO
-    //Writing node lookup and create account implementation, next up create peer finding event
+    //Writing node lookup and create account implementation, next up create peer finding event, wow...
     public Node lookup(String cxID, boolean tryImport, boolean sync) throws UnsafeKeywordException {
         return lookup(cxID, tryImport, sync, connectX.cxRoot, connectX);
     }
@@ -132,7 +131,7 @@ public class PeerDirectory implements Serializable {
                     // Connection will be terminated by caller
                     throw new SecurityException("UUID spoofing: cxID " + n.cxID + " exists with different public key");
                 }
-                // Keys match - this is the same node, update the entry
+                // Keys match - same node re-announcing (e.g. updated address), allow replacement
             }
 
             // Add to high-value peer directory for routing

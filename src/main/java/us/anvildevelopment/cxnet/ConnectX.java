@@ -1856,59 +1856,32 @@ public class ConnectX {
                         if (cycleCount >= 1) {
                             cycleCount = 0;
 
-                            /// Send CXHELLO's to addresses waiting
+                            // Send CXHELLO to waiting addresses via lowLevel builder
                             log.info("[ConnectX] Sending CXHELLO to {} addresses", dataContainer.waitingAddresses.size());
-                        for (String s : dataContainer.waitingAddresses) {
-                            if (isValidPeerAddress(s) && !isSelfAddress(s)) {
-                                //TODO Store static self node blob locally, no need to generate it each time for ALL events
-                                String nodeJson = ConnectX.serialize("cxJSON1", getSelf());
-                                java.io.ByteArrayInputStream nodeInput = new java.io.ByteArrayInputStream(nodeJson.getBytes(StandardCharsets.UTF_8));
-                                java.io.ByteArrayOutputStream signedNodeOutput = new java.io.ByteArrayOutputStream();
-                                encryptionProvider.sign(nodeInput, signedNodeOutput);
-                                nodeInput.close();
-                                byte[] signedNodeBlob = signedNodeOutput.toByteArray();
-                                signedNodeOutput.close();
-
-                                // Create CXHELLO payload using CXHello data structure
-                                // Include peer's preferred address if available (for NAT/public IP scenarios)
-                                String peerAddress = (getSelf() != null) ? getSelf().addr : null;
-                                CXHello helloPayload =
-                                        new CXHello(getOwnID(), listeningPort, signedNodeBlob, peerAddress);
-
-                                String payloadJson = ConnectX.serialize("cxJSON1", helloPayload);
-
-                                // Sign the CXHELLO payload for consistency with CXHELLO_RESPONSE
-                                java.io.ByteArrayInputStream payloadInput = new java.io.ByteArrayInputStream(payloadJson.getBytes(StandardCharsets.UTF_8));
-                                java.io.ByteArrayOutputStream signedPayloadOutput = new java.io.ByteArrayOutputStream();
-                                encryptionProvider.sign(payloadInput, signedPayloadOutput);
-                                payloadInput.close();
-                                byte[] signedPayload = signedPayloadOutput.toByteArray();
-                                signedPayloadOutput.close();
-
-                                // Manually create NetworkEvent (like NEWNODE bootstrap pattern)
-                                NetworkEvent helloEvent = new NetworkEvent(EventType.CXHELLO, signedPayload);
-                                helloEvent.eT = EventType.CXHELLO.name();
-                                helloEvent.iD = java.util.UUID.randomUUID().toString();
-                                // DON'T set event.p (CXPath) - leave null for direct transmission fallback
-
-                                // Create target node with address only (no peer ID known yet)
-                                Node targetNode = new Node();
-                                targetNode.addr = s;
-
-                                // Manually create NetworkContainer
-                                NetworkContainer nc = new NetworkContainer();
-                                nc.se = "cxJSON1";
-                                nc.s = false;  // Not E2E encrypted
-                                nc.iD = getSelf().cxID;  // Set sender ID (like NewNode)
-
-                                // Create OutputBundle directly (bypassing buildEvent) - follows NEWNODE pattern
-                                OutputBundle bundle = new OutputBundle(helloEvent, targetNode, null, null, nc);
-                                queueEvent(bundle);
-                                log.info("[ConnectX] Queued CXHELLO to {}", s);
-                            } else {
-                                log.info("[ConnectX] Skipped CXHELLO target (self or invalid): {}", s);
+                            for (String s : dataContainer.waitingAddresses) {
+                                if (!isValidPeerAddress(s) || isSelfAddress(s)) {
+                                    log.info("[ConnectX] Skipped CXHELLO target (self or invalid): {}", s);
+                                    continue;
+                                }
+                                try {
+                                    byte[] signedNodeBlob = signSelfNode();
+                                    if (signedNodeBlob == null) continue;
+                                    CXHello helloPayload = new CXHello(getOwnID(), listeningPort, signedNodeBlob,
+                                        getSelf() != null ? getSelf().addr : null);
+                                    String payloadJson = ConnectX.serialize("cxJSON1", helloPayload);
+                                    java.io.ByteArrayOutputStream signedOut = new java.io.ByteArrayOutputStream();
+                                    encryptionProvider.sign(new java.io.ByteArrayInputStream(
+                                        payloadJson.getBytes(StandardCharsets.UTF_8)), signedOut);
+                                    byte[] signedPayload = signedOut.toByteArray();
+                                    signedOut.close();
+                                    buildEvent(EventType.CXHELLO, signedPayload)
+                                        .lowLevel(s)
+                                        .queue();
+                                    log.info("[ConnectX] Queued CXHELLO to {}", s);
+                                } catch (Exception e) {
+                                    log.warn("[ConnectX] Failed to queue CXHELLO to {}: {}", s, e.getMessage());
+                                }
                             }
-                        }
                         //Clear after
                             //TODO evaluate thread safety
                             dataContainer.waitingAddresses.clear();

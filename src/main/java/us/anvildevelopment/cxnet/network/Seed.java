@@ -6,7 +6,6 @@
 package us.anvildevelopment.cxnet.network;
 
 import us.anvildevelopment.cxnet.ConnectX;
-import us.anvildevelopment.cxnet.network.nodemesh.Node;
 import us.anvildevelopment.cxnet.network.nodemesh.PeerDirectory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,17 +23,19 @@ import java.util.Map;
  * - High-value (hv) peers for initial connections (LAN peers are NEVER shared)
  * - Network configurations to import
  * - Public key certificates for peer verification
- * - Ability to fetch official seeds from CXNET
  *
- * Seeds are versioned and stored both locally (seeds/ directory) and on-chain (c2 Resources chain)
+ * Seeds are versioned and stored both locally (seeds/ directory) and on-chain (c2 Resources chain).
+ *
+ * Peers are stored ONLY as signed blobs (same format as CXHELLO signedNode).
+ * Each blob is signed by the peer's own key and verified before ingestion.
  */
 public class Seed {
     private static final Logger log = LoggerFactory.getLogger(Seed.class);
 
+    private static final String OFFICIAL_SEED_URL = "https://anvildevelopment.us/downloads/cxnet-bootstrap.cxn";
+
     /**
      * Unique identifier for this seed version
-     * Used for tracking, versioning, and on-chain storage
-     * Format: UUID
      */
     public String seedID;
 
@@ -49,71 +50,58 @@ public class Seed {
     public String networkID;
 
     /**
-     * High-value peers for initial connection
-     * Contains Node objects with cxID, addr, and publicKey
-     * NOTE: LAN peers are NEVER included in seeds for privacy/security
+     * High-value peer blobs for initial connection.
+     * Each entry is a signed Node blob -- the node signed its own entry (same as CXHELLO signedNode).
+     * Verified against the node's own embedded public key before ingestion.
+     * LAN peers are NEVER included.
      */
-    public List<Node> hvPeers;
+    public List<byte[]> hvPeerBlobs;
 
     /**
-     * Additional peers for peer finding requests
-     * Subset of hvPeers that are good for discovering more peers
+     * Peer-finding node blobs -- subset of hvPeerBlobs that are good for peer discovery.
      */
-    public List<Node> peerFindingNodes;
+    public List<byte[]> peerFindingNodeBlobs;
 
     /**
      * List of network configurations to import
-     * Contains CXNetwork objects with full network state
      */
     public List<CXNetwork> networks;
 
     /**
-     * Map of cxID -> PGP public key certificate
-     * Used for verifying peer identities before first contact
+     * Map of cxID -> PGP public key certificate for non-node keys (e.g., NMI keys)
      */
     public Map<String, String> certificates;
 
-    /**
-     * Create a new empty Seed
-     */
     public Seed() {
-        this.hvPeers = new ArrayList<>();
-        this.peerFindingNodes = new ArrayList<>();
+        this.hvPeerBlobs = new ArrayList<>();
+        this.peerFindingNodeBlobs = new ArrayList<>();
         this.networks = new ArrayList<>();
         this.certificates = new HashMap<>();
     }
 
     /**
-     * Add a high-value peer to the seed
-     * @param node Node to add (must not be a LAN peer)
+     * Add a high-value peer signed blob to the seed.
+     * @param signedBlob Node blob signed by the peer's own key (must not be LAN peer)
      */
-    public void addHvPeer(Node node) {
-        if (node != null && node.cxID != null) {
-            hvPeers.add(node);
-            // Also add certificate if available
-            if (node.publicKey != null) {
-                certificates.put(node.cxID, node.publicKey);
-            }
+    public void addHvPeer(byte[] signedBlob) {
+        if (signedBlob != null) {
+            hvPeerBlobs.add(signedBlob);
         }
     }
 
     /**
-     * Add a peer finding node to the seed
-     * @param node Node good for peer discovery
+     * Add a peer-finding node blob (also adds to hvPeerBlobs).
+     * @param signedBlob Node blob signed by the peer's own key
      */
-    public void addPeerFindingNode(Node node) {
-        if (node != null && node.cxID != null) {
-            peerFindingNodes.add(node);
-            // Also ensure it's in hvPeers
-            if (!hvPeers.contains(node)) {
-                addHvPeer(node);
-            }
+    public void addPeerFindingNode(byte[] signedBlob) {
+        if (signedBlob != null) {
+            peerFindingNodeBlobs.add(signedBlob);
+            hvPeerBlobs.add(signedBlob);
         }
     }
 
     /**
-     * Add a network to the seed
-     * @param network CXNetwork to add
+     * Add a network to the seed.
      */
     public void addNetwork(CXNetwork network) {
         if (network != null) {
@@ -122,9 +110,7 @@ public class Seed {
     }
 
     /**
-     * Add a certificate to the seed
-     * @param cxID Node identifier
-     * @param publicKey PGP public key
+     * Add a certificate to the seed (for non-node NMI keys).
      */
     public void addCertificate(String cxID, String publicKey) {
         if (cxID != null && publicKey != null) {
@@ -133,17 +119,20 @@ public class Seed {
     }
 
     /**
-     * Create a seed from current PeerDirectory high-value peers
-     * NOTE: LAN peers are automatically excluded
-     * @param peerDirectory PeerDirectory instance to get peers from
-     * @return Seed containing current hv peers
+     * Create a seed from current PeerDirectory high-value peers.
+     * Pulls signed blobs from signedNodeCache -- only peers with signed blobs are included.
+     * LAN peers are automatically excluded.
      */
     public static Seed fromCurrentPeers(PeerDirectory peerDirectory) {
         Seed seed = new Seed();
-        // Only include hv peers, NEVER LAN peers
         if (peerDirectory != null && peerDirectory.hv != null) {
-            for (Node node : peerDirectory.hv.values()) {
-                seed.addHvPeer(node);
+            for (String cxID : peerDirectory.hv.keySet()) {
+                byte[] signedBlob = peerDirectory.getSignedNode(cxID);
+                if (signedBlob != null) {
+                    seed.addHvPeer(signedBlob);
+                } else {
+                    log.debug("[Seed] Skipping peer {} -- no signed blob available", cxID.substring(0, 8));
+                }
             }
         }
         return seed;
@@ -151,8 +140,6 @@ public class Seed {
 
     /**
      * Save this Seed to a file using ConnectX serialization
-     * @param file File to save to
-     * @throws Exception if save fails
      */
     public void save(File file) throws Exception {
         String json = ConnectX.serialize("cxJSON1", this);
@@ -163,9 +150,6 @@ public class Seed {
 
     /**
      * Load a Seed from a file using ConnectX deserialization
-     * @param file File to load from
-     * @return Loaded Seed
-     * @throws Exception if load fails
      */
     public static Seed load(File file) throws Exception {
         StringBuilder json = new StringBuilder();
@@ -179,39 +163,61 @@ public class Seed {
     }
 
     /**
-     * Fetch the official seed from CXNET
-     * This queries the CXNET backend nodes for the current official seed
-     * @param connectX ConnectX instance to use for fetching
+     * Fetch the official CXNET seed.
+     * Tries EPOCH first via ConnectX (if provided), then falls back to
+     * the official download at {@value #OFFICIAL_SEED_URL}.
+     *
+     * @param connectX ConnectX instance for EPOCH request (may be null to use HTTP fallback only)
      * @return Official CXNET seed
-     * @throws Exception if fetch fails
+     * @throws Exception if all fetch attempts fail
      */
     public static Seed fetchOfficial(ConnectX connectX) throws Exception {
-        // TODO: Implement fetching official seed from CXNET
-        // This would:
-        // 1. Send a request to CXNET backendSet nodes
-        // 2. Receive the official seed response
-        // 3. Verify it's signed by CXNET NMI
-        // 4. Return the seed
-        throw new UnsupportedOperationException("Official seed fetching not yet implemented");
+        // Try EPOCH first when a connected instance is available
+        if (connectX != null) {
+            try {
+                log.info("[Seed] Requesting official seed from EPOCH");
+                connectX.joinNetworkFromPeers("CXNET");
+                // joinNetworkFromPeers is async; caller is expected to wait on networkMap
+                // Return null here -- the seed will be applied asynchronously
+                return null;
+            } catch (Exception e) {
+                log.warn("[Seed] EPOCH seed request failed, falling back to HTTP: {}", e.getMessage());
+            }
+        }
+
+        // Fall back to official HTTP download
+        log.info("[Seed] Fetching official seed from {}", OFFICIAL_SEED_URL);
+        okhttp3.OkHttpClient client = new okhttp3.OkHttpClient.Builder()
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .build();
+
+        okhttp3.Request request = new okhttp3.Request.Builder()
+            .url(OFFICIAL_SEED_URL)
+            .build();
+
+        try (okhttp3.Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                throw new IOException("HTTP " + response.code() + " fetching official seed");
+            }
+            byte[] body = response.body().bytes();
+            String json = new String(body, java.nio.charset.StandardCharsets.UTF_8);
+            Seed seed = (Seed) ConnectX.deserialize("cxJSON1", json, Seed.class);
+            log.info("[Seed] Fetched official seed: {} ({} blobs, {} networks)",
+                seed.seedID, seed.hvPeerBlobs.size(), seed.networks.size());
+            return seed;
+        }
     }
 
     /**
      * Apply this seed to a ConnectX instance
-     * This will:
-     * - Cache all certificates
-     * - Add all hv peers to PeerDirectory (LAN peers never included)
-     * - Import all networks
-     *
-     * @param connectX ConnectX instance to apply to
-     * @throws Exception if application fails
      */
     public void apply(ConnectX connectX) throws Exception {
         log.info("[Seed] Applying seed {}", seedID);
         log.info("[Seed]   Networks: {}", networks.size());
-        log.info("[Seed]   HV Peers: {}", hvPeers.size());
+        log.info("[Seed]   HV Peer Blobs: {}", hvPeerBlobs.size());
         log.info("[Seed]   Certificates: {}", certificates.size());
 
-        // Use reflection to call private applySeed method in ConnectX
         java.lang.reflect.Method applySeedMethod = ConnectX.class.getDeclaredMethod("applySeed", Seed.class);
         applySeedMethod.setAccessible(true);
         applySeedMethod.invoke(connectX, this);

@@ -142,7 +142,8 @@ public class PeerDirectory implements Serializable {
             // Also track in seen for last-seen timestamp tracking
             seen.put(n.cxID, n);
         } else {
-            throw new IllegalStateException();
+            log.warn("[PeerDirectory] Rejected invalid node (cxID={}, publicKey={})",
+                n.cxID, n.publicKey != null ? n.publicKey.substring(0, Math.min(16, n.publicKey.length())) : "null");
         }
     }
 
@@ -204,7 +205,8 @@ public class PeerDirectory implements Serializable {
                 }
             }
         } else {
-            throw new IllegalStateException();
+            log.warn("[PeerDirectory] Rejected invalid node for signed add (cxID={}, publicKey={})",
+                n.cxID, n.publicKey != null ? n.publicKey.substring(0, Math.min(16, n.publicKey.length())) : "null");
         }
     }
 

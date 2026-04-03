@@ -77,6 +77,8 @@ public class ConnectX {
     public File resources;
     /** True when this node has no bootstrap seed and should request one via CXHELLO */
     public volatile boolean bootstrapSearch = false;
+    /** Guards against concurrent/duplicate bootstrap attempts */
+    private final java.util.concurrent.atomic.AtomicBoolean bootstrapStarted = new java.util.concurrent.atomic.AtomicBoolean(false);
     /** NMI-signed seed blob to share with peers that request one. Only valid if signed by EPOCH. */
     public byte[] signedBootstrapSeed = null;
     private transient Node self;
@@ -985,6 +987,29 @@ public class ConnectX {
     }
 
     /**
+     * Sign this node's own Node object with its own key, returning the signed blob.
+     * Same format as CXHELLO signedNode -- used when building seeds.
+     * @return Signed node blob, or null on failure
+     */
+    public byte[] signSelfNode() {
+        if (self == null) return null;
+        try {
+            String nodeJson = serialize("cxJSON1", self);
+            java.io.ByteArrayInputStream in = new java.io.ByteArrayInputStream(
+                nodeJson.getBytes(StandardCharsets.UTF_8));
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            encryptionProvider.sign(in, out);
+            in.close();
+            byte[] blob = out.toByteArray();
+            out.close();
+            return blob;
+        } catch (Exception e) {
+            log.warn("[ConnectX] Failed to sign self node: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Register a high-value peer (e.g., NMI/EPOCH) in the peer directory.
      * Use this instead of accessing nodeMesh.peerDirectory.hv directly.
      *
@@ -1102,6 +1127,10 @@ public class ConnectX {
      * 6. After bootstrap, automatically check for seed updates from EPOCH
      */
     public void attemptCXNETBootstrap() {
+        if (!bootstrapStarted.compareAndSet(false, true)) {
+            log.debug("[Bootstrap] Bootstrap already in progress, skipping duplicate call");
+            return;
+        }
         try {
             if (networkMap.containsKey("CXNET")) {
                 log.info("[Bootstrap] CXNET already loaded");
@@ -1192,8 +1221,11 @@ public class ConnectX {
             seed.networkID = "CXNET";
             seed.addNetwork(cxnet);
             if (self != null) {
-                seed.addHvPeer(self);
-                seed.addPeerFindingNode(self);
+                byte[] signedSelfBlob = signSelfNode();
+                if (signedSelfBlob != null) {
+                    seed.addHvPeer(signedSelfBlob);
+                    seed.addPeerFindingNode(signedSelfBlob);
+                }
             }
 
             // Serialize and sign with EPOCH's key
@@ -1233,6 +1265,123 @@ public class ConnectX {
     }
 
     /**
+     * Signs and publishes a seed for a network this peer has authority over.
+     * Saves the signed blob to seeds/{seedID}.cxn and updates currentSeedID so
+     * the SEED_REQUEST handler can serve it automatically.
+     *
+     * @param networkID Network to publish a seed for
+     * @return The signed seed blob, or null on failure
+     */
+    public byte[] signAndPublishNetworkSeed(String networkID) {
+        try {
+            CXNetwork network = networkMap.get(networkID);
+            if (network == null) {
+                log.warn("[NetworkSeed] Network {} not found", networkID);
+                return null;
+            }
+            if (network.configuration == null || network.configuration.backendSet == null
+                    || !network.configuration.backendSet.contains(getOwnID())) {
+                log.warn("[NetworkSeed] This peer is not authoritative for network {}", networkID);
+                return null;
+            }
+
+            Seed seed = new Seed();
+            seed.seedID = java.util.UUID.randomUUID().toString();
+            seed.timestamp = System.currentTimeMillis();
+            seed.networkID = networkID;
+            seed.addNetwork(network);
+            if (self != null) {
+                byte[] signedSelfBlob = signSelfNode();
+                if (signedSelfBlob != null) {
+                    seed.addHvPeer(signedSelfBlob);
+                    seed.addPeerFindingNode(signedSelfBlob);
+                }
+            }
+
+            String seedJson = serialize("cxJSON1", seed);
+            ByteArrayInputStream seedInput = new ByteArrayInputStream(seedJson.getBytes(StandardCharsets.UTF_8));
+            ByteArrayOutputStream signedOutput = new ByteArrayOutputStream();
+            encryptionProvider.sign(seedInput, signedOutput);
+            seedInput.close();
+            byte[] signedBlob = signedOutput.toByteArray();
+            signedOutput.close();
+
+            File seedsDir = new File(cxRoot, "seeds");
+            seedsDir.mkdirs();
+            try (FileOutputStream fos = new FileOutputStream(new File(seedsDir, seed.seedID + ".cxn"))) {
+                fos.write(signedBlob);
+            }
+
+            if (network.configuration.currentSeedID != null) {
+                network.configuration.lastSeedID = network.configuration.currentSeedID;
+            }
+            network.configuration.currentSeedID = seed.seedID;
+
+            log.info("[NetworkSeed] Signed and published seed {} for network {}", seed.seedID, networkID);
+            return signedBlob;
+        } catch (Exception e) {
+            log.error("[NetworkSeed] Failed to publish seed for {}: {}", networkID, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Requests a network seed from peers in order to join a network.
+     * Always asks EPOCH first (authoritative), then falls back to all known HV peers.
+     * The SEED_RESPONSE handler applies the seed when a response arrives.
+     *
+     * @param networkID Network to join (e.g., "TESTNET")
+     */
+    public void joinNetworkFromPeers(String networkID) {
+        if (networkMap.containsKey(networkID)) {
+            log.info("[NetworkJoin] Already in network {}", networkID);
+            return;
+        }
+        String reqJson;
+        try {
+            reqJson = serialize("cxJSON1", new SeedExchange(networkID));
+        } catch (Exception e) {
+            log.error("[NetworkJoin] Failed to serialize SEED_REQUEST for {}: {}", networkID, e.getMessage());
+            return;
+        }
+
+        // Always ask EPOCH first -- it is the authoritative seed source
+        try {
+            buildEvent(EventType.SEED_REQUEST, reqJson.getBytes(StandardCharsets.UTF_8))
+                .toPeer(EPOCH_UUID)
+                .signData()
+                .queue();
+            log.info("[NetworkJoin] Sent SEED_REQUEST for {} to EPOCH", networkID);
+        } catch (Exception e) {
+            log.warn("[NetworkJoin] Could not send SEED_REQUEST to EPOCH: {}", e.getMessage());
+        }
+
+        // Also ask all other known HV peers as fallback
+        if (nodeMesh == null || nodeMesh.peerDirectory == null
+                || nodeMesh.peerDirectory.hv == null || nodeMesh.peerDirectory.hv.isEmpty()) {
+            return;
+        }
+        int sent = 0;
+        for (Node peer : nodeMesh.peerDirectory.hv.values()) {
+            if (self != null && peer.cxID.equals(self.cxID)) continue;
+            if (peer.cxID.equals(EPOCH_UUID)) continue; // already sent above
+            try {
+                buildEvent(EventType.SEED_REQUEST, reqJson.getBytes(StandardCharsets.UTF_8))
+                    .toPeer(peer.cxID)
+                    .signData()
+                    .queue();
+                sent++;
+            } catch (Exception e) {
+                log.warn("[NetworkJoin] Failed to queue SEED_REQUEST to {}: {}",
+                    peer.cxID.substring(0, 8), e.getMessage());
+            }
+        }
+        if (sent > 0) {
+            log.info("[NetworkJoin] Sent SEED_REQUEST for {} to {} additional peer(s)", networkID, sent);
+        }
+    }
+
+    /**
      * Fetches the bootstrap seed blob from the AnvilDevelopment distribution endpoint on a
      * background thread. On success, calls applySignedSeed() and persists to disk.
      * On failure, sets bootstrapSearch=true so peers can supply via CXHELLO.
@@ -1261,11 +1410,13 @@ public class ConnectX {
                 } else {
                     log.warn("[Bootstrap] Remote fetch returned HTTP {}, falling back to CXHELLO", status);
                     bootstrapSearch = true;
+                    bootstrapStarted.set(false);
                 }
                 conn.disconnect();
             } catch (Exception e) {
                 log.warn("[Bootstrap] Remote fetch failed: {} - falling back to CXHELLO", e.getMessage());
                 bootstrapSearch = true;
+                bootstrapStarted.set(false);
             }
         });
         fetchThread.setName("Bootstrap-Fetch-Thread");
@@ -1319,7 +1470,7 @@ public class ConnectX {
     private void applySeed(Seed seed) throws Exception {
         log.info("[Seed] Applying seed {}", seed.seedID);
         log.info("[Seed]   Networks: {}", seed.networks.size());
-        log.info("[Seed]   HV Peers: {}", seed.hvPeers.size());
+        log.info("[Seed]   HV Peer Blobs: {}", seed.hvPeerBlobs.size());
         log.info("[Seed]   Certificates: {}", seed.certificates.size());
 
         // IMPORTANT: Extract and save NMI public key (cx.asc) first
@@ -1338,15 +1489,53 @@ public class ConnectX {
             }
         }
 
-        // Add hv peers to directory (skip self by cxID or public key)
-        for (Node peer : seed.hvPeers) {
-            if (isSelfNode(peer)) {
-                log.info("[Seed] Skipped self in hvPeers: {}", peer.cxID);
-                continue;
+        // Ingest hv peers: verify each signed blob against the node's own key before adding
+        int peersAdded = 0;
+        for (byte[] blob : seed.hvPeerBlobs) {
+            if (blob == null) continue;
+            try {
+                // Strip signature without verification to read the embedded Node (and its publicKey)
+                java.io.ByteArrayInputStream bais = new java.io.ByteArrayInputStream(blob);
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                encryptionProvider.stripSignature(bais, baos);
+                bais.close();
+                String nodeJson = baos.toString(java.nio.charset.StandardCharsets.UTF_8);
+                baos.close();
+
+                Node peer = (Node) deserialize("cxJSON1", nodeJson, Node.class);
+                if (peer == null || peer.cxID == null || peer.publicKey == null) {
+                    log.warn("[Seed] Skipping blob -- missing cxID or publicKey after strip");
+                    continue;
+                }
+                if (isSelfNode(peer)) {
+                    log.debug("[Seed] Skipped self in hvPeerBlobs: {}", peer.cxID);
+                    continue;
+                }
+
+                // Cache the peer's public key so we can verify the blob signature
+                us.anvildevelopment.cxnet.crypt.pgpainless.PainlessCryptProvider pcp =
+                    (us.anvildevelopment.cxnet.crypt.pgpainless.PainlessCryptProvider) encryptionProvider;
+                if (!pcp.cacheKeyFromString(peer.cxID, peer.publicKey)) {
+                    log.warn("[Seed] Could not cache key for {}, skipping", peer.cxID.substring(0, 8));
+                    continue;
+                }
+
+                // Verify the blob signature against the peer's own key
+                java.io.ByteArrayInputStream verifyIn = new java.io.ByteArrayInputStream(blob);
+                java.io.ByteArrayOutputStream verifyOut = new java.io.ByteArrayOutputStream();
+                encryptionProvider.verifyAndStrip(verifyIn, verifyOut, peer.cxID);
+                verifyIn.close();
+                verifyOut.close();
+
+                // Signature valid -- add with signed blob for persistence
+                nodeMesh.peerDirectory.addNode(peer, blob, cxRoot);
+                peersAdded++;
+                log.info("[Seed] Verified and added peer: {}", peer.cxID.substring(0, 8));
+            } catch (Exception e) {
+                log.warn("[Seed] Rejected peer blob -- signature verification failed: {}", e.getMessage());
             }
-            nodeMesh.peerDirectory.addNode(peer);
-            log.info("[Seed] Added peer: {}", peer.cxID);
         }
+        log.info("[Seed] Added {} of {} peer blobs", peersAdded, seed.hvPeerBlobs.size());
 
         // Import networks using shared registration logic
         for (CXNetwork network : seed.networks) {
@@ -1384,6 +1573,9 @@ public class ConnectX {
     public void applySignedSeed(byte[] signedBlob) {
         try {
             PainlessCryptProvider pcp = (PainlessCryptProvider) encryptionProvider;
+            if (Boolean.getBoolean("cxnet.test.epoch")) {
+                pcp.cacheEpochKeyFromFile(cxRoot, EPOCH_UUID);
+            }
             pcp.certCache.putIfAbsent(EPOCH_UUID, pcp.nmipubkey);
 
             // Log first bytes to diagnose PGP format issues
@@ -2248,17 +2440,25 @@ public class ConnectX {
         if (!plugins.containsKey(eventType)) return false;
         CXPlugin plugin = plugins.get(eventType);
         try {
+            // Resolve origin sender: prefer oCXID (survives relay), fall back to transmitter ID
+            String senderCxID = null;
+            if (ib.ne != null && ib.ne.p != null && ib.ne.p.oCXID != null) {
+                senderCxID = ib.ne.p.oCXID;
+            } else if (ib.nc != null && ib.nc.iD != null) {
+                senderCxID = ib.nc.iD;
+            }
+
             switch (plugin.dataLevel != null ? plugin.dataLevel : DataLevel.NETWORK_EVENT) {
                 case INPUT_BUNDLE:
-                    return plugin.handleEvent(ib);
+                    return plugin.handleEvent(ib, senderCxID);
                 case OBJECT:
                     if (plugin.type == null || ib.verifiedObjectBytes == null) return false;
                     String se = (ib.nc != null && ib.nc.se != null) ? ib.nc.se : "cxJSON1";
                     if (!ib.readyObject(plugin.type, se, this)) return false;
-                    return plugin.handleEvent(ib.object);
+                    return plugin.handleEvent(ib.object, senderCxID);
                 case NETWORK_EVENT:
                 default:
-                    return plugin.handleEvent(ib.ne);
+                    return plugin.handleEvent(ib.ne, senderCxID);
             }
         } catch (Exception e) {
             log.error("[Plugin] Error dispatching event to plugin '{}': {}", eventType, e.getMessage());

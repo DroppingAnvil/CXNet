@@ -37,4 +37,20 @@ public class NetworkDictionary implements Serializable {
      */
     public BasicPermissionContainer networkPermissions;
 
+    /**
+     * Controls how seed blobs for this network are verified when distributed by peers.
+     *
+     * <ul>
+     *   <li>{@code false} (default) -- seed blob must be verified against the NMI or a node
+     *       in the backendSet. Only EPOCH / authoritative backends can distribute seeds.</li>
+     *   <li>{@code true} -- seed blob may be signed by any known peer. The receiving node
+     *       verifies against the sender's cached public key. Suitable for informal peer
+     *       networks where any member can relay the seed.</li>
+     * </ul>
+     *
+     * This flag is embedded inside the signed seed blob itself, so a relaying peer
+     * cannot forge it without breaking the NMI's signature on the original seed.
+     */
+    public boolean dynamicSeed = false;
+
 }

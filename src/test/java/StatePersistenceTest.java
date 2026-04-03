@@ -1,5 +1,3 @@
-package us.anvildevelopment.cxnet.test;
-
 import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.network.CXNetwork;
 import us.anvildevelopment.cxnet.network.CXPath;

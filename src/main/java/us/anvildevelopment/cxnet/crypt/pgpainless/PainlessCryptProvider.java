@@ -282,6 +282,50 @@ public class PainlessCryptProvider extends CryptProvider {
             throw dfe;
         }
     }
+    /**
+     * Load and cache EPOCH's actual public key from {@code cx.asc} in the given root directory.
+     * Call this before verifying a seed blob so the certCache holds the real signing key rather
+     * than the hardcoded production NMI key (which differs in test environments).
+     * No-op if the file does not exist or the key is already cached for {@code epochUUID}.
+     */
+    public void cacheEpochKeyFromFile(java.io.File cxRoot, String epochUUID) {
+        try {
+            java.io.File cxAsc = new java.io.File(cxRoot, "cx.asc");
+            if (!cxAsc.exists()) return;
+            byte[] raw = java.nio.file.Files.readAllBytes(cxAsc.toPath());
+            PGPPublicKeyRing epochKey = PGPainless.readKeyRing().publicKeyRing(
+                new java.io.ByteArrayInputStream(java.util.Base64.getDecoder().decode(raw))
+            );
+            certCache.putIfAbsent(epochUUID, epochKey);
+            log.debug("[Crypto] Loaded EPOCH key from cx.asc for {}", epochUUID.substring(0, 8));
+        } catch (Exception e) {
+            log.warn("[Crypto] Could not load EPOCH key from cx.asc: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Parse a base64-encoded PGP public key and cache it under {@code cacheKey}.
+     * Never replaces an existing entry -- if a key is already cached for this ID, returns true immediately.
+     *
+     * @param cacheKey  Cache key (e.g., "peer-nmi:networkID" or a cxID)
+     * @param base64Key Base64-encoded armored PGP public key
+     * @return true if the key is in cache after this call, false if parsing failed
+     */
+    public boolean cacheKeyFromString(String cacheKey, String base64Key) {
+        if (base64Key == null || base64Key.isBlank()) return false;
+        if (certCache.containsKey(cacheKey)) return true;
+        try {
+            PGPPublicKeyRing keyRing = PGPainless.readKeyRing().publicKeyRing(
+                new java.io.ByteArrayInputStream(java.util.Base64.getDecoder().decode(base64Key)));
+            certCache.putIfAbsent(cacheKey, keyRing);
+            log.debug("[Crypto] Cached key for {}", cacheKey.length() > 8 ? cacheKey.substring(0, 8) : cacheKey);
+            return true;
+        } catch (Exception e) {
+            log.warn("[Crypto] Could not parse key for {}: {}", cacheKey, e.getMessage());
+            return false;
+        }
+    }
+
     @Override
     public void setup(String cxID, String s, File dir) throws Exception {
         File privateKeyFile = new File(dir, "key.cx");

@@ -84,6 +84,11 @@ public class RetryProcessor implements Runnable {
                         String targetPeerID = bundle.getTargetPeerID();
                         String networkID = bundle.getNetworkID();
 
+                        if (targetPeerID == null) {
+                            log.warn("[CXS->CXN-FALLBACK] {} has no target peer ID, dropping bundle", eventType);
+                            continue;
+                        }
+
                         log.info("[CXS->CXN-FALLBACK] {} to peer {} failed {} times, converting to CXN with E2E encryption",
                             eventType, (targetPeerID != null && targetPeerID.length() >= 8 ? targetPeerID.substring(0, 8) : "UNKNOWN"), bundle.retryCount);
 

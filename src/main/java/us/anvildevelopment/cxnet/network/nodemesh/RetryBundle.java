@@ -95,7 +95,12 @@ public class RetryBundle {
         if (bundle == null || bundle.ne == null || bundle.ne.p == null) {
             return false; // Invalid bundle
         }
-        // Only convert CXS (peer-to-peer) events to CXN
+        // Low-level discovery events cannot be converted: they target unknown peers by definition
+        // and E2E CXN broadcast requires a known target cert. All other CXS events can fall back.
+        String eventType = bundle.ne.eT;
+        if ("CXHELLO".equals(eventType) || "CXHELLO_RESPONSE".equals(eventType) || "PeerFinding".equals(eventType)) {
+            return false;
+        }
         return "CXS".equals(bundle.ne.p.scope);
     }
 

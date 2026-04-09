@@ -186,5 +186,13 @@ public enum EventType {
      * Use case: Networks created centrally for fine-tuning, then switched to zero trust once stabilized
      */
     ZERO_TRUST_ACTIVATION,
+    /**
+     * Direct stream session orchestration (OPEN, ACCEPT, CLOSE).
+     * Payload: {@code CXStream} serialized as cxJSON1, sent E2E encrypted via
+     * {@code buildEvent(...).toPeer(id).encrypt(id).queue()}.
+     * The data channel itself is a separate TCP socket or WebSocket connection
+     * using AES-GCM-256 (or another pluggable cipher negotiated in the OPEN payload).
+     */
+    STREAM,
     ;
 }

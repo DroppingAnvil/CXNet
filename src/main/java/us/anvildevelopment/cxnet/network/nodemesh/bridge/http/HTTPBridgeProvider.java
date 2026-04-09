@@ -5,23 +5,30 @@
 
 package us.anvildevelopment.cxnet.network.nodemesh.bridge.http;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpHandler;
-import com.sun.net.httpserver.HttpServer;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import okhttp3.*;
+import okio.ByteString;
+import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.servlet.ServletContextHandler;
+import org.eclipse.jetty.servlet.ServletHolder;
+import org.eclipse.jetty.websocket.api.Session;
+import org.eclipse.jetty.websocket.api.WebSocketListener;
+import org.eclipse.jetty.websocket.server.config.JettyWebSocketServletContainerInitializer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.network.CXPath;
 import us.anvildevelopment.cxnet.network.events.NetworkContainer;
 import us.anvildevelopment.cxnet.network.nodemesh.bridge.BridgeProvider;
-import okhttp3.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import us.anvildevelopment.cxnet.network.stream.CXStreamSession;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,33 +36,17 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
- * cxHTTP1 Bridge Provider
+ * cxHTTP1 Bridge Provider (Jetty 11)
  *
- * Enables CX networking over HTTP/HTTPS for:
- * - Reverse proxy compatibility (CloudFlare, RProx, nginx, etc.)
- * - Firewall traversal
- * - NAT bypass
+ * Serves both the CX event endpoint and the stream WebSocket endpoint on the
+ * same port so nodes behind a single-port firewall can use both features.
  *
- * Architecture:
- * - CLIENT: Uses HTTPS for encrypted transport to reverse proxy
- * - SERVER: Plain HTTP behind reverse proxy (TLS termination at proxy)
- * - Trust Model: RProx (AnvilDevelopment.US/rprox.html) handles CloudFlare + TLS
+ * Endpoints:
+ *   POST /cx          -- CX event delivery (existing protocol)
+ *   GET  /health      -- Health check
+ *   WS   /cxstream    -- Stream data channel (query param: session=<sessionID>)
  *
- * Example:
- * Client → HTTPS → CloudFlare/RProx → HTTP → EPOCH NMI Server
- *   URL: https://CXNET.AnvilDevelopment.US/cx
- *
- * HTTP Constraint: Request/Response model (not bidirectional)
- * Solution: Synchronous response collection
- *
- * Flow:
- * 1. Client POSTs NetworkContainer to /cx endpoint via HTTPS
- * 2. RProx terminates TLS and forwards to HTTP server
- * 3. Server processes event through normal CX stack
- * 4. Server captures any response events generated for this sender
- * 5. Server returns responses in HTTP body
- * 6. RProx encrypts response and returns to client via HTTPS
- * 7. Client processes responses locally
+ * Trust Model: plain HTTP/WS behind RProx/CloudFlare for TLS termination.
  */
 public class HTTPBridgeProvider implements BridgeProvider {
     private static final Logger log = LoggerFactory.getLogger(HTTPBridgeProvider.class);
@@ -64,23 +55,23 @@ public class HTTPBridgeProvider implements BridgeProvider {
     private static final MediaType OCTET_STREAM = MediaType.get("application/octet-stream");
 
     private ConnectX connectX;
-    private HttpServer httpServer;
+    private Server jettyServer;
     private OkHttpClient httpClient;
+    private int serverPort = -1;
 
-    // Response queues for synchronous HTTP handling
-    // Key: requestId (from NetworkEvent.iD), Value: responses for that request
-    private static final ConcurrentHashMap<String, LinkedBlockingQueue<NetworkContainer>> responseQueues = new ConcurrentHashMap<>();
+    // Response queues for synchronous HTTP handling (request ID -> response queue)
+    private static final ConcurrentHashMap<String, LinkedBlockingQueue<NetworkContainer>> responseQueues
+        = new ConcurrentHashMap<>();
 
     @Override
-    public String getBridgeProtocol() {
-        return PROTOCOL;
-    }
+    public String getBridgeProtocol() { return PROTOCOL; }
+
+    @Override
+    public boolean isStreamCapable() { return true; }
 
     @Override
     public void initialize(ConnectX connectX) {
         this.connectX = connectX;
-        // Reduced timeouts for faster failure detection and retry queue processing
-        // Failed requests (e.g., offline EPOCH) move to retry queue instead of blocking output queue
         this.httpClient = new OkHttpClient.Builder()
             .connectTimeout(2, TimeUnit.SECONDS)
             .readTimeout(2, TimeUnit.SECONDS)
@@ -89,165 +80,193 @@ public class HTTPBridgeProvider implements BridgeProvider {
     }
 
     @Override
-    public boolean isBidirectional() {
-        return false; // HTTP is request/response only
-    }
+    public boolean isBidirectional() { return false; }
 
     @Override
-    public boolean requiresSyncResponses() {
-        return true; // Must collect and return responses in same HTTP request
+    public boolean requiresSyncResponses() { return true; }
+
+    @Override
+    public boolean probeHealth(String targetAddress) {
+        return probeHealthInternal(targetAddress, null);
     }
 
     /**
-     * Validates a cxHTTP1 peer address.
-     * Expected format: "cxHTTP1:https://host/cx" or "cxHTTP1:http://host/cx"
-     * Rejects anything missing the protocol prefix, a proper http/https scheme,
-     * or a host component - prevents malformed bridge entries from entering routing tables.
+     * Probe health and verify the response identity matches {@code expectedIdentity}.
+     * Use this to confirm the bridge actually routes to THIS node and not some other server.
      */
+    public boolean probeHealthWithIdentity(String targetAddress, String expectedIdentity) {
+        return probeHealthInternal(targetAddress, expectedIdentity);
+    }
+
+    private boolean probeHealthInternal(String targetAddress, String expectedIdentity) {
+        if (targetAddress == null || !targetAddress.startsWith(PROTOCOL + ":")) return false;
+        String url = targetAddress.substring(PROTOCOL.length() + 1);
+        if (url.endsWith("/cx")) {
+            url = url.substring(0, url.length() - 3) + "/health";
+        } else if (url.endsWith("/")) {
+            url = url + "health";
+        } else {
+            url = url + "/health";
+        }
+        try {
+            Request req = new Request.Builder().url(url).get().build();
+            try (Response resp = httpClient.newCall(req).execute()) {
+                if (!resp.isSuccessful()) return false;
+                if (expectedIdentity != null) {
+                    String body = resp.body() != null ? resp.body().string() : "";
+                    return body.contains("\"identity\":\"" + expectedIdentity + "\"");
+                }
+                return true;
+            }
+        } catch (Exception e) {
+            log.debug("[cxHTTP1] Health probe failed for {}: {}", targetAddress, e.getMessage());
+            return false;
+        }
+    }
+
     @Override
     public boolean isValidAddress(String addr) {
         if (addr == null || addr.isEmpty()) return false;
-        // Must start with our protocol prefix
         if (!addr.startsWith(PROTOCOL + ":")) return false;
         String url = addr.substring(PROTOCOL.length() + 1);
-        // URL must use http or https scheme
         if (!url.startsWith("http://") && !url.startsWith("https://")) return false;
-        // Must have at least a minimal host after the scheme (e.g. "https://x" = 9 chars minimum)
         return url.length() > 8;
     }
 
     /**
-     * CLIENT SIDE: Send event via HTTPS POST and wait for sync responses
-     * Client uses HTTPS - TLS termination handled by RProx/CloudFlare
+     * Returns the WebSocket stream URL for this node's bridge, derived from
+     * the HTTP bridge address by replacing http(s) with ws(s) and path with /cxstream.
+     * Returns null if the server is not running.
      */
     @Override
-    public List<NetworkContainer> transmitEvent(CXPath path, byte[] containerBytes) throws Exception {
-        List<NetworkContainer> responses = new ArrayList<>();
-
-        try {
-            // POST encrypted NetworkContainer to HTTPS endpoint
-            RequestBody body = RequestBody.create(containerBytes, OCTET_STREAM);
-            Request request = new Request.Builder()
-                .url(path.bridgeArg)
-                .post(body)
-                .build();
-
-            Response response = httpClient.newCall(request).execute();
-
-            if (!response.isSuccessful()) {
-                throw new IOException("HTTP Bridge failed: " + response.code() + " " + response.message());
-            }
-
-            // Parse response body as array of NetworkContainers
-            // TODO: Response format - for now assume single or multiple containers
-            byte[] responseBody = response.body().bytes();
-            if (responseBody != null && responseBody.length > 0) {
-                try {
-                    // Deserialize response NetworkContainers
-                    // This would be an array of signed NetworkContainers
-                    // For simplicity, treat as single container for now
-                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    ByteArrayInputStream bais = new ByteArrayInputStream(responseBody);
-
-                    // Decrypt and deserialize
-                    Object decrypted = connectX.encryptionProvider.decrypt(bais, baos);
-                    String json = baos.toString("UTF-8");
-
-                    // Skip if response is not JSON (e.g., "OK", error messages)
-                    String trimmed = json.trim();
-                    if (!trimmed.isEmpty() && (trimmed.startsWith("{") || trimmed.startsWith("["))) {
-                        NetworkContainer nc = (NetworkContainer) ConnectX.deserialize("cxJSON1", json, NetworkContainer.class);
-                        responses.add(nc);
-                    } else {
-                        log.info("[HTTP Bridge] Received non-JSON response (acknowledgment): {}", trimmed);
-                    }
-                } catch (Exception parseEx) {
-                    // Response parsing failed - likely an acknowledgment or error message
-                    log.info("[HTTP Bridge] Response parse skipped (likely acknowledgment)");
-                }
-            }
-
-            response.close();
-        } catch (Exception e) {
-            log.error("HTTP Bridge transmit error: {}", e.getMessage());
-            throw e;
+    public String getStreamAddress() {
+        if (serverPort <= 0) return null;
+        // Derive from the node's own bridge address if available
+        String self = connectX.getSelf() != null ? connectX.getSelf().addr : null;
+        if (self != null && self.startsWith("cxHTTP1:")) {
+            String url = self.substring("cxHTTP1:".length());
+            // CX traffic is already encrypted -- always use plain ws://, no need for wss://
+            // Strip the http(s):// scheme and rebuild with ws:// to avoid false matches
+            // when the hostname starts with "cx" (e.g. cx1.example.com)
+            String hostAndPath = url.replaceFirst("^https?://", "");
+            int pathIdx = hostAndPath.indexOf("/cx");
+            String base = pathIdx >= 0 ? hostAndPath.substring(0, pathIdx) : hostAndPath;
+            return "ws://" + base + "/cxstream";
         }
-
-        return responses;
+        return "ws://localhost:" + serverPort + "/cxstream";
     }
 
-    /**
-     * SERVER SIDE: Start HTTP server for incoming CX messages
-     * Server uses plain HTTP - TLS termination handled by RProx reverse proxy
-     * IMPORTANT: This server should NOT be exposed directly to internet
-     *            Must be behind RProx/CloudFlare for security
-     */
+    // -------------------------------------------------------------------------
+    // Server
+    // -------------------------------------------------------------------------
+
     @Override
     public void startServer(int port) throws Exception {
-        // IMPORTANT: Bind to 0.0.0.0 (all interfaces)
-        // Default InetSocketAddress(port) may bind to localhost only on some systems
-        httpServer = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
+        this.serverPort = port;
 
-        // Main CX endpoint - receives requests
-        httpServer.createContext("/cx", new CXMessageHandler());
+        jettyServer = new Server();
+        ServerConnector connector = new ServerConnector(jettyServer);
+        connector.setHost("0.0.0.0");
+        connector.setPort(port);
+        jettyServer.addConnector(connector);
 
-        // Health check endpoint - for monitoring/load balancers
-        httpServer.createContext("/health", new HealthCheckHandler());
+        ServletContextHandler context = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
+        context.setContextPath("/");
 
-        // NOTE: Seed download uses SEED_REQUEST event via /cx endpoint for security
-        // This ensures proper two-layer signature verification through CX protocol
+        // CX event endpoint
+        context.addServlet(new ServletHolder(new CXServlet()), "/cx");
+        // Health check endpoint
+        context.addServlet(new ServletHolder(new HealthServlet()), "/health");
 
-        httpServer.setExecutor(null); // Use default executor
-        httpServer.start();
+        // WebSocket stream endpoint on same port
+        JettyWebSocketServletContainerInitializer.configure(context, (servletContext, wsContainer) -> {
+            wsContainer.setMaxBinaryMessageSize(1024 * 1024 + 64); // max frame + tag overhead
+            wsContainer.addMapping("/cxstream", (upgradeRequest, upgradeResponse) ->
+                new CXStreamWSEndpoint(connectX));
+        });
 
-        log.info("cxHTTP1 Bridge Server started on port {}", port);
-        log.info("  Binding: 0.0.0.0:{} (all interfaces)", port);
-        log.info("  INTERNAL Endpoint: http://localhost:{}/cx", port);
-        log.info("  INTERNAL Health: http://localhost:{}/health", port);
-        log.warn("WARNING: Server uses plain HTTP, CX is cryptographic by design but we still recommend a solution like RProx behind Cloudflare");
+        jettyServer.setHandler(context);
+        jettyServer.start();
+
+        log.info("cxHTTP1 Bridge Server (Jetty) started on port {}", port);
+        log.info("  CX endpoint:     http://0.0.0.0:{}/cx", port);
+        log.info("  Stream endpoint: ws://0.0.0.0:{}/cxstream", port);
     }
 
     @Override
     public void stopServer() {
-        if (httpServer != null) {
-            httpServer.stop(0);
-            log.info("cxHTTP1 Bridge Server stopped");
+        if (jettyServer != null) {
+            try {
+                jettyServer.stop();
+                log.info("cxHTTP1 Bridge Server stopped");
+            } catch (Exception e) {
+                log.error("Error stopping Jetty server", e);
+            }
         }
     }
 
-    /**
-     * Register a response queue for a specific request
-     * Called before processing an HTTP request
-     */
+    // -------------------------------------------------------------------------
+    // Client
+    // -------------------------------------------------------------------------
+
+    @Override
+    public List<NetworkContainer> transmitEvent(CXPath path, byte[] containerBytes) throws Exception {
+        List<NetworkContainer> responses = new ArrayList<>();
+        RequestBody body = RequestBody.create(containerBytes, OCTET_STREAM);
+        Request request = new Request.Builder()
+            .url(path.bridgeArg)
+            .post(body)
+            .build();
+
+        try (Response response = httpClient.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                throw new IOException("HTTP Bridge failed: " + response.code() + " " + response.message());
+            }
+            byte[] responseBody = response.body() != null ? response.body().bytes() : new byte[0];
+            if (responseBody.length > 0) {
+                try {
+                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                    connectX.encryptionProvider.decrypt(new ByteArrayInputStream(responseBody), baos);
+                    String json = baos.toString("UTF-8");
+                    String trimmed = json.trim();
+                    if (!trimmed.isEmpty() && (trimmed.startsWith("{") || trimmed.startsWith("["))) {
+                        NetworkContainer nc = (NetworkContainer) ConnectX.deserialize(
+                            "cxJSON1", json, NetworkContainer.class);
+                        responses.add(nc);
+                    }
+                } catch (Exception ignored) {
+                    // Acknowledgment or non-JSON response -- not an error
+                }
+            }
+        } catch (Exception e) {
+            log.error("HTTP Bridge transmit error: {}", e.getMessage());
+            throw e;
+        }
+        return responses;
+    }
+
+    // -------------------------------------------------------------------------
+    // Response queue (sync HTTP bridge)
+    // -------------------------------------------------------------------------
+
     public static void registerResponseQueue(String requestId) {
         responseQueues.put(requestId, new LinkedBlockingQueue<>());
     }
 
-    /**
-     * Add a response to the queue for a specific request
-     * Called when CX generates a response event
-     */
     public static void queueResponse(String requestId, NetworkContainer response) {
         LinkedBlockingQueue<NetworkContainer> queue = responseQueues.get(requestId);
-        if (queue != null) {
-            queue.offer(response);
-        }
+        if (queue != null) queue.offer(response);
     }
 
-    /**
-     * Collect all responses for a request and clean up
-     */
     public static List<NetworkContainer> collectResponses(String requestId, long timeoutMs) {
         List<NetworkContainer> responses = new ArrayList<>();
         LinkedBlockingQueue<NetworkContainer> queue = responseQueues.get(requestId);
-
         if (queue != null) {
             try {
-                // Wait a bit for responses to arrive
-                NetworkContainer response = queue.poll(timeoutMs, TimeUnit.MILLISECONDS);
-                while (response != null) {
-                    responses.add(response);
-                    response = queue.poll(100, TimeUnit.MILLISECONDS); // Check for more
+                NetworkContainer r = queue.poll(timeoutMs, TimeUnit.MILLISECONDS);
+                while (r != null) {
+                    responses.add(r);
+                    r = queue.poll(100, TimeUnit.MILLISECONDS);
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -255,57 +274,106 @@ public class HTTPBridgeProvider implements BridgeProvider {
                 responseQueues.remove(requestId);
             }
         }
-
         return responses;
     }
 
-    /**
-     * Handler for CX messages over HTTP
-     */
-    class CXMessageHandler implements HttpHandler {
+    // -------------------------------------------------------------------------
+    // HTTP servlets (Jetty / Jakarta)
+    // -------------------------------------------------------------------------
+
+    class CXServlet extends HttpServlet {
         @Override
-        public void handle(HttpExchange exchange) throws IOException {
-            if (!"POST".equals(exchange.getRequestMethod())) {
-                sendResponse(exchange, 405, "Method not allowed, use CX Protocol".getBytes());
+        protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+            try {
+                byte[] body = req.getInputStream().readAllBytes();
+                connectX.nodeMesh.processNetworkInput(new ByteArrayInputStream(body), null);
+                resp.setStatus(200);
+            } catch (Exception e) {
+                log.error("[cxHTTP1] Error processing event", e);
+                resp.sendError(500, e.getMessage());
+            }
+        }
+
+        @Override
+        protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+            resp.sendError(405, "Method not allowed, use CX Protocol");
+        }
+    }
+
+    class HealthServlet extends HttpServlet {
+        @Override
+        protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+            resp.setContentType("application/json");
+            resp.setStatus(200);
+            String json = "{\"status\":\"healthy\",\"bridge\":\"cxHTTP1\",\"identity\":\""
+                + (connectX.getOwnID() != null ? connectX.getOwnID() : "unknown") + "\"}";
+            resp.getOutputStream().write(json.getBytes("UTF-8"));
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // WebSocket stream endpoint (server-side, Jetty)
+    // -------------------------------------------------------------------------
+
+    static class CXStreamWSEndpoint implements WebSocketListener {
+        private static final Logger wsLog = LoggerFactory.getLogger(CXStreamWSEndpoint.class);
+
+        private final ConnectX connectX;
+        private Session jettySession;
+        private String streamSessionID;
+
+        CXStreamWSEndpoint(ConnectX connectX) {
+            this.connectX = connectX;
+        }
+
+        @Override
+        public void onWebSocketConnect(Session session) {
+            this.jettySession = session;
+            String query = session.getUpgradeRequest().getQueryString();
+            if (query != null && query.startsWith("session=")) {
+                streamSessionID = query.substring("session=".length());
+            }
+            if (streamSessionID == null || streamSessionID.isEmpty()) {
+                wsLog.warn("[cxHTTP1/WS] Stream connection without session ID -- closing");
+                session.close(1008, "Missing session ID");
                 return;
             }
-
-            try {
-                // Read encrypted NetworkContainer from request
-                InputStream requestStream = exchange.getRequestBody();
-                byte[] requestBody = requestStream.readAllBytes();
-                requestStream.close();
-
-                // Process event through normal CX stack
-                connectX.nodeMesh.processNetworkInput(new ByteArrayInputStream(requestBody), null);
-
-                sendResponse(exchange, 200, new byte[0]);
-
-            } catch (Exception e) {
-                log.error("[HTTP Bridge Server] Error", e);
-                sendResponse(exchange, 500, ("Error: " + e.getMessage()).getBytes());
+            if (connectX.streamManager != null) {
+                CXStreamSession cxSession = connectX.streamManager.getSession(streamSessionID);
+                if (cxSession != null) {
+                    cxSession.attachWebSocket(session);
+                } else {
+                    wsLog.warn("[cxHTTP1/WS] No pending session for ID {}", streamSessionID.substring(0, 8));
+                    session.close(1008, "Unknown session");
+                }
             }
         }
-    }
 
-    /**
-     * Health check handler
-     */
-    class HealthCheckHandler implements HttpHandler {
         @Override
-        public void handle(HttpExchange exchange) throws IOException {
-            String response = "{\"status\":\"healthy\",\"bridge\":\"cxHTTP1\",\"identity\":\"" +
-                (connectX.getOwnID() != null ? connectX.getOwnID() : "unknown") + "\"}";
-
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            sendResponse(exchange, 200, response.getBytes("UTF-8"));
+        public void onWebSocketBinary(byte[] payload, int offset, int len) {
+            if (streamSessionID == null || connectX.streamManager == null) return;
+            CXStreamSession cxSession = connectX.streamManager.getSession(streamSessionID);
+            if (cxSession != null) {
+                byte[] frame = new byte[len];
+                System.arraycopy(payload, offset, frame, 0, len);
+                cxSession.handleIncomingWSFrame(frame);
+            }
         }
-    }
 
-    private void sendResponse(HttpExchange exchange, int statusCode, byte[] response) throws IOException {
-        exchange.sendResponseHeaders(statusCode, response.length);
-        OutputStream os = exchange.getResponseBody();
-        os.write(response);
-        os.close();
+        @Override
+        public void onWebSocketText(String message) {}
+
+        @Override
+        public void onWebSocketClose(int statusCode, String reason) {
+            if (streamSessionID != null && connectX.streamManager != null) {
+                CXStreamSession cxSession = connectX.streamManager.getSession(streamSessionID);
+                if (cxSession != null) cxSession.handleClose();
+            }
+        }
+
+        @Override
+        public void onWebSocketError(Throwable cause) {
+            wsLog.error("[cxHTTP1/WS] Error in stream session {}", streamSessionID, cause);
+        }
     }
 }

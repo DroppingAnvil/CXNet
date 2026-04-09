@@ -12,6 +12,8 @@ public abstract class CXPlugin {
     }
     public Class<?> type = null;
     public DataLevel dataLevel = null;
+    /** True if this plugin manages a direct stream data channel (e.g. {@code CXStreamPlugin}). */
+    public boolean streamCapable = false;
 
     /**
      * Handle an incoming event payload.

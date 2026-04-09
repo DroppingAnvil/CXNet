@@ -123,8 +123,12 @@ public class OutConnectionController {
                 if (bridge != null) {
                     CXPath bridgePath = new CXPath();
                     bridgePath.bridgeArg = cxPath.bridgeArg;
-                    bridge.transmitEvent(bridgePath, cryptNetworkContainer);
-                    log.info("[OutController] [LL] Bridge transmit via {}", cxPath.bridge);
+                    try {
+                        bridge.transmitEvent(bridgePath, cryptNetworkContainer);
+                        log.info("[OutController] [LL] Bridge transmit via {}", cxPath.bridge);
+                    } catch (Exception e) {
+                        log.info("[OutController] [LL] Bridge transmit FAILED via {}: {}", cxPath.bridge, e.getMessage());
+                    }
                 } else {
                     log.info("[OutController] [LL] No bridge provider for {}", cxPath.bridge);
                 }
@@ -325,7 +329,6 @@ public class OutConnectionController {
                                     }
                                 } catch (Exception e) {
                                     // This route failed, continue trying other routes for this peer
-                                    // DON'T stop - try all addresses before giving up
                                 }
                             }
 

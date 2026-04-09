@@ -858,32 +858,64 @@ public class NodeMesh {
                 try {
                     switch (Objects.requireNonNull(et)) {
                         case NewNode:
-                            // NewNode events are now sent with SIGNED Node blobs (via .signData())
-                            // Extract and verify the signed blob, then save it for relay
-                            byte[] signedNodeBlob = eventData;
+                            // NewNode events carry a PGP-signed Node blob in the inner event's d field.
+                            // The pre-processing loop above (lines 820-834) already stripped that
+                            // signature, so eventData is raw JSON -- no PGP wrapper remaining.
+                            // We must use ib.ne.d (the original signed bytes) so that bootstrap
+                            // verification (self-attestation: node signed by its own key) can work.
+                            byte[] signedNodeBlob = ib.ne.d;
 
-                            // Verify and deserialize the signed Node blob (signed by origin sender)
+                            // Bootstrap verification: the cert for a relayed NewNode may not be cached
+                            // yet on this node. Use the same pattern as CXHELLO:
+                            //   1. Deserialize without verification to extract the public key from the payload
+                            //   2. Temporarily cache the key, then verify the signature against it
+                            //   3. If verification passes the key is authenticated (self-attestation: the blob
+                            //      was signed by the key that claims to own the cxID)
+                            //   4. If verification fails, evict the temp key and reject -- spoofing attempt
+                            Node nodeUnverified = null;
+                            try {
+                                nodeUnverified = (Node) connectX.getSignedObjectNoVerify(
+                                    new ByteArrayInputStream(signedNodeBlob), Node.class, "cxJSON1");
+                            } catch (Exception ignored) {}
+
+                            if (nodeUnverified == null || nodeUnverified.cxID == null) {
+                                log.info("[NodeMesh] NewNode rejected - could not deserialize payload from {}",
+                                    (ib.ne.p.oCXID != null ? ib.ne.p.oCXID.substring(0, 8) : "unknown"));
+                                return;
+                            }
+
+                            // Check if we already have this node before doing any key work
+                            Node node1 = peerDirectory.lookup(nodeUnverified.cxID, true, true, connectX.cxRoot, connectX);
+                            if (node1 != null) {
+                                connectX.encryptionProvider.cacheCert(node1.cxID, true, false, connectX);
+                                log.info("[NodeMesh] NewNode already exists: {}", nodeUnverified.cxID.substring(0, 8));
+                                return;
+                            }
+
+                            // For relayed NewNodes the relayer is a known peer but the described node
+                            // has never been seen -- cacheCert can only resolve the key if the node
+                            // is already in the in-memory directory. Add to memory ONLY (no disk write)
+                            // so the cert becomes available, then verify, then rollback if invalid.
+                            peerDirectory.addNode(nodeUnverified);  // memory-only: no signed blob, no cxRoot
+                            connectX.encryptionProvider.cacheCert(nodeUnverified.cxID, true, false, connectX);
+
+                            // Verify the signature with the bootstrapped key
                             Node node = (Node) connectX.getSignedObject(
-                                ib.ne.p.oCXID, // Origin sender's cxID for signature verification
+                                nodeUnverified.cxID,
                                 new ByteArrayInputStream(signedNodeBlob),
                                 Node.class,
                                 "cxJSON1"
                             );
 
                             if (node == null || node.cxID == null) {
-                                log.info("[NodeMesh] NewNode verification failed - invalid signature");
+                                // Signature doesn't match -- rollback memory entry (nothing was written to disk)
+                                connectX.nodeMesh.peerDirectory.removeNode(nodeUnverified.cxID, connectX.cxRoot);
+                                log.warn("[NodeMesh] NewNode REJECTED - signature mismatch (possible impersonation) from {}",
+                                    (ib.ne.p.oCXID != null ? ib.ne.p.oCXID.substring(0, 8) : "unknown"));
                                 return;
                             }
 
-                            // Check if we already have this node
-                            Node node1 = peerDirectory.lookup(node.cxID, true, true, connectX.cxRoot, connectX);
-                            if (node1 != null) {
-                                connectX.encryptionProvider.cacheCert(node1.cxID, true, false, connectX);
-                                log.info("[NodeMesh] NewNode already exists: {}", node.cxID.substring(0, 8));
-                                return;
-                            }
-
-                            // Add node WITH signed blob (preserves original signature for relay)
+                            // Verification passed -- overwrite temp entry with signed blob and persist to disk
                             peerDirectory.addNode(node, signedNodeBlob, connectX.cxRoot);
                             log.info("[NodeMesh] Imported NewNode: {}", node.cxID.substring(0, 8));
                             log.info("[NodeMesh] NewNode signature VERIFIED and SAVED for relay");

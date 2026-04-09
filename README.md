@@ -263,6 +263,7 @@ peer.updateHTTPBridgePort(8081);                  // HTTP bridge on 8081
 
 ## Features
 
+* **Stream sessions** - bidirectional encrypted data channels via `CXStreamPlugin`, TCP or WebSocket transport with automatic bridge negotiation
 * **Fluent event API** - `buildEvent().toPeer().signData().queue()`
 * **PGP encryption at every layer** - transport (hop-by-hop) and end-to-end
 * **Concurrent crypto pipeline** - 4-thread ingress and 4-thread egress pools distribute signing/verification across cores
@@ -283,6 +284,20 @@ See [`CX-PROTOCOL.md`](CX-PROTOCOL.md) for the full protocol specification cover
 ---
 
 ## Recent Changes
+
+### Stream sessions
+
+Full bidirectional stream sessions between peers are now operational (`CXStreamPlugin`). Open a session with `openStream(targetCxID, localHost)`, accept with `acceptStream(session)`, write chunks with `session.write(data)`, and close with `session.close(cx)`. Sessions use direct TCP by default (main-port mux via `CXST` magic prefix) and upgrade to WebSocket when both sides have a working HTTP bridge.
+
+Bridge transport is negotiated by the receiver: before advertising a WebSocket address in ACCEPT, the receiver probes its own health endpoint and checks the response identity matches its own node ID. If the external URL routes to a different server (common in test environments using placeholder bridge addresses), it falls back to TCP automatically. `NodeConfig.streamBridgeOnly = true` disables TCP entirely for nodes behind reverse proxies where exposing a direct IP would defeat the point.
+
+### Retry and routing fixes
+
+**CXS→CXN fallback** now correctly excludes only low-level discovery events (`CXHELLO`, `CXHELLO_RESPONSE`, `PeerFinding`) which cannot be converted because they target unknown peers and E2E CXN broadcast requires a known target cert. All other CXS events (MESSAGE, STREAM, NewNode, etc.) fall back to CXN broadcast with E2E encryption after the retry threshold. **BridgeHealthMonitor** removed from routing -- it was marking entire bridge protocols as degraded based on per-peer failures, blocking all bridge-addressed peers when the seed node was unreachable.
+
+### Bootstrap and verification fixes
+
+**NewNode relayed verification** now uses `ib.ne.d` (original signed bytes) instead of already-stripped `eventData`. For nodes not yet in peerDirectory, a memory-only entry is added before cert lookup and rolled back on failure. **`cacheCert` NPE** (`log.info(n.toString())` before null check) fixed -- was silently returning false for every EPOCH event until bootstrap completed. **EPOCH key pre-cached** at `initializeCrypto()` time so seed node events can be verified immediately, before the async bootstrap file load finishes.
 
 ### Security hardening -- seed and peer ingestion
 

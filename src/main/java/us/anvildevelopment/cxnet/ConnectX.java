@@ -100,6 +100,7 @@ public class ConnectX {
     public NodeMesh nodeMesh;
     public BlockchainPersistence blockchainPersistence;
     public DataContainer dataContainer;
+    public us.anvildevelopment.cxnet.network.stream.CXStreamManager streamManager;
 
     /**
      * Seed consensus collection for multi-peer verification
@@ -271,6 +272,11 @@ public class ConnectX {
 
     public boolean isBridgeProviderPresent(String protocol) {
         return bridgeProviders.containsKey(protocol);
+    }
+
+    /** Returns all registered bridge providers (used by CXStreamManager for bridge selection). */
+    public java.util.Collection<BridgeProvider> getBridgeProviders() {
+        return bridgeProviders.values();
     }
     // Instance methods for signing (use these for proper per-instance crypto)
     public Object getSignedObject(String cxID, InputStream is, Class<?> clazz, String method) throws Exception {
@@ -1052,6 +1058,15 @@ public class ConnectX {
         // Initialize encryption provider
         encryptionProvider.setup(cxID, password, cxRoot);
 
+        // Pre-cache EPOCH's NMI key immediately so events from the seed node can be
+        // verified before the async bootstrap file load completes
+        if (encryptionProvider instanceof PainlessCryptProvider) {
+            PainlessCryptProvider pcp = (PainlessCryptProvider) encryptionProvider;
+            if (pcp.nmipubkey != null) {
+                pcp.certCache.putIfAbsent(EPOCH_UUID, pcp.nmipubkey);
+            }
+        }
+
         // Create and set self node
         Node selfNode = new Node();
         selfNode.cxID = cxID;
@@ -1742,6 +1757,7 @@ public class ConnectX {
      */
     public void connect(int port) throws IOException {
         this.listeningPort = port;
+        this.streamManager = new us.anvildevelopment.cxnet.network.stream.CXStreamManager(this);
         OutConnectionController outController =
             new OutConnectionController(this);
         nodeMesh = NodeMesh.initializeNetwork(this, port, outController);
@@ -1755,8 +1771,10 @@ public class ConnectX {
         // Runs periodically every 5 minutes to maintain LAN peer connectivity
         Thread lanScanThread = new Thread(() -> {
             try {
-                // Wait for socket to be ready
-                Thread.sleep(10000); // Wait 10 seconds for network to stabilize and peers to bootstrap
+                // Staggered start: base 10s + random 0-10s jitter so multiple instances starting
+                // simultaneously don't all scan and flood CXHELLO at exactly the same moment.
+                long jitter = (long) (Math.random() * 10000);
+                Thread.sleep(10000 + jitter);
 
                 log.info("[LAN Scanner] Starting periodic LAN discovery (every 5 minutes)");
 
@@ -2403,6 +2421,9 @@ public class ConnectX {
         }
         if (plugins.containsKey(cxp.serviceName)) return false;
         plugins.put(cxp.serviceName, cxp);
+        if (cxp instanceof us.anvildevelopment.cxnet.api.CXStreamPlugin) {
+            ((us.anvildevelopment.cxnet.api.CXStreamPlugin) cxp).initialize(this, streamManager);
+        }
         return true;
     }
     public boolean sendPluginEvent(InputBundle ib, String eventType) {

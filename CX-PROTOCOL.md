@@ -1,8 +1,44 @@
 # ConnectX (CX) Protocol Documentation
 
-**Version:** 3.5
-**Last Updated:** 2026-04-03 (Seed security, CXMessage, plugin sender identity, lowLevel() address dispatch)
+**Version:** 3.6
+**Last Updated:** 2026-04-09 (Stream sessions, bridge negotiation, retry fixes, bootstrap verification hardening)
 **Status:** Early Development. Core networking and event API are functional; many subsystems are incomplete or in progress.
+
+---
+
+## Recent Updates (v3.6)
+
+### Stream Sessions (CXStreamPlugin)
+
+Full bidirectional stream sessions between peers are now operational and pass the multi-peer integration test.
+
+**Transport:** Sessions use direct TCP by default (main-port mux via `CXST` magic prefix on the P2P socket, or dedicated port). If both sides have an HTTP bridge, WebSocket transport is used instead.
+
+**Bridge negotiation:** When the receiver gets a STREAM OPEN event, it checks its own bridge readiness before committing to WebSocket transport. `CXStreamManager.isLocalStreamBridgeReachable()` probes the node's own health endpoint and verifies the response identity matches the node's own cxID via `HTTPBridgeProvider.probeHealthWithIdentity()`. If the identity doesn't match (e.g. the public URL resolves to a different server in test environments) or the probe fails, the receiver falls back to direct TCP and sends ACCEPT with a TCP port instead of a bridge address.
+
+**`NodeConfig.streamBridgeOnly`:** New flag. When `true`, the node will never expose a direct TCP address in ACCEPT events -- WebSocket only. If the bridge is unreachable the ACCEPT is rejected rather than leaking the real IP. Intended for nodes behind Cloudflare or similar reverse proxies.
+
+**Transport detection in `write()`:** `CXStreamSession.write()` now routes to the actual connected transport (tcpOut / wsOkClient / wsJettySession) rather than the declared `transportType`. The declared type may differ from the actual transport when the receiver downgrades from WebSocket to TCP -- previously this caused data to be silently dropped.
+
+**`handleAccept` is payload-driven:** The initiator's `handleAccept` in `CXStreamManager` now decides the connection action from the ACCEPT payload fields (`bridgeAddress`, `port`, `listenerIsInitiator`) rather than from the stored `session.transportType`. The receiver's ACCEPT is the authoritative transport decision.
+
+### CXS→CXN fallback scope fix
+
+`RetryBundle.shouldConvertToCXN()` was incorrectly blocking conversion for most event types. The correct rule is an exclusion: low-level discovery events (`CXHELLO`, `CXHELLO_RESPONSE`, `PeerFinding`) cannot be converted because they target unknown peers by definition and E2E CXN broadcast requires a known target certificate. All other CXS events (MESSAGE, STREAM, NewNode, etc.) can fall back to CXN broadcast with E2E encryption after `CXS_TO_CXN_THRESHOLD` failures.
+
+### BridgeHealthMonitor removed from routing
+
+All `isHealthy()`, `recordSuccess()`, and `recordFailure()` calls were removed from `OutConnectionController` and `BridgeHealthMonitor.initialize()` was removed from `ConnectX.connect()`. The monitor was tracking per-peer transmit failures as bridge protocol health. In practice, when all seed node addresses were unreachable (e.g., EPOCH offline), the `cxHTTP1` protocol was marked degraded and ALL bridge-addressed peers were skipped -- including local test peers that were fully reachable. Bridge health is no longer a routing gate.
+
+### NewNode verification fix
+
+The EventProcessor pre-processing loop strips the PGP signature from `ib.ne.d` into `eventData` before the switch statement. Case `NewNode` was calling `getSignedObject(eventData)` -- passing already-stripped bytes -- so `verifyAndStrip` found no signatures and rejected every relayed node. Changed to use `ib.ne.d` (original signed bytes). For relayed NewNodes where the sender isn't yet in peerDirectory, the node is added to memory only (no disk write) before `cacheCert()` so the key can be loaded; if signature verification fails the memory entry is rolled back.
+
+### cacheCert NPE and EPOCH key pre-cache
+
+`PainlessCryptProvider.cacheCert()` had `log.info(n.toString())` before the null check on the looked-up node. When `peerDirectory.lookup()` returned null, this threw NPE, caught by the outer catch, and `cacheCert` returned false silently. The null check is now before the log call.
+
+`ConnectX.initializeCrypto()` now immediately caches `nmipubkey` under `EPOCH_UUID` in `certCache` after `setup()` completes. Previously this only happened inside `applySignedSeed()`, which runs asynchronously after the bootstrap file IOJob finishes. Events from the seed node arriving before the bootstrap completed could not be verified because EPOCH's cert was not yet in cache.
 
 ---
 

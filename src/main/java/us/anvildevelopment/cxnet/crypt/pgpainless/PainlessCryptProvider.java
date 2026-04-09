@@ -417,8 +417,8 @@ public class PainlessCryptProvider extends CryptProvider {
         }
         try {
             Node n = connectX.nodeMesh.peerDirectory.lookup(cxID, tryImport, sync);
-            log.info(n.toString());
             if (n != null) {
+                log.info(n.toString());
                 PGPPublicKeyRing cert = PGPainless.readKeyRing()
                         .publicKeyRing(
                                 new ByteArrayInputStream(

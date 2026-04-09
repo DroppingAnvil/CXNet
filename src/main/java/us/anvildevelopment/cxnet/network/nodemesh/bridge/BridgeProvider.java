@@ -80,6 +80,41 @@ public interface BridgeProvider {
     boolean requiresSyncResponses();
 
     /**
+     * Whether this bridge supports a persistent bidirectional stream data channel
+     * (e.g. WebSocket). When true, the bridge can be used as the transport for
+     * {@code CXStreamSession} in addition to normal CX event routing.
+     */
+    default boolean isStreamCapable() {
+        return false;
+    }
+
+    /**
+     * Returns the WebSocket URL for the stream data channel on this bridge,
+     * e.g. {@code ws://host:port/cxstream}. Only meaningful when {@link #isStreamCapable()}
+     * is true. Returns null by default.
+     */
+    default String getStreamAddress() {
+        return null;
+    }
+
+    /**
+     * Probe whether the given bridge address is currently reachable.
+     *
+     * Called by {@link BridgeHealthMonitor} to check if a degraded address has recovered.
+     * Implementations should make a lightweight outbound request (e.g. HTTP GET /health)
+     * and return true only if a valid response is received.
+     *
+     * The default returns true (non-HTTP bridges are assumed always reachable unless they
+     * fail at transmit time, at which point the retry system handles it).
+     *
+     * @param targetAddress the full bridge address string (e.g. "cxHTTP1:https://host/cx")
+     * @return true if the endpoint is reachable and responding
+     */
+    default boolean probeHealth(String targetAddress) {
+        return true;
+    }
+
+    /**
      * Validate whether a full peer address string is a well-formed address for this bridge.
      *
      * The address is in the format "protocol:arg" (e.g. "cxHTTP1:https://host/cx").

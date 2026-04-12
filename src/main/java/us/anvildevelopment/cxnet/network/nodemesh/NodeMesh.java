@@ -47,6 +47,8 @@ public class NodeMesh {
     // Instance fields (per-peer)
     public ServerSocket serverSocket;
     public ConcurrentHashMap<String, Set<String>> transmissionIDMap = new ConcurrentHashMap<>();
+    /** Tracks qd values already processed; drops duplicate CXB fan-out copies after the first. */
+    private final ConcurrentHashMap<String, Long> seenQd = new ConcurrentHashMap<>();
     /** Guards against two IOThreads concurrently importing the same unknown peer (NewNode/CXHELLO). */
     private final ConcurrentHashMap<String, Boolean> inFlightImports = new ConcurrentHashMap<>();
     public PeerDirectory peerDirectory = null;
@@ -314,6 +316,7 @@ public class NodeMesh {
                     Node importedNode = null;
                     byte[] signedNodeBlobForPersistence = null; // For CXHELLO persistence
                     if (parsedEvent.d != null && parsedEvent.d.length > 0) {
+                        boolean certAlreadyPresent = false;
                         try {
                             Node newNode;
 
@@ -331,8 +334,8 @@ public class NodeMesh {
 
                                 // CXHELLO payload: CXHello class with signedNode byte array
                                 CXHello cxhelloData =
-                                    (CXHello) ConnectX.deserialize("cxJSON1", payloadJson,
-                                        CXHello.class);
+                                        (CXHello) ConnectX.deserialize("cxJSON1", payloadJson,
+                                                CXHello.class);
 
                                 //SET OBJECT IN INPUT BUNDLE
                                 //IMPORTANT
@@ -366,6 +369,8 @@ public class NodeMesh {
                                 }
                             } else {
                                 // NewNode payload is a SIGNED Node object (from EventBuilder.signData())
+                                // Key is unknown on first contact, so we strip without verification,
+                                // import the node, then re-verify the same payload with the imported key.
                                 String originSender = parsedEvent.p != null ? parsedEvent.p.oCXID : null;
 
                                 if (originSender == null) {
@@ -373,37 +378,14 @@ public class NodeMesh {
                                     throw new DecryptionFailureException();
                                 }
 
+                                // Step 1: Strip without verification to extract the Node (key not yet known)
                                 ByteArrayInputStream signedPayloadStream = new ByteArrayInputStream(parsedEvent.d);
                                 ByteArrayOutputStream strippedPayloadStream = new ByteArrayOutputStream();
-
-                                // Check if we have the sender's key cached (known sender vs unknown sender)
-                                boolean isKnownSender = connectX.encryptionProvider.cacheCert(originSender, true, false, connectX);
-
-                                if (isKnownSender) {
-                                    // Known sender: verify and strip signature
-                                    Object verifyResult = connectX.encryptionProvider.verifyAndStrip(
-                                        signedPayloadStream, strippedPayloadStream, originSender);
-
-                                    // verifyResult holds a Boolean (auto-boxed from boolean return). Cast to unbox.
-                                    if (!((Boolean) verifyResult)) {
-                                        log.info("[NodeMesh] NewNode payload signature verification FAILED for {}", originSender);
-                                        throw new DecryptionFailureException();
-                                    }
-                                } else {
-                                    log.info("[NodeMesh] Processing NewNode from unknown sender (will import key first)");
-                                    // Unknown sender: strip signature WITHOUT verification (we'll verify container signature after import)
-                                    connectX.encryptionProvider.stripSignature(signedPayloadStream, strippedPayloadStream);
-                                }
-
-                                String strippedJson = strippedPayloadStream.toString(StandardCharsets.UTF_8);
-                                //Strip signature from Event Payload
-                                ByteArrayInputStream baiss = new ByteArrayInputStream(strippedJson.getBytes(StandardCharsets.UTF_8));
-                                ByteArrayOutputStream fullyStrippedEvent = new ByteArrayOutputStream();
-                                connectX.encryptionProvider.stripSignature(baiss, fullyStrippedEvent);
-                                String fullyStrippedJSON = fullyStrippedEvent.toString(StandardCharsets.UTF_8);
-                                newNode = (Node) ConnectX.deserialize("cxJSON1", fullyStrippedJSON, Node.class);
-
+                                connectX.encryptionProvider.stripSignature(signedPayloadStream, strippedPayloadStream);
                                 signedPayloadStream.close();
+
+                                newNode = (Node) ConnectX.deserialize("cxJSON1",
+                                        strippedPayloadStream.toString(StandardCharsets.UTF_8), Node.class);
                                 strippedPayloadStream.close();
                             }
 
@@ -427,51 +409,66 @@ public class NodeMesh {
                             }
 
                             log.debug("[NodeMesh] [STEP-11] Node extracted: cxID={}, hasPublicKey={}, signedBlob={}",
-                                (newNode != null ? newNode.cxID : "null"),
-                                (newNode != null ? (newNode.publicKey != null) : false),
-                                (signedNodeBlobForPersistence != null ? signedNodeBlobForPersistence.length + " bytes" : "null"));
-                            // Import the node with signed blob for CXHELLO persistence
-                            if (signedNodeBlobForPersistence != null) {
-                                peerDirectory.addNode(newNode, signedNodeBlobForPersistence, connectX.cxRoot);
-                                log.info("[NodeMesh] Imported and PERSISTED CXHELLO node: " + newNode.cxID.substring(0, 8));
-                            } else {
-                                peerDirectory.addNode(newNode);
-                                log.info("[NodeMesh] Imported NewNode: " + newNode.cxID.substring(0, 8));
-                            }
+                                    (newNode != null ? newNode.cxID : "null"),
+                                    (newNode != null ? (newNode.publicKey != null) : false),
+                                    (signedNodeBlobForPersistence != null ? signedNodeBlobForPersistence.length + " bytes" : "null"));
+                            // Temp: load key into cert cache ONLY - no disk write, no PeerDirectory entry.
+                            // We need the key available for verifyAndStrip below. If verification passes
+                            // we persist via addNode after the try block; if it fails we evict via removeCert.
+                            // We only evict if we were the ones who added it (certAlreadyPresent guard).
+                            certAlreadyPresent = connectX.encryptionProvider.hasCert(newNode.cxID);
+                            connectX.encryptionProvider.cacheKeyFromString(newNode.cxID, newNode.publicKey);
                             importedNode = newNode;
+                            log.info("[NodeMesh] Temp-cached key for {}, verifying...", newNode.cxID.substring(0, 8));
 
-                            log.debug("[NodeMesh] [STEP-12] Node imported, verifying container signature for {}", nc.iD);
-                            // Now VERIFY the signature using the imported public key
-                            ByteArrayInputStream verifyBais = new ByteArrayInputStream(nc.e);
-                            ByteArrayOutputStream verifyBaos = new ByteArrayOutputStream();
-                            o1 = connectX.encryptionProvider.verifyAndStrip(verifyBais, verifyBaos, nc.iD);
+                            log.debug("[NodeMesh] [STEP-12] Node imported, verifying event signature for {}", nc.iD);
 
-                            log.debug("[NodeMesh] [STEP-13] verifyAndStrip result={} for {}", o1, nc.iD);
-                            // o1 holds a Boolean (verifyAndStrip returns boolean, auto-boxed to Object).
-                            // Boolean.FALSE is never null, so the old "== null" check never triggered on failure.
-                            if (!((Boolean) o1)) {
-                                log.info("[NodeMesh] NewNode/CXHELLO container signature verification FAILED for {}", nc.iD);
-                                // Rollback: Remove the imported node (memory AND filesystem)
-                                peerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
-                                throw new DecryptionFailureException();
+                            if (parsedEvent.eT.equals("NewNode")) {
+                                // For NewNode: verify the payload signed by the origin, not the container.
+                                // The container sig only proves the transmitter; the payload sig proves the origin.
+                                String originSender = parsedEvent.p != null ? parsedEvent.p.oCXID : null;
+                                ByteArrayInputStream verifyBais = new ByteArrayInputStream(parsedEvent.d);
+                                ByteArrayOutputStream verifyBaos = new ByteArrayOutputStream();
+                                o1 = connectX.encryptionProvider.verifyAndStrip(verifyBais, verifyBaos, originSender);
+                                verifyBais.close();
+                                verifyBaos.close();
+
+                                log.debug("[NodeMesh] [STEP-13] NewNode payload verifyAndStrip result={} for {}", o1, originSender);
+                                if (!((Boolean) o1)) {
+                                    log.info("[NodeMesh] NewNode payload signature verification FAILED for {}, rolling back", originSender);
+                                    if (!certAlreadyPresent) connectX.encryptionProvider.removeCert(importedNode.cxID);
+                                    throw new DecryptionFailureException();
+                                }
+                                log.info("[NodeMesh] NewNode payload signature VERIFIED for {}", newNode.cxID);
+                            } else {
+                                // For CXHELLO: verify the container signature (transmitter identity)
+                                ByteArrayInputStream verifyBais = new ByteArrayInputStream(nc.e);
+                                ByteArrayOutputStream verifyBaos = new ByteArrayOutputStream();
+                                o1 = connectX.encryptionProvider.verifyAndStrip(verifyBais, verifyBaos, nc.iD);
+                                verifyBais.close();
+                                verifyBaos.close();
+
+                                log.debug("[NodeMesh] [STEP-13] CXHELLO container verifyAndStrip result={} for {}", o1, nc.iD);
+                                if (!((Boolean) o1)) {
+                                    log.info("[NodeMesh] CXHELLO container signature verification FAILED for {}", nc.iD);
+                                    if (!certAlreadyPresent) connectX.encryptionProvider.removeCert(importedNode.cxID);
+                                    throw new DecryptionFailureException();
+                                }
+                                log.info("[NodeMesh] CXHELLO container signature VERIFIED for {}", newNode.cxID);
                             }
-                            log.info("[NodeMesh] Container signature VERIFIED for {}", newNode.cxID);
-                            verifyBais.close();
-                            verifyBaos.close();
 
                             // For CXHELLO: Also verify the signedNodeBlob signature (now that we have the public key)
                             if (parsedEvent.eT.equals("CXHELLO") && signedNodeBlobForPersistence != null) {
                                 ByteArrayInputStream signedBlobVerifyInput = new ByteArrayInputStream(signedNodeBlobForPersistence);
                                 ByteArrayOutputStream signedBlobVerifyOutput = new ByteArrayOutputStream();
                                 boolean blobVerified = connectX.encryptionProvider.verifyAndStrip(
-                                    signedBlobVerifyInput, signedBlobVerifyOutput, nc.iD);
+                                        signedBlobVerifyInput, signedBlobVerifyOutput, nc.iD);
                                 signedBlobVerifyInput.close();
                                 signedBlobVerifyOutput.close();
 
                                 if (!blobVerified) {
                                     log.info("[NodeMesh] CXHELLO signedNode verification FAILED for {}", nc.iD);
-                                    // Rollback: Remove the imported node (memory AND filesystem)
-                                    peerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
+                                    if (!certAlreadyPresent) connectX.encryptionProvider.removeCert(importedNode.cxID);
                                     throw new DecryptionFailureException();
                                 }
                                 log.info("[NodeMesh] CXHELLO signedNode signature VERIFIED for {}", newNode.cxID);
@@ -481,9 +478,8 @@ public class NodeMesh {
                             throw e;
                         } catch (Exception e) {
                             log.error("[NodeMesh] Failed to process NewNode/CXHELLO", e);
-                            if (importedNode != null) {
-                                // Rollback: Remove the imported node (memory AND filesystem)
-                                peerDirectory.removeNode(importedNode.cxID, connectX.cxRoot);
+                            if (importedNode != null && !certAlreadyPresent) {
+                                connectX.encryptionProvider.removeCert(importedNode.cxID);
                             }
                             throw new DecryptionFailureException();
                         }
@@ -492,6 +488,16 @@ public class NodeMesh {
                         throw new DecryptionFailureException();
                     }
 
+                    // All verifications passed -- persist the node now (deferred from temp-import above)
+                    if (importedNode != null) {
+                        if (signedNodeBlobForPersistence != null) {
+                            peerDirectory.addNode(importedNode, signedNodeBlobForPersistence, connectX.cxRoot);
+                            log.info("[NodeMesh] Verified and PERSISTED CXHELLO node: {}", importedNode.cxID.substring(0, 8));
+                        } else {
+                            peerDirectory.addNode(importedNode);
+                            log.info("[NodeMesh] Verified and added NewNode: {}", importedNode.cxID.substring(0, 8));
+                        }
+                    }
                     log.debug("[NodeMesh] [STEP-14] CXHELLO/NewNode processing complete, handing off to event dispatch");
                     // Use the already parsed event
                     ne = parsedEvent;
@@ -499,14 +505,16 @@ public class NodeMesh {
                     inFlightImports.remove(nc.iD);
 
                 } else {
-                    // Standard event: Verify signature (we already have public key)
+                    // Standard event: verify the inner NetworkEvent signature.
+                    // nc.e is always signed by the ORIGINAL SENDER (nc.oD), never by a relay hop.
+                    // Using nc.iD (transmitter) here would fail for any relayed event.
+                    String innerSigner = (nc.oD != null) ? nc.oD : nc.iD;
                     ByteArrayInputStream verifyBais = new ByteArrayInputStream(nc.e);
-                    o1 = connectX.encryptionProvider.verifyAndStrip(verifyBais, baoss, nc.iD);
+                    o1 = connectX.encryptionProvider.verifyAndStrip(verifyBais, baoss, innerSigner);
                     networkEvent = baoss.toString(StandardCharsets.UTF_8);
                     ne = (NetworkEvent) ConnectX.deserialize(nc.se, networkEvent, NetworkEvent.class);
                     verifyBais.close();
 
-                    //Add o1 check
                     if (!(boolean) o1) {
                         log.info("[NodeMesh] Signature verification failure, rejecting event. 003");
                         return;
@@ -517,10 +525,15 @@ public class NodeMesh {
                     byte[] signedEventd = ne.d;
                     ByteArrayInputStream baiss = new ByteArrayInputStream(signedEventd);
                     ByteArrayOutputStream strippedJSON = new ByteArrayOutputStream();
-                    if (connectX.encryptionProvider.verifyAndStrip(baiss, strippedJSON, parsedEvent.p.oCXID)) {
-                        ib.verifiedObjectBytes = strippedJSON.toByteArray();
-                    } else {
-                        log.info("[NodeMesh] Internal event data verification failure, rejecting event. 004");
+                    try {
+                        if (connectX.encryptionProvider.verifyAndStrip(baiss, strippedJSON, parsedEvent.p.oCXID)) {
+                            ib.verifiedObjectBytes = strippedJSON.toByteArray();
+                        } else {
+                            log.info("[NodeMesh] Internal event data verification failure, rejecting event. 004");
+                            return;
+                        }
+                    } catch (Exception e004) {
+                        log.info("[NodeMesh] Internal event data verification failure (exception), rejecting event. 004: {}", e004.getMessage());
                         return;
                     }
                     baiss.close();
@@ -633,6 +646,18 @@ public class NodeMesh {
                     iterator.remove();
                     removeCount--;
                 }
+            }
+        }
+
+        // QD DEDUPLICATION: Drop duplicate copies from CXB fan-out
+        if (nc.qd != null) {
+            if (seenQd.putIfAbsent(nc.qd, System.currentTimeMillis()) != null) {
+                if (socket != null) socket.close();
+                return;
+            }
+            if (seenQd.size() > NodeConfig.maxSeenQd) {
+                long cutoff = System.currentTimeMillis() - 600_000L;
+                seenQd.entrySet().removeIf(e -> e.getValue() < cutoff);
             }
         }
 
@@ -838,10 +863,33 @@ public class NodeMesh {
 
 
 
+            // Permission gate for r=true events: drop before any plugin or switch dispatch.
+            // Relay steps inside fireEvent must never run for unauthorized events.
+            if (ib.ne.r && ib.nc != null && ib.nc.oD != null) {
+                String senderID = ib.nc.oD;
+                if (!ib.nc.oD.equals(ib.ne.p.oCXID)) {
+                    Analytics.addData(AnalyticData.SecurityEvent, "Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                    log.info("[Permission] Mismatched CXIDs: {} vs {} for {}", ib.ne.p.oCXID, ib.nc.oD, ib.ne.eT);
+                    return;
+                }
+                String networkID = ib.ne.p != null ? ib.ne.p.network : null;
+                if (networkID != null) {
+                    CXNetwork network = connectX.getNetwork(networkID);
+                    if (network != null) {
+                        Long chainID = (ib.ne.p.chainID != null) ? ib.ne.p.chainID : getChainID(network, null);
+                        if (!network.checkChainPermission(senderID, Permission.Record.name(), chainID)) {
+                            log.info("[Permission] Dropping r=true event {} from {} - no Record permission for chain {}",
+                                ib.ne.eT, senderID.substring(0, 8), chainID);
+                            return; // Drop: no relay, no record, no plugin
+                        }
+                    }
+                }
+            }
+
             try {
                 et = EventType.valueOf(ib.ne.eT);
             } catch (Exception ignored) {}
-            if (et == null & !connectX.sendPluginEvent(ib, ib.ne.eT)) {
+            if (et == null && !connectX.sendPluginEvent(ib, ib.ne.eT)) {
                 Analytics.addData(AnalyticData.Tear, "Unsupported event - "+ib.ne.eT);
                 log.info("UNABLE TO PROCESS UNKNOWN EVENT");
                 if (NodeConfig.supportUnavailableServices) {
@@ -892,12 +940,11 @@ public class NodeMesh {
                                 return;
                             }
 
-                            // For relayed NewNodes the relayer is a known peer but the described node
-                            // has never been seen -- cacheCert can only resolve the key if the node
-                            // is already in the in-memory directory. Add to memory ONLY (no disk write)
-                            // so the cert becomes available, then verify, then rollback if invalid.
-                            peerDirectory.addNode(nodeUnverified);  // memory-only: no signed blob, no cxRoot
-                            connectX.encryptionProvider.cacheCert(nodeUnverified.cxID, true, false, connectX);
+                            // For relayed NewNodes the key is unknown -- load it into cert cache ONLY
+                            // (no disk write, no PeerDirectory entry) so verifyAndStrip can run.
+                            // On failure evict via removeCert (only if we added it); on success persist via addNode.
+                            boolean relayedCertAlreadyPresent = connectX.encryptionProvider.hasCert(nodeUnverified.cxID);
+                            connectX.encryptionProvider.cacheKeyFromString(nodeUnverified.cxID, nodeUnverified.publicKey);
 
                             // Verify the signature with the bootstrapped key
                             Node node = (Node) connectX.getSignedObject(
@@ -908,8 +955,8 @@ public class NodeMesh {
                             );
 
                             if (node == null || node.cxID == null) {
-                                // Signature doesn't match -- rollback memory entry (nothing was written to disk)
-                                connectX.nodeMesh.peerDirectory.removeNode(nodeUnverified.cxID, connectX.cxRoot);
+                                // Signature doesn't match -- evict temp cert (nothing was written to disk)
+                                if (!relayedCertAlreadyPresent) connectX.encryptionProvider.removeCert(nodeUnverified.cxID);
                                 log.warn("[NodeMesh] NewNode REJECTED - signature mismatch (possible impersonation) from {}",
                                     (ib.ne.p.oCXID != null ? ib.ne.p.oCXID.substring(0, 8) : "unknown"));
                                 return;
@@ -1024,51 +1071,51 @@ public class NodeMesh {
                     throw new DecryptionFailureException();
                 }
 
-                // After infrastructure handling, fire event to application layer
-                // SKIP application layer if E2E decryption failed (event not intended for us)
+                // Permission gate for r=true events: must happen BEFORE fireEvent so that
+                // unauthorized events are dropped before the relay steps inside fireEvent run.
+                if (ib.ne.r && ib.nc != null && ib.nc.oD != null) {
+                    String senderID = ib.nc.oD;
+                    // CXID coherence: container oD must match the event's claimed origin
+                    if (!ib.nc.oD.equals(ib.ne.p.oCXID)) {
+                        Analytics.addData(AnalyticData.SecurityEvent, "Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
+                        log.info("[Permission] Mismatched CXIDs: {} vs {} for {}", ib.ne.p.oCXID, ib.nc.oD, ib.ne.eT);
+                        return;
+                    }
+                    String networkID = ib.ne.p != null ? ib.ne.p.network : null;
+                    if (networkID != null) {
+                        CXNetwork network = connectX.getNetwork(networkID);
+                        if (network != null) {
+                            // Use the chain ID the sender explicitly set in the path, not a derived one
+                            Long chainID = (ib.ne.p.chainID != null) ? ib.ne.p.chainID : getChainID(network, null);
+                            if (!network.checkChainPermission(senderID, Permission.Record.name(), chainID)) {
+                                log.info("[Permission] Dropping r=true event {} from {} - no Record permission for chain {}",
+                                    ib.ne.eT, senderID.substring(0, 8), chainID);
+                                return; // Drop: no relay, no record
+                            }
+                        }
+                    }
+                }
+
+                // Fire event to application layer (includes relay steps)
+                // Skip application layer if E2E decryption failed (event not intended for us)
                 if (!e2eDecryptionFailed) {
                     fireEvent(ib);
                 } else {
                     log.info("[E2E] Skipping application layer for undecryptable E2E event, will relay");
                 }
 
-                // DEBUG: Log auto-record attempt
-                log.info("[Auto-Record DEBUG] Event type: " + ib.ne.eT + ", r=" + ib.ne.r +
-                    ", nc=" + (ib.nc != null) + ", nc.iD=" + (ib.nc != null ? ib.nc.iD : "null") +
-                    ", nc.oD=" + (ib.nc != null ? ib.nc.oD : "null"));
-
-                // Auto-record events with r=true if ORIGINAL sender has permission
-                if (ib.ne.r && ib.nc != null && ib.nc.oD != null) {
+                // Auto-record r=true events - permission was already verified above
+                if (ib.ne.r && ib.nc != null && ib.nc.oD != null && ib.signedEventBytes != null) {
                     String senderID = ib.nc.oD;
-                    //Additional verification after application layer
-                    if (!ib.nc.oD.equals(ib.ne.p.oCXID)) {
-                        Analytics.addData(AnalyticData.SecurityEvent, "Security failure, mismatched CXIDs: " + ib.ne.p.oCXID + ", " + ib.nc.oD + " Event Type: " + ib.ne.eT);
-                        log.info("Security failure, mismatched CXIDs: {}, {} Event Type: {}", ib.ne.p.oCXID, ib.nc.oD, ib.ne.eT);
-                        return;
-                    }
                     String networkID = ib.ne.p != null ? ib.ne.p.network : null;
-
                     if (networkID != null) {
                         CXNetwork network = connectX.getNetwork(networkID);
                         if (network != null) {
-                            // Determine target chain from event type (c1=admin, c2=resources, c3=events)
-                            Long chainID = getChainID(network, et);
-
-                            // Check if sender has Record permission for this chain
-                            boolean hasPermission = network.checkChainPermission(senderID, Permission.Record.name(), chainID);
-
-                            if (hasPermission) {
-                                // Record event to blockchain with signed bytes
-                                if (ib.signedEventBytes != null) {
-                                    boolean recorded = connectX.Event(ib.ne, senderID, ib.signedEventBytes);
-                                    if (recorded) {
-                                        log.info("[Auto-Record] Event " + ib.ne.eT + " from " + senderID.substring(0, 8) + " recorded to chain " + chainID);
-                                    }
-                                } else {
-                                    log.info("[Auto-Record] Cannot record event - missing signed bytes");
-                                }
-                            } else {
-                                log.info("[Auto-Record] Event {} from {} NOT recorded - no permission", ib.ne.eT, senderID.substring(0, 8));
+                            Long chainID = (ib.ne.p.chainID != null) ? ib.ne.p.chainID : getChainID(network, null);
+                            boolean recorded = connectX.Event(ib.ne, senderID, ib.signedEventBytes);
+                            if (recorded) {
+                                log.info("[Auto-Record] Event {} from {} recorded to chain {}",
+                                    ib.ne.eT, senderID.substring(0, 8), chainID);
                             }
                         }
                     }
@@ -1314,10 +1361,12 @@ public class NodeMesh {
                                             strippedOutput.close();
 
                                             if (discoveredPeer != null && discoveredPeer.cxID != null) {
-                                                // Add with signed blob for persistence and relaying
-                                                peerDirectory.addNode(discoveredPeer, signedNodeBytes, connectX.cxRoot);
+                                                // Temp: load key into cert cache only so verifyAndStrip can run.
+                                                // Only persist to PeerDirectory after verification passes.
+                                                boolean pfCertAlreadyPresent = connectX.encryptionProvider.hasCert(discoveredPeer.cxID);
+                                                connectX.encryptionProvider.cacheKeyFromString(discoveredPeer.cxID, discoveredPeer.publicKey);
 
-                                                // Now verify the signature using the imported public key
+                                                // Verify the signature using the now-cached public key
                                                 ByteArrayInputStream verifyInput = new ByteArrayInputStream(signedNodeBytes);
                                                 ByteArrayOutputStream verifyOutput = new ByteArrayOutputStream();
                                                 boolean verified = connectX.encryptionProvider.verifyAndStrip(
@@ -1326,12 +1375,14 @@ public class NodeMesh {
                                                 verifyOutput.close();
 
                                                 if (!verified) {
-                                                    // Signature verification FAILED - rollback
-                                                    peerDirectory.removeNode(discoveredPeer.cxID, connectX.cxRoot);
+                                                    if (!pfCertAlreadyPresent) connectX.encryptionProvider.removeCert(discoveredPeer.cxID);
                                                     log.error("[PeerFinding] Signature verification FAILED for " +
-                                                        discoveredPeer.cxID.substring(0, 8) + " - rolled back");
+                                                        discoveredPeer.cxID.substring(0, 8) + " - discarded");
                                                     continue;
                                                 }
+
+                                                // Verification passed -- persist now
+                                                peerDirectory.addNode(discoveredPeer, signedNodeBytes, connectX.cxRoot);
 
                                                 imported++;
                                                 log.info("[PeerFinding]   + " + discoveredPeer.cxID.substring(0, 8) +
@@ -1781,6 +1832,9 @@ public class NodeMesh {
                                 connectX.dataContainer.blockNode(blockData.network, blockData.nodeID, blockData.reason);
                                 log.info("[BLOCK_NODE] Node " + blockData.nodeID + " blocked from network " + blockData.network);
                             }
+                            try { connectX.saveDataContainer(); } catch (Exception ex) {
+                                log.error("[BLOCK_NODE] Failed to persist DataContainer: {}", ex.getMessage());
+                            }
 
                             ne.executeOnSync = true;
 
@@ -1807,6 +1861,9 @@ public class NodeMesh {
                                     log.info("[UNBLOCK_NODE] Node {} unblocked from network {} (was blocked for: {})", unblockData.nodeID, unblockData.network, removedReason);
                                 }
                             }
+                            try { connectX.saveDataContainer(); } catch (Exception ex) {
+                                log.error("[UNBLOCK_NODE] Failed to persist DataContainer: {}", ex.getMessage());
+                            }
 
                             ne.executeOnSync = true;
 
@@ -1829,6 +1886,9 @@ public class NodeMesh {
                             log.info("[REGISTER_NODE] Node " + registerData.nodeID + " registered to network " + registerData.network);
                             log.info("[REGISTER_NODE] Total registered nodes: " +
                                 connectX.dataContainer.networkRegisteredNodes.get(registerData.network).size());
+                            try { connectX.saveDataContainer(); } catch (Exception ex) {
+                                log.error("[REGISTER_NODE] Failed to persist DataContainer: {}", ex.getMessage());
+                            }
 
                             ne.executeOnSync = true;
 
@@ -2046,6 +2106,132 @@ public class NodeMesh {
 
                         } catch (Exception e) {
                             log.error("[PEER_LIST_RESPONSE] Error handling response ", e);
+                        }
+                        handledLocally = true;
+                        break;
+
+                    case NETEPOCH:
+                        // CXNET NMI side: validate CXIK, import the network, respond with NMI-signed seed
+                        log.info("[NETEPOCH] Request received from {}", nc.iD);
+                        try {
+                            ib.readyObject(NetworkEpoch.class, ib.nc.se, connectX);
+                            NetworkEpoch req = (NetworkEpoch) ib.object;
+
+                            NetworkEpoch resp = new NetworkEpoch();
+                            resp.networkID = req.networkID;
+
+                            if (req.cxik == null || !connectX.dataContainer.consumeCXIK(req.cxik)) {
+                                log.warn("[NETEPOCH] Invalid or unknown CXIK from {} for network {}", nc.iD, req.networkID);
+                                resp.success = false;
+                                resp.message = "Invalid or expired CXIK";
+                            } else if (req.signedSeedBlob == null) {
+                                log.warn("[NETEPOCH] No seed blob provided from {} for network {}", nc.iD, req.networkID);
+                                resp.success = false;
+                                resp.message = "No seed blob provided";
+                            } else {
+                                try {
+                                    // Persist the CXIK consumption
+                                    connectX.saveDataContainer();
+
+                                    // Import the network from the creator-signed seed
+                                    connectX.applySignedSeed(req.signedSeedBlob);
+
+                                    // Re-sign the seed with EPOCH's key so recipients can verify it
+                                    byte[] epochSignedBlob = connectX.signAndPublishNetworkSeed(req.networkID);
+                                    if (epochSignedBlob == null) {
+                                        resp.success = false;
+                                        resp.message = "Network imported but NMI re-sign failed";
+                                        log.error("[NETEPOCH] signAndPublishNetworkSeed returned null for {}", req.networkID);
+                                    } else {
+                                        resp.success = true;
+                                        resp.message = "ok";
+                                        resp.signedSeedBlob = epochSignedBlob;
+                                        log.info("[NETEPOCH] Network {} imported and signed by EPOCH", req.networkID);
+                                    }
+                                } catch (Exception e) {
+                                    resp.success = false;
+                                    resp.message = "Import failed: " + e.getMessage();
+                                    log.error("[NETEPOCH] Import failed for network {}: {}", req.networkID, e.getMessage());
+                                }
+                            }
+
+                            String respJson = connectX.serialize("cxJSON1", resp);
+                            connectX.buildEvent(EventType.NETEPOCH_RESPONSE, respJson.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                                    .toPeer(nc.iD)
+                                    .signData()
+                                    .queue();
+
+                        } catch (Exception e) {
+                            log.error("[NETEPOCH] Error processing request: {}", e.getMessage());
+                        }
+                        handledLocally = true;
+                        break;
+
+                    case NETEPOCH_RESPONSE:
+                        // Creator side: apply the EPOCH-signed seed if approved
+                        log.info("[NETEPOCH_RESPONSE] Received from {}", nc.iD);
+                        try {
+                            ib.readyObject(NetworkEpoch.class, ib.nc.se, connectX);
+                            NetworkEpoch resp = (NetworkEpoch) ib.object;
+
+                            if (!resp.success) {
+                                log.error("[NETEPOCH_RESPONSE] Network {} registration rejected by EPOCH: {}", resp.networkID, resp.message);
+                            } else if (resp.signedSeedBlob == null) {
+                                log.error("[NETEPOCH_RESPONSE] Success response for {} but no seed blob provided", resp.networkID);
+                            } else {
+                                connectX.applySignedSeed(resp.signedSeedBlob);
+                                log.info("[NETEPOCH_RESPONSE] Network {} registered and EPOCH-signed seed applied", resp.networkID);
+                            }
+                        } catch (Exception e) {
+                            log.error("[NETEPOCH_RESPONSE] Error processing response: {}", e.getMessage());
+                        }
+                        handledLocally = true;
+                        break;
+
+                    case CHECK_NETWORK_NAME:
+                        log.info("[CHECK_NETWORK_NAME] Request from {}", nc.iD);
+                        try {
+                            ib.readyObject(us.anvildevelopment.cxnet.network.events.NetworkNameCheck.class, ib.nc.se, connectX);
+                            us.anvildevelopment.cxnet.network.events.NetworkNameCheck nameReq =
+                                    (us.anvildevelopment.cxnet.network.events.NetworkNameCheck) ib.object;
+
+                            us.anvildevelopment.cxnet.network.events.NetworkNameCheck nameResp =
+                                    new us.anvildevelopment.cxnet.network.events.NetworkNameCheck();
+                            nameResp.networkName = nameReq.networkName;
+                            nameResp.requestId = nameReq.requestId;
+                            nameResp.taken = connectX.getNetwork(nameReq.networkName) != null;
+                            nameResp.message = nameResp.taken ? "Name already registered" : "Available";
+
+                            connectX.buildEvent(EventType.CHECK_NETWORK_NAME_RESPONSE,
+                                            connectX.serialize("cxJSON1", nameResp)
+                                                    .getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                                    .toPeer(nc.iD)
+                                    .signData()
+                                    .queue();
+                            log.info("[CHECK_NETWORK_NAME] {} -> taken={}", nameReq.networkName, nameResp.taken);
+                        } catch (Exception e) {
+                            log.error("[CHECK_NETWORK_NAME] Error: {}", e.getMessage());
+                        }
+                        handledLocally = true;
+                        break;
+
+                    case CHECK_NETWORK_NAME_RESPONSE:
+                        log.info("[CHECK_NETWORK_NAME_RESPONSE] Received from {}", nc.iD);
+                        try {
+                            ib.readyObject(us.anvildevelopment.cxnet.network.events.NetworkNameCheck.class, ib.nc.se, connectX);
+                            us.anvildevelopment.cxnet.network.events.NetworkNameCheck nameResp =
+                                    (us.anvildevelopment.cxnet.network.events.NetworkNameCheck) ib.object;
+
+                            if (nameResp.requestId != null) {
+                                java.util.function.Consumer<us.anvildevelopment.cxnet.network.events.NetworkNameCheck> cb =
+                                        connectX.pendingNameChecks.remove(nameResp.requestId);
+                                if (cb != null) {
+                                    cb.accept(nameResp);
+                                }
+                            }
+                            log.info("[CHECK_NETWORK_NAME_RESPONSE] {} taken={}", nameResp.networkName, nameResp.taken);
+                        } catch (Exception e) {
+                            log.error("[CHECK_NETWORK_NAME_RESPONSE] Error: {}", e.getMessage());
                         }
                         handledLocally = true;
                         break;

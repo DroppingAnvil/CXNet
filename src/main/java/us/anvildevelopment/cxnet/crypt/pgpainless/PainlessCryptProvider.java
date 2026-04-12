@@ -2,6 +2,8 @@ package us.anvildevelopment.cxnet.crypt.pgpainless;
 
 import org.bouncycastle.openpgp.api.OpenPGPKeyMaterialProvider;
 import org.pgpainless.decryption_verification.MessageMetadata;
+import us.anvildevelopment.cxnet.analytics.Analytics;
+import us.anvildevelopment.cxnet.analytics.AnalyticData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import us.anvildevelopment.cxnet.ConnectX;
@@ -108,22 +110,25 @@ public class PainlessCryptProvider extends CryptProvider {
                 org.pgpainless.decryption_verification.MessageMetadata meta = decryptionStream.getMetadata();
                 boolean verified = meta.isVerifiedSigned();
                 if (!verified) {
-                    log.info("[VERIFY-FAIL] isVerifiedSigned=false for " + cxID.substring(0, 8));
-                    log.info("[VERIFY-FAIL] verifiedInline=" + meta.getVerifiedInlineSignatures().size()
-                        + " rejectedInline=" + meta.getRejectedInlineSignatures().size());
+                    log.debug("[VERIFY-FAIL] isVerifiedSigned=false for {}", cxID.substring(0, 8));
+                    log.debug("[VERIFY-FAIL] verifiedInline={} rejectedInline={}", meta.getVerifiedInlineSignatures().size(), meta.getRejectedInlineSignatures().size());
                     meta.getRejectedInlineSignatures().forEach(f ->
-                        log.info("[VERIFY-FAIL] rejected: " + f));
+                            log.debug("[VERIFY-FAIL] rejected: {}", f));
                 }
                 return verified;
+            } catch (org.pgpainless.exception.MissingDecryptionMethodException e) {
+                // Not the intended recipient for this encrypted payload -- normal in a mesh.
+                log.debug("[VERIFY] Not a recipient for encrypted message from {}", cxID.substring(0, 8));
+                Analytics.addData(AnalyticData.E2EMISS, "Not recipient for message from " + cxID);
+                return false;
             } catch (Exception e) {
-                log.error(e.getMessage());
-                e.printStackTrace();
+                log.info("[VERIFY-FAIL] Decryption/verification error for {}: {}", cxID.substring(0, 8), e.getMessage());
                 DecryptionFailureException dfe = new DecryptionFailureException();
                 dfe.initCause(e);
                 throw dfe;
             }
         }
-        log.info("[VERIFY-FAIL] cacheCert returned false for " + cxID);
+        log.debug("[VERIFY-FAIL] cacheCert returned false for {}", cxID);
         return false;
     }
     @Override
@@ -220,11 +225,11 @@ public class PainlessCryptProvider extends CryptProvider {
                 PGPPublicKeyRing publicRing = PGPainless.extractCertificate(secretKey);
                 KeyRingInfo info = new KeyRingInfo(publicRing);
 
-                log.info("Primary User ID: " + info.getPrimaryUserId());
-                log.info("Public Keys: " + info.getPublicKeys());
-                log.info("Algorithm: " + info.getAlgorithm());
-                log.info("Signing Subkeys: " + info.getSigningSubkeys());
-                log.info("Primary User ID (again): " + info.getPrimaryUserId());
+                log.info("Primary User ID: {}", info.getPrimaryUserId());
+                log.info("Public Keys: {}", info.getPublicKeys());
+                log.info("Algorithm: {}", info.getAlgorithm());
+                log.info("Signing Subkeys: {}", info.getSigningSubkeys());
+                log.info("Primary User ID (again): {}", info.getPrimaryUserId());
                 //log.info("Preferred Hash Algorithms: " + info.getPreferredHashAlgorithms());
             }
             // PGPainless 2.x generates v6 keys via modernKeyRing; raw BouncyCastle produces
@@ -257,8 +262,6 @@ public class PainlessCryptProvider extends CryptProvider {
             decryptionStream.close();
             return decryptionStream.getMetadata();
         } catch (Exception e) {
-
-            e.printStackTrace();
             DecryptionFailureException dfe = new DecryptionFailureException();
             dfe.initCause(e);
             throw dfe;
@@ -276,7 +279,6 @@ public class PainlessCryptProvider extends CryptProvider {
             decryptionStream.close();
             return decryptionStream.getMetadata();
         } catch (Exception e) {
-            e.printStackTrace();
             DecryptionFailureException dfe = new DecryptionFailureException();
             dfe.initCause(e);
             throw dfe;
@@ -303,6 +305,19 @@ public class PainlessCryptProvider extends CryptProvider {
         }
     }
 
+    @Override
+    public boolean hasCert(String cxID) {
+        return certCache.containsKey(cxID);
+    }
+
+    @Override
+    public void removeCert(String cxID) {
+        if (cxID != null) {
+            certCache.remove(cxID);
+            log.debug("[Crypto] Evicted temp cert for {}", cxID.length() > 8 ? cxID.substring(0, 8) : cxID);
+        }
+    }
+
     /**
      * Parse a base64-encoded PGP public key and cache it under {@code cacheKey}.
      * Never replaces an existing entry -- if a key is already cached for this ID, returns true immediately.
@@ -311,6 +326,7 @@ public class PainlessCryptProvider extends CryptProvider {
      * @param base64Key Base64-encoded armored PGP public key
      * @return true if the key is in cache after this call, false if parsing failed
      */
+    @Override
     public boolean cacheKeyFromString(String cacheKey, String base64Key) {
         if (base64Key == null || base64Key.isBlank()) return false;
         if (certCache.containsKey(cacheKey)) return true;
@@ -330,14 +346,23 @@ public class PainlessCryptProvider extends CryptProvider {
     public void setup(String cxID, String s, File dir) throws Exception {
         File privateKeyFile = new File(dir, "key.cx");
         if (privateKeyFile.exists()) {
-            // Try loading as unencrypted .asc file first (exported from Kleopatra)
+            // Try loading as a plain (unencrypted) secret keyring first.
+            // PGPainless may return null instead of throwing when handed an encrypted file,
+            // so treat null the same as an exception and fall through to the decryption path.
+            boolean plainLoaded = false;
             try {
                 secretKey = PGPainless.readKeyRing().secretKeyRing(privateKeyFile.toURL().openStream());
-            } catch (Exception e) {
-                // If that fails, try decrypting it (old format with password-protected file)
+                plainLoaded = secretKey != null;
+            } catch (Exception ignored) {
+                plainLoaded = false;
+            }
+            if (!plainLoaded) {
+                // Decrypt the password-protected file written on first startup
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                DecryptionStream ds = PGPainless.decryptAndOrVerify().onInputStream(privateKeyFile.toURL().openStream()).withOptions(ConsumerOptions.get()
-                .addMessagePassphrase(Passphrase.fromPassword(s)));
+                DecryptionStream ds = PGPainless.decryptAndOrVerify()
+                        .onInputStream(privateKeyFile.toURL().openStream())
+                        .withOptions(ConsumerOptions.get()
+                                .addMessagePassphrase(Passphrase.fromPassword(s)));
                 Streams.pipeAll(ds, baos);
                 ds.close();
                 secretKey = PGPainless.readKeyRing().secretKeyRing(baos.toByteArray());
@@ -444,7 +469,7 @@ public class PainlessCryptProvider extends CryptProvider {
                 String keyHex = (keyId != null)
                         ? "0x" + Long.toHexString(keyId.getKeyId()).toUpperCase()
                         : "null";
-                log.info("[stripSignature] Ignoring missing certificate for key: " + keyHex);
+                log.debug("[stripSignature] Ignoring missing certificate for key: {}", keyHex);
                 return null;   // ← This should allow stripping without verification
             };
 
@@ -462,11 +487,10 @@ public class PainlessCryptProvider extends CryptProvider {
 
             // Debug
             MessageMetadata metadata = decryptionStream.getMetadata();
-            log.info("[stripSignature] Peeking complete. " +
-                    "Verified signatures: " + metadata.getVerifiedSignatures().size());
+            log.debug("[stripSignature] Peeking complete. Verified signatures: {}", metadata.getVerifiedSignatures().size());
 
         } catch (Exception e) {
-            log.error("[stripSignature] Failed to strip signature", e);
+            log.warn("[stripSignature] Failed to strip signature", e);
             DecryptionFailureException dfe = new DecryptionFailureException();
             dfe.initCause(e);
             throw dfe;

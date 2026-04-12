@@ -9,7 +9,6 @@ import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.io.NetworkInputIOJob;
 import us.anvildevelopment.cxnet.network.nodemesh.NodeConfig;
 import us.anvildevelopment.cxnet.network.nodemesh.NodeMesh;
-import us.anvildevelopment.cxnet.network.stream.CXStreamSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -81,33 +80,8 @@ public class SocketWatcher implements Runnable {
                         long totalTime = System.currentTimeMillis() - acceptTime;
                         log.debug("{} TOTAL: {} bytes in {}ms", peerPrefix, data.length, totalTime);
 
-                        //IMPORTANT
-                        // Stream mux discriminator: CXST magic prefix routes to CXStreamManager
-                        if (NodeConfig.streamMainPortMux && cx.streamManager != null
-                                && data.length >= CXStreamSession.STREAM_MAGIC.length + 1
-                                && data[0] == CXStreamSession.STREAM_MAGIC[0]
-                                && data[1] == CXStreamSession.STREAM_MAGIC[1]
-                                && data[2] == CXStreamSession.STREAM_MAGIC[2]
-                                && data[3] == CXStreamSession.STREAM_MAGIC[3]) {
-                            int idLen = data[4] & 0xFF;
-                            if (data.length >= 5 + idLen) {
-                                String sessionID = new String(data, 5, idLen, java.nio.charset.StandardCharsets.UTF_8);
-                                CXStreamSession streamSession = cx.streamManager.getSession(sessionID);
-                                if (streamSession != null) {
-                                    log.info("{} STREAM mux routing to session {}", peerPrefix, sessionID.substring(0, 8));
-                                    streamSession.attachSocket(s, data, 5 + idLen);
-                                } else {
-                                    log.warn("{} STREAM mux unknown session {}", peerPrefix, sessionID.substring(0, Math.min(8, sessionID.length())));
-                                    s.close();
-                                }
-                            } else {
-                                log.warn("{} STREAM mux truncated header, closing", peerPrefix);
-                                s.close();
-                            }
-                            continue;
-                        }
-
-                        // Normal CX protocol event
+                        // Queue for IOThread -- CXST mux detection happens there where the
+                        // still-open socket can be used to complete a partial header read.
                         java.io.ByteArrayInputStream bufferedStream = new java.io.ByteArrayInputStream(data);
                         NetworkInputIOJob ni = new NetworkInputIOJob(bufferedStream, s);  // Pass buffered stream + Socket
                         synchronized (cx.jobQueue) {

@@ -12,5 +12,6 @@ public enum AnalyticData {
     NetworkError,
     Tear,
     Stats,
+    E2EMISS,
 
 }

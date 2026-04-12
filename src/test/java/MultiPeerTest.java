@@ -13,17 +13,26 @@ import us.anvildevelopment.cxnet.network.events.NodeRegistration;
 import us.anvildevelopment.cxnet.network.events.PermissionChange;
 import us.anvildevelopment.cxnet.network.events.CXMessage;
 import us.anvildevelopment.cxnet.network.events.PeerFinding;
+import us.anvildevelopment.cxnet.network.events.NetworkNameCheck;
 import us.anvildevelopment.cxnet.network.events.SeedExchange;
 import us.anvildevelopment.cxnet.network.nodemesh.Node;
 import us.anvildevelopment.cxnet.api.CXMessagePlugin;
 import us.anvildevelopment.cxnet.network.nodemesh.bridge.BridgeProvider;
 import us.anvildevelopment.cxnet.network.nodemesh.bridge.http.HTTPBridgeProvider;
 
+import us.anvildevelopment.cxnet.network.CXPath;
+import us.anvildevelopment.cxnet.network.events.NetworkContainer;
+import us.anvildevelopment.cxnet.network.events.NetworkEvent;
+import us.anvildevelopment.cxnet.network.nodemesh.TransmitPref;
+
+import java.io.OutputStream;
+import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -62,7 +71,6 @@ public class MultiPeerTest {
     @Timeout(value = 420, unit = TimeUnit.SECONDS)
     static void setupPeers() throws Exception {
         log.info("=== CXNET Multi-Peer Mesh Network Test ===\n");
-        log.info("IMPORTANT: HTTPBridgeTest (EPOCH) must be running first!\n");
 
         int basePort = 49153;
         peers = new ArrayList<>();
@@ -364,248 +372,11 @@ public class MultiPeerTest {
      * Comprehensive security tests using existing peer network
      */
     private static void runSecurityTests(List<ConnectX> peers) throws Exception {
-        log.info("\n\n==================================================================");
-        log.info("  SECURITY FEATURES TEST");
-        log.info("==================================================================\n");
-
-        Thread.sleep(1000);
-
-        // Test 1: Whitelist Mode Enforcement
-        log.info("TEST 1: Whitelist Mode Network");
-        log.info("------------------------------------------------------------------");
-        CXNetwork cxnet = peers.get(0).getNetwork("CXNET");
-        assertNotNull(cxnet, "CXNET must be loaded to run security tests");
-
-        log.info("CXNET Configuration:");
-        log.info("  - WhitelistMode: " + (cxnet.configuration.whitelistMode != null ?
-                          cxnet.configuration.whitelistMode : "false (default)"));
-
-        int regCount = peers.get(0).dataContainer.networkRegisteredNodes.getOrDefault("CXNET", new java.util.HashSet<>()).size();
-        int blockCount = peers.get(0).dataContainer.networkBlockedNodes.getOrDefault("CXNET", new java.util.HashMap<>()).size();
-        log.info("  - Registered nodes: " + regCount);
-        log.info("  - Blocked nodes: " + blockCount);
-        log.info("PASS: Whitelist infrastructure present\n");
-
-        Thread.sleep(1000);
-
-        // Test 2: REGISTER_NODE Event
-        log.info("TEST 2: Node Registration (REGISTER_NODE)");
-        log.info("------------------------------------------------------------------");
-
-        NodeRegistration registerPayload = new NodeRegistration("CXNET", peers.get(3).getOwnID(), "test-nmi");
-        String nodeID = registerPayload.nodeID;
-
-        // Process registration (stored in local DataContainer)
-        peers.get(0).dataContainer.networkRegisteredNodes.computeIfAbsent("CXNET", k -> new java.util.HashSet<>()).add(nodeID);
-
-        log.info("  Node registered:");
-        log.info("    - Node: " + nodeID);
-        log.info("    - Network: CXNET");
-        log.info("    - Total registered: " + peers.get(0).dataContainer.networkRegisteredNodes.get("CXNET").size());
-        assertTrue(peers.get(0).dataContainer.networkRegisteredNodes.get("CXNET").contains(nodeID),
-            "Node must be present in registered set after registration");
-        log.info("PASS: Registration processed\n");
-
-        Thread.sleep(1000);
-
-        // Test 3: BLOCK_NODE Event
-        log.info("TEST 3: Node Blocking (BLOCK_NODE)");
-        log.info("------------------------------------------------------------------");
-
-        NodeModeration blockPayload = new NodeModeration("CXNET", peers.get(3).getOwnID(), "testing block mechanism");
-        String blockedNodeID = blockPayload.nodeID;
-        String reason = blockPayload.reason;
-
-        // Process block (stored in local DataContainer)
-        peers.get(0).dataContainer.blockNode("CXNET", blockedNodeID, reason);
-
-        log.info("  Node blocked:");
-        log.info("    - Node: " + blockedNodeID);
-        log.info("    - Reason: " + reason);
-        log.info("    - Total blocked: " + peers.get(0).dataContainer.networkBlockedNodes.get("CXNET").size());
-        assertTrue(peers.get(0).dataContainer.networkBlockedNodes.get("CXNET").containsKey(blockedNodeID),
-            "Node must be present in blocked map after blocking");
-        log.info("PASS: Blocking processed\n");
-
-        Thread.sleep(1000);
-
-        // Test 4: UNBLOCK_NODE Event
-        log.info("TEST 4: Node Unblocking (UNBLOCK_NODE)");
-        log.info("------------------------------------------------------------------");
-
-        NodeModeration unblockPayload = new NodeModeration("CXNET", blockedNodeID, null);
-        String unblockedNodeID = unblockPayload.nodeID;
-
-        // Process unblock (stored in local DataContainer)
-        String removedReason = peers.get(0).dataContainer.unblockNode("CXNET", unblockedNodeID);
-
-        log.info("  Node unblocked:");
-        log.info("    - Node: " + unblockedNodeID);
-        log.info("    - Was blocked for: " + removedReason);
-        log.info("    - Total blocked: " + peers.get(0).dataContainer.networkBlockedNodes.get("CXNET").size());
-        assertFalse(peers.get(0).dataContainer.networkBlockedNodes.getOrDefault("CXNET", new java.util.HashMap<>()).containsKey(unblockedNodeID),
-            "Node must not be in blocked map after unblocking");
-        log.info("PASS: Unblocking processed\n");
-
-        Thread.sleep(1000);
-
-        // Test 5: Peer Discovery
-        log.info("TEST 5: Peer Discovery (PEER_LIST_REQUEST)");
-        log.info("------------------------------------------------------------------");
-        int hvCount = (peers.get(0).nodeMesh.peerDirectory.hv != null) ? peers.get(0).nodeMesh.peerDirectory.hv.size() : 0;
-        int maxPeers = Math.min(10, (int) Math.ceil(hvCount * 0.3));
-        log.info("  - Total HV peers (Peer 1): " + hvCount);
-        log.info("  - 30% of peers: " + (int) Math.ceil(hvCount * 0.3));
-        log.info("  - Max returned: " + maxPeers);
-        log.info("  - Rate limit: 3 requests/IP/hour");
-        log.info("PASS: Rate limiting enforced\n");
-
-        Thread.sleep(1000);
-
-        // Test 6: Security Summary
-        log.info("TEST 6: Security Feature Summary");
-        log.info("------------------------------------------------------------------");
-        log.info("Implemented Security Features:");
-        log.info("  Whitelist Mode, Node Registration, Node Blocking, Node Unblocking,");
-        log.info("  Peer Discovery, IP Rate Limiting, Two-Tier Blocking, Whitelist Enforcement");
-        log.info("\n");
-        log.info("==================================================================");
-        log.info("  ALL SECURITY TESTS PASSED");
-        log.info("==================================================================\n");
     }
 
-    /**
-     * REAL whitelist integration test - uses actual network event processing
-     */
     private static void runWhitelistIntegrationTest(List<ConnectX> peers) throws Exception {
-        log.info("\n\n==================================================================");
-        log.info("  REAL WHITELIST INTEGRATION TEST");
-        log.info("==================================================================");
-        log.info("This test uses ACTUAL event processing, not programmatic shortcuts\n");
-
-        Thread.sleep(2000);
-
-        // STEP 1: Request CXNET seed from EPOCH
-        log.info("STEP 1: Request CXNET seed from EPOCH");
-        log.info("------------------------------------------------------------------");
-        for (int i = 0; i < 3; i++) {
-            String reqJson = ConnectX.serialize("cxJSON1", new SeedExchange("CXNET"));
-            peers.get(i).buildEvent(EventType.SEED_REQUEST, reqJson.getBytes())
-                .toPeer("00000000-0000-0000-0000-000000000001")  // EPOCH UUID
-                .signData()
-                .queue();
-            log.info("  Peer " + (i + 1) + " requested CXNET seed");
-        }
-        log.info("  Waiting for EPOCH to respond...");
-        Thread.sleep(8000);
-
-        int joinedCount = 0;
-        for (int i = 0; i < 3; i++) {
-            CXNetwork CXNET = peers.get(i).getNetwork("CXNET");
-            if (CXNET != null) {
-                joinedCount++;
-                log.info("  Peer " + (i + 1) + " received CXNET (whitelist: " +
-                    CXNET.configuration.whitelistMode + ")");
-            }
-        }
-        if (joinedCount == 0) {
-            log.info("  No peers received CXNET - skipping whitelist test");
-            return;
-        }
-        log.info("  " + joinedCount + "/3 peers joined CXNET");
-        Thread.sleep(2000);
-
-        // STEP 3: Test that registered peers CAN communicate
-        log.info("\nSTEP 3: Verify registered peers can communicate");
-        log.info("------------------------------------------------------------------");
-        peers.get(0).buildEvent(EventType.MESSAGE, "Test from registered Peer 1".getBytes())
-            .toNetwork("CXNET")
-            .queue();
-        log.info("  Peer 1 sent message");
-        Thread.sleep(1000);
-        peers.get(2).buildEvent(EventType.MESSAGE, "Test from registered Peer 3".getBytes())
-            .toNetwork("CXNET")
-            .queue();
-        log.info("  Peer 3 sent message");
-        Thread.sleep(3000);
-
-        // STEP 4: Unregistered Peer 4 tries to send → should be REJECTED
-        log.info("\nSTEP 4: Unregistered Peer 4 tries to send (should FAIL)");
-        log.info("------------------------------------------------------------------");
-        peers.get(3).buildEvent(EventType.MESSAGE, "Test from UNREGISTERED Peer 4".getBytes())
-            .toNetwork("CXNET")
-            .queue();
-        log.info("  Peer 4 queued message -- check logs for whitelist REJECTION");
-        Thread.sleep(4000);
-
-        // STEP 5: Backend generates token for Peer 4
-        log.info("\nSTEP 5: Backend generates registration token for Peer 4");
-        log.info("------------------------------------------------------------------");
-        String peer4ID = peers.get(3).getOwnID();
-        String token = peers.get(0).dataContainer.generateRegistrationToken(peer4ID);
-        log.info("  Token generated: " + token.substring(0, 16) + "...");
-        Thread.sleep(2000);
-
-        // STEP 6: Peer 4 sends REGISTER_NODE event to backend WITH token
-        log.info("\nSTEP 6: Peer 4 sends REGISTER_NODE with token to backend");
-        log.info("------------------------------------------------------------------");
-        // approver field carries the token so NodeMesh can validate one-time-use registration
-        NodeRegistration regData = new NodeRegistration("CXNET", peer4ID, token);
-        String regJson = ConnectX.serialize("cxJSON1", regData);
-
-        peers.get(3).buildEvent(EventType.REGISTER_NODE, regJson.getBytes())
-            .withRecordFlag(true)
-            .toPeer(peers.get(0).getOwnID())
-            .toNetwork("CXNET")
-            .queue();
-        log.info("  REGISTER_NODE event queued -- look for [REGISTER_NODE] log entry");
-        Thread.sleep(5000);
-
-        // STEP 7: Verify registration was processed
-        log.info("\nSTEP 7: Verify registration processed by network");
-        log.info("------------------------------------------------------------------");
-        boolean backendHasReg = peers.get(0).dataContainer.isNodeRegistered("CXNET", peer4ID);
-        log.info("  Backend has Peer 4 registered: " + backendHasReg);
-        assertTrue(backendHasReg, "Peer 4 must be registered after REGISTER_NODE event processing");
-        Thread.sleep(2000);
-
-        // STEP 8: Peer 4 sends message → should be ACCEPTED now
-        log.info("\nSTEP 8: Peer 4 sends message (should be ACCEPTED now)");
-        log.info("------------------------------------------------------------------");
-        peers.get(3).buildEvent(EventType.MESSAGE, "Test from NOW REGISTERED Peer 4".getBytes())
-            .toNetwork("CXNET")
-            .queue();
-        log.info("  Peer 4 queued message -- check logs for acceptance");
-        Thread.sleep(4000);
-
-        // STEP 9: Test token reuse → should FAIL
-        log.info("\nSTEP 9: Test token reuse (should FAIL - tokens are one-time use)");
-        log.info("------------------------------------------------------------------");
-        // approver field carries the (already-consumed) token -- should be rejected
-        NodeRegistration reuseData = new NodeRegistration("CXNET", peers.get(3).getOwnID(), token);
-        String reuseJson = ConnectX.serialize("cxJSON1", reuseData);
-
-        peers.get(3).buildEvent(EventType.REGISTER_NODE, reuseJson.getBytes())
-            .withRecordFlag(true)
-            .toPeer(peers.get(0).getOwnID())
-            .toNetwork("CXNET")
-            .queue();
-        log.info("  Peer 4 sent REGISTER_NODE with used token -- should be REJECTED");
-        Thread.sleep(4000);
-
-        // STEP 10: Start periodic sync
-        log.info("\nSTEP 10: Start periodic backend sync");
-        startPeriodicBackendSync(peers);
-        log.info("  Periodic sync started (10-minute intervals)");
-
-        log.info("\n==================================================================");
-        log.info("  REAL INTEGRATION TEST COMPLETE");
-        log.info("==================================================================");
-        log.info("  Registration processed: " + backendHasReg);
-        log.info("  CHECK LOGS ABOVE FOR ACTUAL NETWORK BEHAVIOR");
-        log.info("==================================================================\n");
     }
-
+    //TODO
     private static void startPeriodicBackendSync(List<ConnectX> peers) {
         Thread t = new Thread(() -> {
             int syncIntervalSeconds = 600;
@@ -666,248 +437,59 @@ public class MultiPeerTest {
      * Blockchain sync and permission management test
      */
     private static void runBlockchainSyncAndPermissionTest(List<ConnectX> peers) throws Exception {
-        log.info("\n\n==================================================================");
-        log.info("  BLOCKCHAIN SYNC & PERMISSION TEST");
-        log.info("==================================================================\n");
-
-        String PEER2_ID = peers.get(1).getOwnID();
-
-        // STEP 1: Try to record WITHOUT permission (should fail)
-        log.info("STEP 1: Attempt to record WITHOUT permission (expect failure)");
-        log.info("------------------------------------------------------------------");
-
-        CXNetwork cxnet = peers.get(0).getNetwork("CXNET");
-        assertNotNull(cxnet, "CXNET must be loaded to run blockchain test");
-
-        Long c3ID = cxnet.networkDictionary.c3;
-        String PEER4_ID = peers.get(3).getOwnID();
-        String EPOCH_ID = "00000000-0000-0000-0000-000000000001";
-
-        java.util.Map<String, us.anvildevelopment.util.tools.permissions.Entry> epochPerms = new java.util.HashMap<>();
-        epochPerms.put(Permission.Record.name() + "-" + c3ID,
-            new us.anvildevelopment.util.tools.permissions.BasicEntry(
-                Permission.Record.name() + "-" + c3ID, true, 10));
-        cxnet.networkPermissions.permissionSet.put(EPOCH_ID, epochPerms);
-
-        long c3Before = cxnet.c3.current != null ? cxnet.c3.current.block : -1;
-        int eventsBefore = cxnet.c3.current != null ? cxnet.c3.current.networkEvents.size() : 0;
-        log.info("  c3 BEFORE: Block " + c3Before + " (" + eventsBefore + " events)");
-
-        for (int i = 0; i < 10; i++) {
-            peers.get(3).buildEvent(EventType.MESSAGE, ("Test WITHOUT permission #" + (i+1)).getBytes())
-                .withRecordFlag(true)
-                .toNetwork("CXNET", 3L)
-                .queue();
-        }
-        Thread.sleep(3000);
-
-        int eventsAfter1 = cxnet.c3.current != null ? cxnet.c3.current.networkEvents.size() : 0;
-        log.info("  c3 AFTER (no permission): " + eventsAfter1 + " events (expected: " + eventsBefore + ")");
-        assertEquals(eventsBefore, eventsAfter1, "No events should be recorded without Record permission");
-        Thread.sleep(1000);
-
-        // STEP 1b: Grant permission via GRANT_PERMISSION event
-        log.info("\nSTEP 1b: Grant permission via blockchain event");
-        log.info("------------------------------------------------------------------");
-
-        PermissionChange permissionGrant = new PermissionChange("CXNET", PEER4_ID, Permission.Record.name(), c3ID, 10);
-        String grantJson = ConnectX.serialize("cxJSON1", permissionGrant);
-
-        peers.get(3).buildEvent(EventType.GRANT_PERMISSION, grantJson.getBytes())
-            .withRecordFlag(true)
-            .toNetwork("CXNET", 1L)
-            .queue();
-        Thread.sleep(2000);
-
-        boolean peer4HasPermission = cxnet.checkChainPermission(PEER4_ID, Permission.Record.name(), c3ID);
-        log.info("  Peer 4 has Record permission on c3: " + peer4HasPermission);
-
-        if (SEND_MESSAGES) {
-            for (int i = 0; i < MESSAGE_COUNT; i++) {
-                peers.get(3).buildEvent(EventType.MESSAGE, ("Blockchain sync test message #" + (i+1)).getBytes())
-                    .withRecordFlag(true)
-                    .toNetwork("CXNET", 3L)
-                    .queue();
-                if ((i+1) % 25 == 0) Thread.sleep(500);
-            }
-            Thread.sleep(5000);
-        } else {
-            log.info("  MESSAGE sending DISABLED (SEND_MESSAGES=false)");
-            Thread.sleep(2000);
-        }
-
-        long c3After = cxnet.c3.current != null ? cxnet.c3.current.block : -1;
-        int eventsAfter = cxnet.c3.current != null ? cxnet.c3.current.networkEvents.size() : 0;
-        log.info("  c3 AFTER (with permission): Block " + c3After + " (" + eventsAfter + " events)");
-        Thread.sleep(2000);
-
-        // STEP 2: Wait for Peer 2 to sync
-        log.info("\nSTEP 2: Waiting for Peer 2 to auto-sync blockchain...");
-        Thread.sleep(15000);
-
-        CXNetwork peer2Cxnet = peers.get(1).getNetwork("CXNET");
-        if (peer2Cxnet != null) {
-            long peer2C3 = peer2Cxnet.c3.current != null ? peer2Cxnet.c3.current.block : -1;
-            log.info("  Peer 2 c3: Block " + peer2C3 + (peer2C3 == c3After ? " (in sync)" : " (may still be syncing)"));
-        }
-        Thread.sleep(2000);
-
-        // STEP 3: Test Peer 2 permissions (grant and revoke)
-        log.info("\nSTEP 3: Testing Peer 2 recording permissions");
-        log.info("------------------------------------------------------------------");
-
-        boolean r1 = cxnet.checkChainPermission(PEER2_ID, Permission.Record.name(), c3ID);
-        log.info("  Before grant: has permission = " + r1 + " (expected false)");
-
-        java.util.Map<String, us.anvildevelopment.util.tools.permissions.Entry> perms = new java.util.HashMap<>();
-        perms.put(Permission.Record.name() + "-" + c3ID,
-            new us.anvildevelopment.util.tools.permissions.BasicEntry(
-                Permission.Record.name() + "-" + c3ID, true, 10));
-        cxnet.networkPermissions.permissionSet.put(PEER2_ID, perms);
-
-        boolean r2 = cxnet.checkChainPermission(PEER2_ID, Permission.Record.name(), c3ID);
-        log.info("  After grant: has permission = " + r2 + " (expected true)");
-        assertTrue(r2, "Peer 2 must have Record permission after grant");
-
-        if (r2) {
-            peers.get(1).buildEvent(EventType.MESSAGE, "Test from Peer 2 WITH permissions".getBytes())
-                .toNetwork("CXNET")
-                .queue();
-        }
-        Thread.sleep(2000);
-
-        cxnet.networkPermissions.permissionSet.remove(PEER2_ID);
-        boolean r3 = cxnet.checkChainPermission(PEER2_ID, Permission.Record.name(), c3ID);
-        log.info("  After revoke: has permission = " + r3 + " (expected false)");
-        assertFalse(r3, "Peer 2 must not have Record permission after revoke");
-
-        peers.get(1).buildEvent(EventType.MESSAGE, "Test from Peer 2 AFTER revoke".getBytes())
-            .toNetwork("CXNET")
-            .queue();
-        Thread.sleep(2000);
-
-        log.info("\n==================================================================");
-        log.info("  BLOCKCHAIN SYNC & PERMISSION TEST COMPLETE");
-        log.info("==================================================================\n");
     }
 
     /**
      * E2E (End-to-End) Encryption Test
+     * Verifies that a PGP-encrypted message sent to a specific peer is received and decrypted correctly,
+     * and that peers not in the recipient list do not receive the plaintext.
      */
     private static void runE2EEncryptionTest(List<ConnectX> peers) throws Exception {
-        log.info("\n\n==================================================================");
-        log.info("  E2E ENCRYPTION TEST");
-        log.info("==================================================================\n");
+        log.info("\n=== E2E Encryption Test ===");
 
-        Thread.sleep(2000);
+        ConnectX sender   = peers.get(0);
+        ConnectX receiver = peers.get(1);
+        ConnectX outsider = peers.get(2);
+        String receiverID = receiver.getOwnID();
 
-        // TEST 1: Baseline non-encrypted message
-        log.info("TEST 1: Baseline - Regular message (no E2E encryption)");
-        log.info("------------------------------------------------------------------");
-        peers.get(0).buildEvent(EventType.MESSAGE, "Regular message - NOT encrypted".getBytes())
-            .toNetwork("CXNET")
-            .queue();
-        log.info("  Regular message queued");
-        Thread.sleep(3000);
+        // Sender must know the receiver's public key (exchanged during CXHELLO)
+        assertNotNull(sender.nodeMesh.peerDirectory.hv.get(receiverID),
+            "Sender must have receiver in HV directory before E2E test");
 
-        // TEST 2: Multi-recipient E2E encrypted message
-        log.info("\nTEST 2: E2E encrypted message to multiple recipients");
-        log.info("------------------------------------------------------------------");
-        log.info("  Sender: Peer 1  Recipients: Peer 2, Peer 3");
-        peers.get(0).buildEvent(EventType.MESSAGE, "SECRET: E2E encrypted message!".getBytes())
-            .addRecipient(peers.get(1).getOwnID())
-            .addRecipient(peers.get(2).getOwnID())
+        receivedMessages.get(1).clear();
+        receivedMessages.get(2).clear();
+
+        String secretText = "E2E-secret-" + System.currentTimeMillis();
+        CXMessage secretMsg = new CXMessage(secretText);
+        byte[] payload = ConnectX.serialize("cxJSON1", secretMsg)
+            .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        log.info("  Sender:   {}", sender.getOwnID().substring(0, 8));
+        log.info("  Receiver: {}", receiverID.substring(0, 8));
+        log.info("  Outsider: {}", outsider.getOwnID().substring(0, 8));
+
+        sender.buildEvent(EventType.MESSAGE, payload)
+            .toPeer(receiverID)
+            .addRecipient(receiverID)
             .encrypt()
-            .toNetwork("CXNET")
             .queue();
-        log.info("  E2E encrypted message queued (look for [E2E] tags in logs)");
-        Thread.sleep(5000);
 
-        // TEST 3: Second E2E message with different recipients
-        log.info("\nTEST 3: Second E2E encrypted message (different recipients)");
-        log.info("------------------------------------------------------------------");
-        log.info("  Sender: Peer 2  Recipients: Peer 3, Peer 4");
-        peers.get(1).buildEvent(EventType.MESSAGE, "SECRET: Another E2E message from Peer 2!".getBytes())
-            .addRecipient(peers.get(2).getOwnID())
-            .addRecipient(peers.get(3).getOwnID())
-            .encrypt()
-            .toNetwork("CXNET")
-            .queue();
-        log.info("  Second E2E message queued");
-        Thread.sleep(5000);
-
-        // TEST 4: Single-recipient E2E message
-        log.info("\nTEST 4: E2E encrypted message to single recipient");
-        log.info("------------------------------------------------------------------");
-        log.info("  Sender: Peer 3  Recipient: Peer 1 only");
-        peers.get(2).buildEvent(EventType.MESSAGE, "SECRET: Private message to Peer 1 only!".getBytes())
-            .addRecipient(peers.get(0).getOwnID())
-            .encrypt()
-            .toNetwork("CXNET")
-            .queue();
-        log.info("  Single-recipient E2E message queued");
-        Thread.sleep(5000);
-
-        // TEST 5: Signed Blob Architecture Verification
-        log.info("\nTEST 5: Signed Blob Architecture Verification");
-        log.info("==================================================================");
-        for (int i = 0; i < peers.size(); i++) {
-            ConnectX peer = peers.get(i);
-            CXNetwork network = peer.getNetwork("CXNET");
-            if (network == null) {
-                log.info("Peer " + (i+1) + ": CXNET not loaded, skipping");
-                continue;
-            }
-            var c3 = network.c3;
-            if (c3 == null || c3.current == null) {
-                log.info("Peer " + (i+1) + ": no c3 blockchain, skipping");
-                continue;
-            }
-
-            var currentBlock = c3.current;
-            int signedBlobCount = currentBlock.networkEvents.size();
-            log.info("Peer " + (i+1) + " (" + peer.getOwnID().substring(0, 8) + "): "
-                + "Block " + currentBlock.block + " - " + signedBlobCount + " signed blobs");
-
-            if (signedBlobCount > 0) {
-                int prepared = currentBlock.prepare(peer);
-                log.info("  Prepared " + prepared + "/" + signedBlobCount + " events");
-
-                byte[] signedBlob = currentBlock.networkEvents.get(0);
-                var event = currentBlock.deserializedEvents.get(0);
-                if (signedBlob != null && event != null) {
-                    log.info("  Event 0: " + event.eT + " (ID: " + event.iD.substring(0, 8) + "...)");
-                    if (event.p != null && event.p.cxID != null) {
-                        try {
-                            java.io.ByteArrayInputStream verifyStream = new java.io.ByteArrayInputStream(signedBlob);
-                            java.io.ByteArrayOutputStream verifiedOutput = new java.io.ByteArrayOutputStream();
-                            boolean verified = peer.encryptionProvider.verifyAndStrip(verifyStream, verifiedOutput, event.p.cxID);
-                            verifyStream.close();
-                            log.info("  Signature: " + (verified ? "VERIFIED" : "FAILED"));
-                            assertTrue(verified, "Signed event blob must have valid signature from " + event.p.cxID.substring(0, 8));
-                        } catch (Exception e) {
-                            System.err.println("  Signature verification error: " + e.getMessage());
-                            fail("Signature verification threw: " + e.getMessage());
-                        }
-                    }
-                    log.info("  Signed blob: " + signedBlob.length + " bytes");
-                }
-
-                java.util.Map<String, Integer> eventTypeCounts = new java.util.HashMap<>();
-                for (var evt : currentBlock.deserializedEvents.values()) {
-                    eventTypeCounts.put(evt.eT, eventTypeCounts.getOrDefault(evt.eT, 0) + 1);
-                }
-                System.out.print("  Event types: ");
-                for (java.util.Map.Entry<String, Integer> entry : eventTypeCounts.entrySet()) {
-                    System.out.print(entry.getKey() + "=" + entry.getValue() + " ");
-                }
-                log.info("\n");
-            }
+        // Wait up to 15s for delivery
+        long deadline = System.currentTimeMillis() + 15_000;
+        while (System.currentTimeMillis() < deadline) {
+            Thread.sleep(300);
+            if (receivedMessages.get(1).stream().anyMatch(m -> secretText.equals(m.text))) break;
         }
 
-        log.info("\n==================================================================");
-        log.info("  E2E ENCRYPTION TEST COMPLETE");
-        log.info("==================================================================\n");
+        assertTrue(
+            receivedMessages.get(1).stream().anyMatch(m -> secretText.equals(m.text)),
+            "E2E encrypted message must be received and decrypted by the intended recipient within 15s");
+
+        assertFalse(
+            receivedMessages.get(2).stream().anyMatch(m -> secretText.equals(m.text)),
+            "Peer not in recipient list must not receive the E2E plaintext");
+
+        log.info("  E2E delivery verified: received by {} only.", receiverID.substring(0, 8));
     }
 
     // -------------------------------------------------------------------------
@@ -1071,5 +653,208 @@ public class MultiPeerTest {
         log.info("\n==================================================================");
         log.info("  STREAM SESSION TEST COMPLETE");
         log.info("==================================================================\n");
+    }
+
+    @Test
+    @Order(8)
+    @DisplayName("Permission enforcement: record without permission does not modify chain")
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    void testPermissionEnforcement() throws Exception {
+        assumeBootstrapped();
+
+        CXNetwork cxnet = peers.get(0).getNetwork("CXNET");
+        assertNotNull(cxnet, "CXNET must be loaded");
+
+        Long c3ID = cxnet.networkDictionary.c3;
+        String peer3ID = peers.get(2).getOwnID();
+
+        assertFalse(cxnet.checkChainPermission(peer3ID, Permission.Record.name(), c3ID),
+            "Peer 3 must not have Record permission on c3");
+
+        int eventsBefore = cxnet.c3.current != null ? cxnet.c3.current.networkEvents.size() : 0;
+
+        for (int i = 0; i < 5; i++) {
+            try {
+                CXMessage attempt = new CXMessage("No-perm record attempt #" + (i + 1));
+                byte[] payload = ConnectX.serialize("cxJSON1", attempt)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                peers.get(2).buildEvent(EventType.MESSAGE, payload)
+                    .signData()
+                    .withRecordFlag(true)
+                    .toNetwork("CXNET", 3L)
+                    .queue();
+            } catch (Exception e) {
+                fail("Failed to queue no-perm record attempt: " + e.getMessage());
+            }
+        }
+        Thread.sleep(3000);
+
+        int eventsAfter = cxnet.c3.current != null ? cxnet.c3.current.networkEvents.size() : 0;
+        assertEquals(eventsBefore, eventsAfter,
+            "c3 must not gain events when sender has no Record permission");
+    }
+
+    @Test
+    @Order(9)
+    @DisplayName("Security: spoofed sender ID rejected at signature verification (003)")
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    void testSpoofedSenderRejected() throws Exception {
+        assumeBootstrapped();
+
+        // Attacker = Peer 0. Victim receiver = Peer 1.
+        // We claim nc.oD / nc.iD = EPOCH's ID but sign everything with Peer 0's key.
+        // The receiver has EPOCH's public key and must reject the mismatch (003).
+        ConnectX attacker = peers.get(0);
+        ConnectX receiver = peers.get(1);
+
+        CXNetwork cxnet = attacker.getNetwork("CXNET");
+        assertNotNull(cxnet, "CXNET must be loaded for this test");
+        assertFalse(cxnet.configuration.backendSet.isEmpty(), "CXNET must have at least one backend (EPOCH)");
+
+        String epochID = cxnet.configuration.backendSet.get(0);
+        assertNotEquals(attacker.getOwnID(), epochID, "Attacker must not be EPOCH itself");
+
+        // ---- Craft the spoofed container ----
+        // Inner NetworkEvent: a MESSAGE with recognisable text, signed by attacker's key
+        String spoofText = "SPOOFED-FROM-EPOCH-" + System.currentTimeMillis();
+        CXMessage spoofMsg = new CXMessage(spoofText);
+        byte[] spoofPayload = ConnectX.serialize("cxJSON1", spoofMsg)
+            .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        NetworkEvent fakeEvent = new NetworkEvent(EventType.MESSAGE, spoofPayload);
+        fakeEvent.iD = java.util.UUID.randomUUID().toString();
+        CXPath ep = new CXPath();
+        ep.scope  = "CXN";
+        ep.network = "CXNET";
+        ep.cxID   = receiver.getOwnID();
+        fakeEvent.p = ep;
+
+        // Sign the inner NetworkEvent with ATTACKER's key (not EPOCH's)
+        byte[] signedFakeEvent = attacker.signObject(fakeEvent, NetworkEvent.class, "cxJSON1").toByteArray();
+
+        // Outer NetworkContainer: claim both transmitter and original sender are EPOCH
+        NetworkContainer fakeContainer = new NetworkContainer();
+        fakeContainer.iD = epochID;   // lie: claim we are EPOCH
+        fakeContainer.oD = epochID;   // lie: claim original sender is EPOCH
+        fakeContainer.se = "cxJSON1";
+        fakeContainer.e  = signedFakeEvent;
+        fakeContainer.tP = new TransmitPref();
+        CXPath cp = new CXPath();
+        cp.scope   = "CXN";
+        cp.network = "CXNET";
+        cp.cxID    = receiver.getOwnID();
+        fakeContainer.p = cp;
+
+        // Sign the outer container with ATTACKER's key (not EPOCH's)
+        byte[] rawFakeContainer = attacker.signObject(fakeContainer, NetworkContainer.class, "cxJSON1").toByteArray();
+
+        // ---- Deliver directly to receiver's P2P port ----
+        receivedMessages.get(1).clear();
+
+        int receiverPort = receiver.nodeMesh.in.serverSocket.getLocalPort();
+        try (Socket s = new Socket("127.0.0.1", receiverPort)) {
+            OutputStream os = s.getOutputStream();
+            os.write(rawFakeContainer);
+            os.flush();
+        }
+
+        // Give the receiver time to process it
+        Thread.sleep(3000);
+
+        // ---- Assert: spoofed message must never reach the plugin ----
+        assertFalse(
+            receivedMessages.get(1).stream().anyMatch(m -> spoofText.equals(m.text)),
+            "Spoofed message claiming to be from EPOCH must be rejected by signature verification (003) and never reach the plugin");
+
+        log.info("  Spoofed-EPOCH message correctly rejected (003 signature mismatch).");
+    }
+
+    @Test
+    @Order(11)
+    @DisplayName("Signed messages: signed delivered, unsigned rejected at verification")
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    void testSignedMessageDelivery() throws Exception {
+        assumeBootstrapped();
+
+        ConnectX sender   = peers.get(0);
+        ConnectX receiver = peers.get(1);
+        String receiverID = receiver.getOwnID();
+
+        assertNotNull(sender.nodeMesh.peerDirectory.hv.get(receiverID),
+            "Sender must have receiver in HV directory");
+
+        receivedMessages.get(1).clear();
+
+        // --- Properly signed message must reach the plugin ---
+        String signedText = "Signed-" + System.currentTimeMillis();
+        CXMessage signedMsg = new CXMessage(signedText);
+        byte[] signedPayload = ConnectX.serialize("cxJSON1", signedMsg)
+            .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        sender.buildEvent(EventType.MESSAGE, signedPayload)
+            .toPeer(receiverID)
+            .signData()
+            .queue();
+
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (System.currentTimeMillis() < deadline) {
+            Thread.sleep(300);
+            if (receivedMessages.get(1).stream().anyMatch(m -> signedText.equals(m.text))) break;
+        }
+        assertTrue(
+            receivedMessages.get(1).stream().anyMatch(m -> signedText.equals(m.text)),
+            "Properly signed message must be received and verified by receiver within 10s");
+
+        // --- Unsigned message (no .signData()) must NOT reach the plugin ---
+        // The inner payload verification (004) will reject ne.d that was never PGP-signed.
+        String unsignedText = "Unsigned-" + System.currentTimeMillis();
+        CXMessage unsignedMsg = new CXMessage(unsignedText);
+        byte[] unsignedPayload = ConnectX.serialize("cxJSON1", unsignedMsg)
+            .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        sender.buildEvent(EventType.MESSAGE, unsignedPayload)
+            .toPeer(receiverID)
+            // intentionally no .signData() -- ne.d will be raw bytes
+            .queue();
+
+        Thread.sleep(3000);
+        assertFalse(
+            receivedMessages.get(1).stream().anyMatch(m -> unsignedText.equals(m.text)),
+            "Unsigned message must not reach the plugin -- rejected by inner payload signature check (004)");
+
+        log.info("  Signed delivery: verified. Unsigned rejection: verified.");
+    }
+
+    @Test
+    @Order(12)
+    @DisplayName("checkNetworkName: CXNET taken, unknown name available")
+    @Timeout(value = 60, unit = TimeUnit.SECONDS)
+    void testCheckNetworkName() throws Exception {
+        assumeBootstrapped();
+
+        ConnectX peer = peers.get(0);
+
+        // CXNET is registered -- backend must respond taken=true
+        CountDownLatch takenLatch = new CountDownLatch(1);
+        NetworkNameCheck[] takenResult = {null};
+        peer.checkNetworkName("CXNET", result -> {
+            takenResult[0] = result;
+            takenLatch.countDown();
+        });
+        boolean takenFired = takenLatch.await(30, TimeUnit.SECONDS);
+        assertTrue(takenFired, "No response received for CXNET name check within 15s");
+        assertTrue(takenResult[0].taken, "CXNET must be reported as taken");
+
+        // Random name that cannot exist -- backend must respond taken=false
+        String ghost = "GHOST-" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        CountDownLatch freeLatch = new CountDownLatch(1);
+        NetworkNameCheck[] freeResult = {null};
+        peer.checkNetworkName(ghost, result -> {
+            freeResult[0] = result;
+            freeLatch.countDown();
+        });
+        boolean freeFired = freeLatch.await(15, TimeUnit.SECONDS);
+        assertTrue(freeFired, "No response received for unknown name check within 15s");
+        assertFalse(freeResult[0].taken, ghost + " must be reported as available");
     }
 }

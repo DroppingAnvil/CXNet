@@ -43,20 +43,20 @@ public class OutputProcessor implements Runnable {
 
                 // Log every 100 iterations OR when queue is large (only if enabled)
                 if (NodeConfig.enableOutLoopLogging && (loopCount % 100 == 0 || queueSizeBefore > 5)) {
-                    log.info("[OUT-LOOP] Peer {} iteration {}, queue: {}, polled: {}", peerShort, loopCount, queueSizeBefore, (bundle != null));
+                    log.debug("[OUT-LOOP] Peer {} iteration {}, queue: {}, polled: {}", peerShort, loopCount, queueSizeBefore, (bundle != null));
                 }
 
                 // Debug: Log if we polled from a non-empty queue
                 if (queueSizeBefore > 10) {
                     // Log when queue is large (stuck?)
-                    log.info("[poll-DEBUG] Peer {} queue size: {}, polled: {}", peerShort, queueSizeBefore, (bundle != null ? "YES" : "NULL"));
+                    log.debug("[poll-DEBUG] Peer {} queue size: {}, polled: {}", peerShort, queueSizeBefore, (bundle != null ? "YES" : "NULL"));
                     if (bundle != null && bundle.ne != null && bundle.ne.eT != null) {
-                        log.info("[poll-DEBUG]   -> Event type: {}", bundle.ne.eT);
+                        log.debug("[poll-DEBUG]   -> Event type: {}", bundle.ne.eT);
                     }
                 } else if (bundle != null) {
                     String et = (bundle.ne != null && bundle.ne.eT != null) ? bundle.ne.eT : "NULL";
                     if (et.contains("HELLO")) {
-                        log.info("[poll-DEBUG] Peer {} polled {}", peerShort, et);
+                        log.debug("[poll-DEBUG] Peer {} polled {}", peerShort, et);
                     }
                 }
 
@@ -79,23 +79,26 @@ public class OutputProcessor implements Runnable {
                         eventType = "EXCEPTION:" + ex.getMessage();
                     }
 
-                    // Log EVERY bundle for debugging
-                    log.info("[OUT-DEBUG] Type={}, Node={}, Perm={}", eventType, nodeAddr, hasPerm);
+                    log.debug("[OUT-DEBUG] Type={}, Node={}, Perm={}", eventType, nodeAddr, hasPerm);
 
                     try {
                         outController.transmitEvent(bundle);
                     } catch (Exception e) {
-                        // Move failed event to retry queue instead of dropping it
-                        // This prevents failed events (e.g., to offline EPOCH) from blocking the output queue
-                        RetryBundle retryBundle =
-                            new RetryBundle(bundle);
-                        retryBundle.scheduleNextRetry(e.getMessage());
-
-                        outController.connectXAPI.retryQueue.add(retryBundle);
-
-                        log.error("[OUT-ERROR] {} to {} failed: {}", eventType, nodeAddr, e.getMessage());
-                        log.error("[RETRY-QUEUE] Added to retry queue (retry 1/{} in {}s)",
-                            RetryBundle.MAX_RETRIES, (RetryBundle.INITIAL_RETRY_DELAY_MS / 1000));
+                        // CXHELLO is fire-and-forget: a failed send means the host isn't a CX peer.
+                        // Retrying won't help and would keep a growing pile in the retry queue.
+                        boolean isHello = eventType.contains("HELLO");
+                        if (isHello) {
+                            log.debug("[OUT-DROP] {} to {} failed (no retry): {}", eventType, nodeAddr, e.getMessage());
+                        } else {
+                            // Move failed event to retry queue instead of dropping it
+                            // This prevents failed events (e.g., to offline EPOCH) from blocking the output queue
+                            RetryBundle retryBundle = new RetryBundle(bundle);
+                            retryBundle.scheduleNextRetry(e.getMessage());
+                            outController.connectXAPI.retryQueue.add(retryBundle);
+                            log.error("[OUT-ERROR] {} to {} failed: {}", eventType, nodeAddr, e.getMessage());
+                            log.error("[RETRY-QUEUE] Added to retry queue (retry 1/{} in {}s)",
+                                RetryBundle.MAX_RETRIES, (RetryBundle.INITIAL_RETRY_DELAY_MS / 1000));
+                        }
                     }
                 }
 

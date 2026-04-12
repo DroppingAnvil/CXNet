@@ -3,6 +3,7 @@ package us.anvildevelopment.cxnet.io;
 import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.network.nodemesh.NodeConfig;
 import us.anvildevelopment.cxnet.network.nodemesh.NodeMesh;
+import us.anvildevelopment.cxnet.network.stream.CXStreamSession;
 import us.anvildevelopment.cxnet.utils.obj.BaseStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -98,7 +99,46 @@ public class IOThread implements Runnable {
                     break;
                 case NETWORK_READ:
                     NetworkInputIOJob ioj = (NetworkInputIOJob) ioJob;
-                    nodeMesh.processNetworkInput(ioJob.is, ioj.s);
+                    byte[] buffered = ioJob.is.readAllBytes();
+                    if (NodeConfig.streamMainPortMux && cx.streamManager != null
+                            && buffered.length >= 4
+                            && buffered[0] == CXStreamSession.STREAM_MAGIC[0]
+                            && buffered[1] == CXStreamSession.STREAM_MAGIC[1]
+                            && buffered[2] == CXStreamSession.STREAM_MAGIC[2]
+                            && buffered[3] == CXStreamSession.STREAM_MAGIC[3]) {
+                        try {
+                            InputStream sock = ioj.s.getInputStream();
+                            ioj.s.setSoTimeout(1000);
+                            // Get the length byte (byte 4) -- read from socket if not yet buffered
+                            int idLen = buffered.length >= 5 ? (buffered[4] & 0xFF) : (sock.read() & 0xFF);
+                            // Allocate exactly the header size we need
+                            byte[] header = new byte[5 + idLen];
+                            int have = Math.min(buffered.length, header.length);
+                            System.arraycopy(buffered, 0, header, 0, have);
+                            // If idLen was read from the socket (not from buffered), store it in
+                            // header[4] and advance 'have' -- otherwise readNBytes would try to
+                            // read idLen + session ID bytes when only session ID bytes remain.
+                            if (buffered.length < 5) {
+                                header[4] = (byte) idLen;
+                                have = 5;
+                            }
+                            if (have < header.length) sock.readNBytes(header, have, header.length - have);
+                            String sessionID = new String(header, 5, idLen, java.nio.charset.StandardCharsets.UTF_8);
+                            CXStreamSession streamSession = cx.streamManager.getSession(sessionID);
+                            if (streamSession != null) {
+                                log.info("[IOThread] STREAM mux routing to session {}", sessionID.substring(0, 8));
+                                streamSession.attachSocket(ioj.s, header, header.length);
+                            } else {
+                                log.warn("[IOThread] STREAM mux unknown session {}", sessionID.substring(0, Math.min(8, sessionID.length())));
+                                ioj.s.close();
+                            }
+                        } catch (Exception e) {
+                            log.warn("[IOThread] STREAM mux header read failed: {}", e.getMessage());
+                            try { ioj.s.close(); } catch (Exception ignored) {}
+                        }
+                        break;
+                    }
+                    nodeMesh.processNetworkInput(new ByteArrayInputStream(buffered), ioj.s);
                     break;
                 case SIGN_OBJECT:
                     break;

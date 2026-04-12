@@ -48,11 +48,11 @@ public class RetryProcessor implements Runnable {
                     while ((polled = outController.connectXAPI.retryQueue.poll()) != null) {
                         if (polled.hasExceededMaxRetries()) {
                             // Drop after max retries
-                            log.error("[RETRY-DROP] {} to {} dropped after {} retries",
+                            log.info("[RETRY-DROP] {} to {} dropped after {} retries",
                                 polled.getEventType(), polled.getTargetAddress(), polled.retryCount);
-                            log.error("[RETRY-DROP]   First attempt: {}s ago",
+                            log.info("[RETRY-DROP]   First attempt: {}s ago",
                                 ((System.currentTimeMillis() - polled.firstAttemptTime) / 1000));
-                            log.error("[RETRY-DROP]   Last error: {}", polled.lastError);
+                            log.info("[RETRY-DROP]   Last error: {}", polled.lastError);
                         } else if (polled.shouldRetry()) {
                             // Ready for retry
                             toRetry.add(polled);
@@ -89,50 +89,58 @@ public class RetryProcessor implements Runnable {
                             continue;
                         }
 
-                        log.info("[CXS->CXN-FALLBACK] {} to peer {} failed {} times, converting to CXN with E2E encryption",
+                        log.debug("[CXS->CXN-FALLBACK] {} to peer {} failed {} times, converting to CXN with E2E encryption",
                             eventType, (targetPeerID != null && targetPeerID.length() >= 8 ? targetPeerID.substring(0, 8) : "UNKNOWN"), bundle.retryCount);
 
                         try {
-                            // Attempt node lookup to prime cert cache before E2E encrypt
-                            try {
-                                outController.connectXAPI.nodeMesh.peerDirectory.lookup(targetPeerID, true, true);
-                            } catch (Exception lookupEx) {
-                                log.error("[CXS->CXN-LOOKUP] Could not resolve peer {}: {}",
+                            byte[] eventData = bundle.bundle.ne.d;
+                            EventType et = EventType.valueOf(bundle.bundle.ne.eT);
+
+                            // Discovery events carry public keys -- E2E is circular and breaks receivers.
+                            // Broadcast signed-only so any peer can strip and import the key.
+                            boolean isDiscovery = "NewNode".equals(eventType)
+                                || "CXHELLO".equals(eventType)
+                                || "CXHELLO_RESPONSE".equals(eventType);
+
+                            if (isDiscovery) {
+                                // eventData is already signed (from the original send) -- do NOT sign again.
+                                outController.connectXAPI.buildEvent(et, eventData)
+                                    .toNetwork(networkID != null ? networkID : "CXNET")
+                                    .queue();
+                                log.info("[CXS->CXN-SUCCESS] {} converted to signed CXN broadcast for network {}",
+                                    eventType, (networkID != null ? networkID : "CXNET"));
+                            } else {
+                                // Attempt node lookup to prime cert cache before E2E encrypt
+                                try {
+                                    outController.connectXAPI.nodeMesh.peerDirectory.lookup(targetPeerID, true, true);
+                                } catch (Exception lookupEx) {
+                                    log.debug("[CXS->CXN-LOOKUP] Could not resolve peer {}: {}",
                                         (targetPeerID != null && targetPeerID.length() >= 8 ? targetPeerID.substring(0, 8) : "UNKNOWN"),
-                                    lookupEx.getMessage());
-                                // Continue anyway - cert may already be cached or lookup partial
+                                        lookupEx.getMessage());
+                                }
+                                outController.connectXAPI.buildEvent(et, eventData)
+                                    .toNetwork(networkID != null ? networkID : "CXNET")
+                                    .addRecipient(targetPeerID)
+                                    .encrypt()
+                                    .queue();
+                                log.info("[CXS->CXN-SUCCESS] {} converted to E2E-encrypted CXN broadcast for network {}",
+                                    eventType, (networkID != null ? networkID : "CXNET"));
                             }
 
-                            // Re-encrypt the event data with E2E encryption for the target peer
-                            byte[] eventData = bundle.bundle.ne.d;
-
-                            EventType et =
-                                EventType.valueOf(bundle.bundle.ne.eT);
-
-                            outController.connectXAPI.buildEvent(et, eventData)
-                                .toNetwork(networkID != null ? networkID : "CXNET")
-                                .addRecipient(targetPeerID)
-                                .encrypt()
-                                .queue();
-
                             bundle.convertedToCXN = true;
-                            log.info("[CXS->CXN-SUCCESS] {} converted to E2E-encrypted CXN broadcast for network {}",
-                                eventType, (networkID != null ? networkID : "CXNET"));
-
                             // Don't requeue - new event created via EventBuilder
                             continue;
 
                         } catch (Exception e) {
-                            // E2E is mandatory - do not fall back to plain CXS
-                            log.error("[CXS->CXN-FAILED] E2E encrypt failed for {} (cert unavailable?): {} - will retry E2E",
-                                eventType, e.getMessage());
+                            log.info("[CXS->CXN-FAILED] Conversion failed for {} ({}): {} - will retry",
+                                eventType, e.getClass().getSimpleName(), e.getMessage());
                             bundle.scheduleNextRetry(e.getMessage());
                             outController.connectXAPI.retryQueue.add(bundle);
                             continue;
                         }
                     }
 
-                    log.info("[RETRY-ATTEMPT] {} to {} (attempt {}/{})",
+                    log.debug("[RETRY-ATTEMPT] {} to {} (attempt {}/{})",
                         eventType, nodeAddr, (bundle.retryCount + 1), RetryBundle.MAX_RETRIES);
 
                     try {
@@ -146,8 +154,8 @@ public class RetryProcessor implements Runnable {
                         outController.connectXAPI.retryQueue.add(bundle);
 
                         long nextRetryDelay = (bundle.nextRetryTime - System.currentTimeMillis()) / 1000;
-                        log.error("[RETRY-FAILED] {} to {} failed again: {}", eventType, nodeAddr, e.getMessage());
-                        log.error("[RETRY-QUEUE] Retry {}/{} in {}s", bundle.retryCount, RetryBundle.MAX_RETRIES, nextRetryDelay);
+                        log.debug("[RETRY-FAILED] {} to {} failed again: {}", eventType, nodeAddr, e.getMessage());
+                        log.debug("[RETRY-QUEUE] Retry {}/{} in {}s", bundle.retryCount, RetryBundle.MAX_RETRIES, nextRetryDelay);
                     }
                 }
 

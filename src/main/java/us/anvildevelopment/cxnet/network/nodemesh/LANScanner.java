@@ -29,6 +29,10 @@ public class LANScanner {
     private final java.util.Map<Socket, Long> activeCXHELLOSockets = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long SOCKET_TIMEOUT_MS = 5000; // Close sockets after 5 seconds
 
+    // Dedup: skip addresses tried recently (failed = not a CX peer, no point retrying quickly)
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> recentlyQueued = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long REQUEUE_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
     // Port range to scan (default: 49152-49162 = 10 ports)
     private static final int PORT_RANGE_START = 49152;
     private static final int PORT_RANGE_END = 49162;
@@ -220,6 +224,16 @@ public class LANScanner {
                 }
             }
         }
+
+        // Dedup: skip addresses tried within the cooldown window
+        String addrKey = targetIP + ":" + targetPort;
+        long now = System.currentTimeMillis();
+        Long lastQueued = recentlyQueued.get(addrKey);
+        if (lastQueued != null && (now - lastQueued) < REQUEUE_COOLDOWN_MS) {
+            log.debug("[LAN Scanner] Skipping recently-queued address {}", addrKey);
+            return;
+        }
+        recentlyQueued.put(addrKey, now);
 
         try {
             // Sign our Node object for .cxi persistence on receiver

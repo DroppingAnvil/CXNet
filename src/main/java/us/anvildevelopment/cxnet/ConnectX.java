@@ -35,6 +35,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class ConnectX {
@@ -101,6 +102,8 @@ public class ConnectX {
     public BlockchainPersistence blockchainPersistence;
     public DataContainer dataContainer;
     public us.anvildevelopment.cxnet.network.stream.CXStreamManager streamManager;
+    /** In-flight CHECK_NETWORK_NAME callbacks keyed by requestId. Called by NodeMesh on response. */
+    public final ConcurrentHashMap<String, Consumer<us.anvildevelopment.cxnet.network.events.NetworkNameCheck>> pendingNameChecks = new ConcurrentHashMap<>();
 
     /**
      * Seed consensus collection for multi-peer verification
@@ -321,14 +324,13 @@ public class ConnectX {
      * @param bundle OutputBundle to queue
      */
     public void queueEvent(OutputBundle bundle) {
-        // Debug logging for CXHELLO
         if (bundle != null && bundle.ne != null && bundle.ne.eT != null && bundle.ne.eT.contains("HELLO")) {
-            log.info("[queueEvent-DEBUG] Queuing {} to peer {}, queue size before: {}", bundle.ne.eT, getOwnID().substring(0, 8), outputQueue.size());
+            String targetPeer = (bundle.n != null && bundle.n.cxID != null)
+                ? bundle.n.cxID.substring(0, 8)
+                : (bundle.ne.p != null && bundle.ne.p.cxID != null ? bundle.ne.p.cxID.substring(0, 8) : "broadcast");
+            log.debug("[queueEvent-DEBUG] Queuing {} to peer {}, queue size before: {}", bundle.ne.eT, targetPeer, outputQueue.size());
         }
         outputQueue.add(bundle);
-        if (bundle != null && bundle.ne != null && bundle.ne.eT != null && bundle.ne.eT.contains("HELLO")) {
-            log.info("[queueEvent-DEBUG] Queue size after: " + outputQueue.size());
-        }
     }
 
     /**
@@ -474,6 +476,7 @@ public class ConnectX {
         private boolean doSign = false;
         private boolean doEncrypt = false;
         private boolean doLowLevel = false;
+        private String fanOutQd = null;
 
         private EventBuilder(ConnectX connectX, EventType eventType, byte[] data) {
             this.connectX = connectX;
@@ -555,6 +558,39 @@ public class ConnectX {
             this.path.bridge = bridgeType;
             this.path.bridgeArg = bridgeArg;
             return this;
+        }
+
+        /**
+         * Route to every peer in the given network's backend set (scope CXB).
+         * OutConnectionController fans the single OutputBundle out to each backend.
+         * All copies share the same qd so recipients drop duplicates after the first.
+         * A random qd is generated; use toBackends(networkID, queryId) to supply your own
+         * so you can correlate the response via ConnectX.pendingNameChecks.
+         * @param networkID The network whose backendSet to target
+         */
+        public EventBuilder toBackends(String networkID) {
+            return toBackends(networkID, java.util.UUID.randomUUID().toString());
+        }
+
+        /**
+         * Route to every peer in the given network's backend set with a caller-supplied qd.
+         * @param networkID The network whose backendSet to target
+         * @param queryId   Shared deduplication / correlation ID for this fan-out
+         */
+        public EventBuilder toBackends(String networkID, String queryId) {
+            this.path.scope = "CXB";
+            this.path.network = networkID;
+            this.container.qd = queryId;
+            this.fanOutQd = queryId;
+            return this;
+        }
+
+        /**
+         * Returns the qd assigned by toBackends(), or null if not a fan-out.
+         * Store this before calling queue() if you need to correlate a response future.
+         */
+        public String getQueryId() {
+            return fanOutQd;
         }
 
         /**
@@ -1167,7 +1203,13 @@ public class ConnectX {
                     public void doAfter(boolean success) {
                         if (success && o instanceof ByteArrayOutputStream) {
                             applySignedSeed(((ByteArrayOutputStream) o).toByteArray());
-                            requestSeedUpdateFromEpoch();
+                            // If the local file failed (unsigned legacy format or wrong key),
+                            // fall through to a fresh remote fetch in addition to P2P seed request
+                            if (!networkMap.containsKey("CXNET")) {
+                                fetchBootstrapSeedAsync();
+                            } else {
+                                requestSeedUpdateFromEpoch();
+                            }
                         }
                     }
                 });
@@ -1767,37 +1809,32 @@ public class ConnectX {
         // Attempt automatic CXNET bootstrap after network layer is ready
         attemptCXNETBootstrap();
 
-        // Initialize LAN scanner for local peer discovery
-        // Runs periodically every 5 minutes to maintain LAN peer connectivity
+        // Initialize LAN scanner for local peer discovery.
+        // Runs once on startup (after jitter), then every 15 minutes.
+        // After steady-state is reached, Global Scanner will be started (not yet implemented).
         Thread lanScanThread = new Thread(() -> {
             try {
-                // Staggered start: base 10s + random 0-10s jitter so multiple instances starting
-                // simultaneously don't all scan and flood CXHELLO at exactly the same moment.
                 long jitter = (long) (Math.random() * 10000);
                 Thread.sleep(10000 + jitter);
 
-                log.info("[LAN Scanner] Starting periodic LAN discovery (every 5 minutes)");
+                boolean globalScannerStarted = false;
 
                 while (true) {
                     try {
-                        // Verify socket is listening before scanning
                         if (nodeMesh != null && nodeMesh.in != null && nodeMesh.in.serverSocket != null &&
-                            nodeMesh.in.serverSocket.isBound() && !nodeMesh.in.serverSocket.isClosed()) {
-
-                            log.info("[LAN Scanner] Starting LAN scan...");
-                            LANScanner scanner =
-                                new LANScanner(this, port);
-                            scanner.scanNetwork();
-                            log.info("[LAN Scanner] Scan complete, next scan in 5 minutes");
+                                nodeMesh.in.serverSocket.isBound() && !nodeMesh.in.serverSocket.isClosed()) {
+                            new LANScanner(this, port).scanNetwork();
+                            if (!globalScannerStarted) {
+                                globalScannerStarted = true;
+                                // TODO: startGlobalScanner();
+                            }
                         } else {
-                            log.error("[LAN Scanner] Socket not ready, skipping scan");
+                            log.warn("[LAN Scanner] Socket not ready, skipping scan");
                         }
                     } catch (Exception e) {
                         log.error("[LAN Scanner] Scan failed: ", e);
                     }
-
-                    // Wait 5 minutes before next scan (matches peer discovery cycle)
-                    Thread.sleep(300000); // 5 minutes = 300,000 ms
+                    Thread.sleep(15 * 60 * 1000L);
                 }
             } catch (InterruptedException e) {
                 log.info("[LAN Scanner] Thread interrupted, stopping periodic scans");
@@ -1817,9 +1854,13 @@ public class ConnectX {
 
                 log.info("[Persistence] Starting periodic save and discovery thread");
                 log.info("[Persistence] - Blockchain saves: every 30 seconds");
-                log.info("[Persistence] - Peer discovery: every 5 minutes");
+                log.info("[Persistence] - Peer discovery: backoff {}s/{}s then every {}s",
+                    NodeConfig.peerDiscoveryBackoff1Ms / 1000,
+                    NodeConfig.peerDiscoveryBackoff2Ms / 1000,
+                    NodeConfig.peerDiscoverySteadyMs   / 1000);
 
-                int cycleCount = 0; // Track cycles for peer discovery timing
+                int  discoveryRun     = 0;
+                long nextDiscoveryAt  = System.currentTimeMillis() + NodeConfig.peerDiscoveryBackoff1Ms;
 
                 while (true) {
                     try {
@@ -1862,17 +1903,13 @@ public class ConnectX {
                         }
 
                         // TODO: Persist PeerDirectory
-                        // Save discovered LAN and WAN peers to disk
-
                         // TODO: Persist DataContainer
-                        // Save network registrations, blocklists, and other network data
 
-                        // Peer discovery every 5 minutes (10 cycles of 30 seconds) PROD
-                        // We are using 30 seconds for testing
-                        //TODO REMOVE TEST
-                        cycleCount++;
-                        if (cycleCount >= 1) {
-                            cycleCount = 0;
+                        if (System.currentTimeMillis() >= nextDiscoveryAt) {
+                            discoveryRun++;
+                            long nextDelay = discoveryRun == 1 ? NodeConfig.peerDiscoveryBackoff2Ms
+                                                               : NodeConfig.peerDiscoverySteadyMs;
+                            nextDiscoveryAt = System.currentTimeMillis() + nextDelay;
 
                             // Send CXHELLO to waiting addresses via lowLevel builder
                             log.info("[ConnectX] Sending CXHELLO to {} addresses", dataContainer.waitingAddresses.size());
@@ -2068,6 +2105,7 @@ public class ConnectX {
 
         // Only grant blockchain recording for non-CXNET networks
         // CXNET requires explicit permission grants to ensure system health
+        //TODO this seems to be not needed anymore
         if (!"CXNET".equals(networkID)) {
             defaultPermissions.put(Permission.Record.name() + "-" + network.networkDictionary.c3,
                 new us.anvildevelopment.util.tools.permissions.BasicEntry(Permission.Record.name() + "-" + network.networkDictionary.c3, true, 10));
@@ -2099,7 +2137,105 @@ public class ConnectX {
             log.error("[Blockchain] Failed to persist network {}: {}", networkID, e.getMessage());
         }
 
+        // If CXNET is available and this node is not EPOCH, register the network with CXNET NMI
+        if (!EPOCH_UUID.equals(self.cxID) && networkMap.containsKey("CXNET")) {
+            submitNetworkToEpoch(network);
+        }
+
         return network;
+    }
+
+    /**
+     * Check whether a network name is already registered with the CXNET backend set.
+     * Sends CHECK_NETWORK_NAME to all CXNET backends via CXB scope.
+     * qd deduplication ensures only one backend processes and responds.
+     * The callback is invoked from the NodeMesh event thread -- do not block inside it.
+     *
+     * @param name     the network name to check
+     * @param callback receives the full NetworkNameCheck response (taken, message, etc.)
+     */
+    public void checkNetworkName(String name,
+            Consumer<us.anvildevelopment.cxnet.network.events.NetworkNameCheck> callback) throws Exception {
+        String requestId = java.util.UUID.randomUUID().toString();
+        us.anvildevelopment.cxnet.network.events.NetworkNameCheck payload =
+                new us.anvildevelopment.cxnet.network.events.NetworkNameCheck();
+        payload.networkName = name;
+        payload.requestId = requestId;
+
+        pendingNameChecks.put(requestId, callback);
+
+        buildEvent(us.anvildevelopment.cxnet.network.events.EventType.CHECK_NETWORK_NAME,
+                serialize("cxJSON1", payload).getBytes(StandardCharsets.UTF_8))
+                .toBackends("CXNET", requestId)
+                .signData()
+                .queue();
+    }
+
+    /**
+     * Sign the seed for a locally created network and send a NETEPOCH registration request
+     * to the CXNET backend set. The CXIK must have been obtained from the CXNET NMI beforehand.
+     * On approval, CXNET NMI responds with a NETEPOCH_RESPONSE carrying an NMI-signed seed.
+     *
+     * @param network the locally created network
+     */
+    public void submitNetworkToEpoch(CXNetwork network) {
+        String networkID = network.configuration.netID;
+        String cxik = network.configuration.pendingCXIK;
+        if (cxik == null || cxik.isBlank()) {
+            log.warn("[NETEPOCH] No CXIK set on network {} -- skipping EPOCH registration", networkID);
+            return;
+        }
+        try {
+            // Sign the seed for this network
+            byte[] signedSeedBlob = signAndPublishNetworkSeed(networkID);
+            if (signedSeedBlob == null) {
+                log.error("[NETEPOCH] Failed to sign seed for network {} -- cannot submit to EPOCH", networkID);
+                return;
+            }
+
+            NetworkEpoch payload = new NetworkEpoch();
+            payload.networkID = networkID;
+            payload.cxik = cxik;
+            payload.signedSeedBlob = signedSeedBlob;
+
+            String payloadJson = serialize("cxJSON1", payload);
+
+            buildEvent(EventType.NETEPOCH, payloadJson.getBytes(StandardCharsets.UTF_8))
+                    .addRecipient(EPOCH_UUID)
+                    .encrypt()
+                    .toPeer(EPOCH_UUID)
+                    .queue();
+
+            // Clear the key from config so it is not persisted or reused
+            network.configuration.pendingCXIK = null;
+
+            log.info("[NETEPOCH] Registration request queued for network {}", networkID);
+        } catch (Exception e) {
+            log.error("[NETEPOCH] Failed to submit network {} to EPOCH: {}", networkID, e.getMessage());
+        }
+    }
+
+    /**
+     * Issue a CXIK from this node's DataContainer (CXNET NMI only).
+     * The label is stored for audit purposes. The key must be delivered to the requesting
+     * node out-of-band before they call createNetwork().
+     *
+     * @param label audit label (e.g. requester node ID or description)
+     * @return the generated CXIK, or null if this node is not EPOCH
+     */
+    public String issueCXIK(String label) {
+        if (!EPOCH_UUID.equals(self != null ? self.cxID : null)) {
+            log.warn("[CXIK] issueCXIK called on non-EPOCH node - ignored");
+            return null;
+        }
+        String key = dataContainer.issueCXIK(label);
+        try {
+            saveDataContainer();
+        } catch (Exception e) {
+            log.error("[CXIK] Failed to persist DataContainer after issuing CXIK: {}", e.getMessage());
+        }
+        log.info("[CXIK] Issued key for label: {}", label);
+        return key;
     }
 
     /**
@@ -2571,28 +2707,28 @@ public class ConnectX {
      */
     public boolean Event(NetworkEvent ne, String senderID, byte[] signedBlob) {
         if (ne == null || ne.p == null || signedBlob == null) {
-            log.error("[Blockchain-Debug] Event() null check failed: ne={}, ne.p={}, signedBlob={}", ne != null, ne != null && ne.p != null, signedBlob != null);
+            log.debug("[Blockchain] Event() null check failed: ne={}, ne.p={}, signedBlob={}", ne != null, ne != null && ne.p != null, signedBlob != null);
             return false;
         }
 
         // Get network ID from CXPath
         String networkID = ne.p.network;
         if (networkID == null || networkID.isEmpty()) {
-            log.error("[Blockchain-Debug] Event() networkID check failed: networkID={}", networkID);
+            log.debug("[Blockchain] Event() networkID check failed: networkID={}", networkID);
             return false;
         }
 
         // Get the network
         CXNetwork network = networkMap.get(networkID);
         if (network == null) {
-            log.error("[Blockchain-Debug] Event() network not found: networkID={}, available networks={}", networkID, networkMap.keySet());
+            log.debug("[Blockchain] Event() network not found: networkID={}", networkID);
             return false;
         }
 
         // Get chain ID from CXPath (now stored in path instead of inferred from event type)
         Long chainID = ne.p.chainID;
         if (chainID == null) {
-            log.error("[Blockchain] Event missing chain ID in path");
+            log.debug("[Blockchain] Event missing chain ID in path");
             return false;
         }
 
@@ -2607,13 +2743,13 @@ public class ConnectX {
         }
 
         if (targetChain == null) {
-            log.error("[Blockchain] Invalid chain ID: {} (c1={}, c2={}, c3={})", chainID, network.networkDictionary.c1, network.networkDictionary.c2, network.networkDictionary.c3);
+            log.debug("[Blockchain] Invalid chain ID: {} (c1={}, c2={}, c3={})", chainID, network.networkDictionary.c1, network.networkDictionary.c2, network.networkDictionary.c3);
             return false;
         }
 
         // Check if sender has permission to record to this chain
         if (!network.checkChainPermission(senderID, Permission.Record.name(), chainID)) {
-            log.error("[Blockchain-Debug] Event() permission check failed: senderID={}, chainID={}", senderID != null ? senderID.substring(0, 8) : "null", chainID);
+            log.debug("[Blockchain] Event() permission denied: senderID={}, chainID={}", senderID != null ? senderID.substring(0, 8) : "null", chainID);
             return false;
         }
 

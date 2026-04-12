@@ -30,4 +30,10 @@ public enum Scope {
      * The idea here is that users could bind their 2 computers, phone...  together on a secure lan for personal networking
      */
     LAN,
+    /**
+     * ConnectX Backend scope
+     * Fan-out to every peer in a network's backend set.
+     * All copies share the same qd for deduplication so only the first copy is processed.
+     */
+    CXB,
 }

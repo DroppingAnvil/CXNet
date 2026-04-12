@@ -20,9 +20,9 @@ public class NodeConfig {
     public static boolean encryptAllResources = false;
     public static boolean signAllResources = true;
     //
-    public static Integer outputProcessorThreads = 4;  // Parallel OutputProcessor threads for CXHELLO/event processing
-    public static Long IO_THREAD_SLEEP = 5L;
-    public static Long ioSocketSleep = 5L;
+    public static Integer outputProcessorThreads = 6;  // Parallel OutputProcessor threads for CXHELLO/event processing
+    public static Long IO_THREAD_SLEEP = 1L;
+    public static Long ioSocketSleep = 1L;
     public static Integer ioWriteByteBuffer = 20048;
     public static Integer ioReadByteBuffer = 2048;
     public static Integer ioReverseByteBuffer = 20048;
@@ -66,4 +66,19 @@ public class NodeConfig {
      * Default: false (disabled to reduce log noise)
      */
     public static boolean enableOutLoopLogging = false;
+
+    /**
+     * Maximum number of qd (query deduplication) entries held in memory before
+     * eviction of entries older than 10 minutes.
+     * Default: 500
+     */
+    public static int maxSeenQd = 500;
+
+    // Peer discovery backoff schedule (persistence thread)
+    /** Delay after the first discovery cycle (ms). Default: 30s */
+    public static long peerDiscoveryBackoff1Ms = 30_000L;
+    /** Delay after the second discovery cycle (ms). Default: 60s */
+    public static long peerDiscoveryBackoff2Ms = 60_000L;
+    /** Steady-state delay once backoff runs are exhausted (ms). Default: 10 minutes */
+    public static long peerDiscoverySteadyMs   = 10 * 60 * 1000L;
 }

@@ -103,4 +103,13 @@ public class Configuration implements Serializable {
      */
     public Boolean enableOutLoopLogging = false;
 
+    /**
+     * CXIK (ConnectX Integration Key) to present when registering this network with the CXNET NMI.
+     * Set this before calling createNetwork() if you want automatic EPOCH registration.
+     * The key is consumed by the NMI on first use and cleared locally after the request is sent.
+     * Obtain a key from the CXNET NMI operator out-of-band via ConnectX.issueCXIK().
+     * Details on obtaining a CXIK will be available at <a href="https://AnvilDevelopment.us/connectx">...</a>
+     */
+    public String pendingCXIK;
+
 }

@@ -194,5 +194,31 @@ public enum EventType {
      * using AES-GCM-256 (or another pluggable cipher negotiated in the OPEN payload).
      */
     STREAM,
+    /**
+     * Network epoch registration request.
+     * Sent by a network creator to the CXNET backend set to register a new network.
+     * Payload: {@code NetworkEpoch} containing the CXIK and the signed seed blob for the new network.
+     * CXNET NMI validates the CXIK (one-time use), imports the network, re-signs the seed,
+     * and responds with NETEPOCH_RESPONSE.
+     */
+    NETEPOCH,
+    /**
+     * Response to NETEPOCH from the CXNET NMI.
+     * Payload: {@code NetworkEpoch} with success flag and (on success) an NMI-signed seed blob
+     * for the newly imported network.
+     */
+    NETEPOCH_RESPONSE,
+    /**
+     * Check whether a network name is already registered with the CXNET NMI.
+     * Sent via toBackends("CXNET") so all backends receive it; qd deduplication ensures
+     * only one backend processes and responds.
+     * Payload: {@code NetworkNameCheck} with networkName and requestId set.
+     */
+    CHECK_NETWORK_NAME,
+    /**
+     * Response to CHECK_NETWORK_NAME from a CXNET backend.
+     * Payload: {@code NetworkNameCheck} with requestId echoed, taken flag, and message.
+     */
+    CHECK_NETWORK_NAME_RESPONSE,
     ;
 }

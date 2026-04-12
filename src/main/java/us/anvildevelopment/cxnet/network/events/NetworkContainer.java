@@ -60,4 +60,13 @@ public class NetworkContainer implements Serializable {
      */
     public Integer ttl;
 
+    /**
+     * Query deduplication ID. Shared across all fan-out copies of the same logical
+     * request (e.g. toBackends() sends to every peer in a backend set).
+     * Receivers drop any subsequent event that carries a qd they have already processed,
+     * so only the first copy triggers handling -- hedging without double-processing.
+     * Null for regular (non-fan-out) events.
+     */
+    public String qd;
+
 }

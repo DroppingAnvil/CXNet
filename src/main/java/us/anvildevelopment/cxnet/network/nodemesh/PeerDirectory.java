@@ -329,12 +329,12 @@ public class PeerDirectory implements Serializable {
         // PRIORITY 1: CXHELLO discovered LAN addresses (highest priority for P2P)
         if (connectX != null && connectX.dataContainer != null) {
             java.util.List<String> lanAddresses = connectX.dataContainer.getLocalPeerAddresses(cxID);
-            log.info("[getAllAddresses] Peer {}: Found {} LAN addresses in DataContainer", cxID.substring(0, 8), lanAddresses.size());
-            for (String addr : lanAddresses) {
-                if (addr != null && !addr.isEmpty() && !seen.contains(addr)) {
-                    addresses.add(addr);
-                    seen.add(addr);
-                    log.info("[getAllAddresses]   - LAN: {}", addr);
+            log.debug("[getAllAddresses] Peer {}: Found {} LAN addresses in DataContainer", cxID.substring(0, 8), lanAddresses.size());
+                for (String addr : lanAddresses) {
+                    if (addr != null && !addr.isEmpty() && !seen.contains(addr)) {
+                        addresses.add(addr);
+                        seen.add(addr);
+                        log.debug("[getAllAddresses]   - LAN: {}", addr);
                 }
             }
         }
@@ -351,11 +351,11 @@ public class PeerDirectory implements Serializable {
             if (node != null && node.addr != null && !node.addr.isEmpty() && !seen.contains(node.addr)) {
                 addresses.add(node.addr);
                 seen.add(node.addr);
-                log.info("[getAllAddresses]   - Node: {}", node.addr);
+                log.debug("[getAllAddresses]   - Node: {}", node.addr);
             }
         }
 
-        log.info("[getAllAddresses] Total addresses for {}: {}", cxID.substring(0, 8), addresses.size());
+        log.debug("[getAllAddresses] Total addresses for {}: {}", cxID.substring(0, 8), addresses.size());
         return addresses;
     }
 }

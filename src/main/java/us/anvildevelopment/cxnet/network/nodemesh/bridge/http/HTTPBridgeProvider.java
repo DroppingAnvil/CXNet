@@ -220,7 +220,7 @@ public class HTTPBridgeProvider implements BridgeProvider {
 
         try (Response response = httpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                throw new IOException("HTTP Bridge failed: " + response.code() + " " + response.message());
+                log.debug("HTTP Bridge failed: {} {}", response.code(), response.message());
             }
             byte[] responseBody = response.body() != null ? response.body().bytes() : new byte[0];
             if (responseBody.length > 0) {
@@ -239,7 +239,7 @@ public class HTTPBridgeProvider implements BridgeProvider {
                 }
             }
         } catch (Exception e) {
-            log.error("HTTP Bridge transmit error: {}", e.getMessage());
+            log.debug("HTTP Bridge transmit error: {}", e.getMessage());
             throw e;
         }
         return responses;

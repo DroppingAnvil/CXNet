@@ -130,6 +130,34 @@ public abstract class CryptProvider {
         // Default no-op; override in implementations that support epoch mode
     }
     public boolean cacheCert(String cxID, boolean tryImport, boolean sync, ConnectX connectX) {return false;}
+
+    /**
+     * Returns true if the cert for {@code cxID} is already in the in-memory cache.
+     * Use this before a temp-import to decide whether a failure-path removeCert is safe.
+     */
+    public boolean hasCert(String cxID) { return false; }
+
+    /**
+     * Cache a peer's public key directly from a base64-encoded key string, without requiring
+     * the node to be in PeerDirectory. Use this for the temp-import pattern: load the key so
+     * verifyAndStrip can run, then call removeCert (only if !hasCert was true before) on
+     * failure, or addNode on success.
+     *
+     * @param cacheKey  cache key (usually the peer's cxID)
+     * @param base64Key base64-encoded PGP public key bytes
+     * @return true if the key is available in the cache after this call
+     */
+    public boolean cacheKeyFromString(String cacheKey, String base64Key) { return false; }
+
+    /**
+     * Evict a peer's public key from the in-memory cert cache without touching disk or
+     * PeerDirectory. Only call this when hasCert() returned false before the temp-import,
+     * to avoid evicting a legitimately cached cert that pre-existed the temp import.
+     *
+     * @param cxID the peer's cxID to evict
+     */
+    public void removeCert(String cxID) {}
+
     public void shutdown() {
 
     }

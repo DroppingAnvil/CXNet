@@ -353,6 +353,48 @@ public class OutConnectionController {
                     }
                 }
             }
+            if (out.ne.p.scope.equalsIgnoreCase("CXB")) {
+                // CXB scope: fan out to every peer in the network's backend set.
+                // Each backend gets its own connection attempt using the same signed bytes.
+                // container.qd ensures recipients process only the first copy they see.
+                CXNetwork cxb = connectXAPI.getNetwork(out.ne.p.network);
+                if (cxb != null && cxb.configuration != null && cxb.configuration.backendSet != null) {
+                    for (String backendID : cxb.configuration.backendSet) {
+                        if (backendID.equals(connectXAPI.getOwnID())) continue;
+                        java.util.List<String> addresses =
+                                connectXAPI.nodeMesh.peerDirectory.getAllAddresses(backendID, connectXAPI);
+                        boolean sent = false;
+                        for (String address : addresses) {
+                            try {
+                                if (address.contains(":") && !address.matches("^\\d+\\.\\d+\\.\\d+\\.\\d+:.*")) {
+                                    String[] parts = address.split(":", 2);
+                                    BridgeProvider bridge = connectXAPI.getBridgeProvider(parts[0]);
+                                    if (bridge != null) {
+                                        CXPath bp = new CXPath();
+                                        bp.bridgeArg = parts[1];
+                                        bridge.transmitEvent(bp, cryptNetworkContainer);
+                                        sent = true;
+                                        break;
+                                    }
+                                } else {
+                                    String[] addr = address.split(":");
+                                    java.net.Socket s = new java.net.Socket(addr[0], Integer.parseInt(addr[1]));
+                                    s.getOutputStream().write(cryptNetworkContainer);
+                                    s.close();
+                                    sent = true;
+                                    break;
+                                }
+                            } catch (Exception e) {
+                                // try next address
+                            }
+                        }
+                        log.info("[CXB] {} -> {} {}", out.ne.eT,
+                                backendID.substring(0, 8), sent ? "OK" : "UNREACHABLE");
+                    }
+                } else {
+                    log.warn("[CXB] No backend set for network {}", out.ne.p.network);
+                }
+            }
         } else if (out.n != null && out.n.addr != null && !out.n.addr.isEmpty()) {
             // Special case: Direct transmission to address (for CXHELLO discovery)
             // Used when we have a target address but no peer ID yet

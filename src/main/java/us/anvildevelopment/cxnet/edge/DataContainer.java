@@ -78,7 +78,38 @@ public class DataContainer implements Serializable {
      */
     public List<String> waitingAddresses = new ArrayList<>();
 
+    /**
+     * CXIK (ConnectX Integration Key) store.
+     * Map: key -> label (issuer note, timestamp, or node hint -- for audit only).
+     * Keys are issued by the CXNET NMI and consumed exactly once when a NETEPOCH request is approved.
+     * SECURITY: Only the CXNET NMI node should populate this store.
+     */
+    public Map<String, String> cxikStore = new ConcurrentHashMap<>();
+
     /// CODE
+
+    /**
+     * Issue a new CXIK. The label is stored for audit purposes only and has no effect on validation.
+     * Keys are 4 UUID segments joined by hyphens -- 128 random hex characters.
+     * @return the generated key
+     */
+    public String issueCXIK(String label) {
+        String key = UUID.randomUUID().toString().replace("-", "")
+                + "-" + UUID.randomUUID().toString().replace("-", "")
+                + "-" + UUID.randomUUID().toString().replace("-", "")
+                + "-" + UUID.randomUUID().toString().replace("-", "");
+        cxikStore.put(key, label != null ? label : "");
+        return key;
+    }
+
+    /**
+     * Consume a CXIK. Returns true and removes the key if it exists.
+     * One-time use: the key is removed regardless of what happens next.
+     */
+    public boolean consumeCXIK(String key) {
+        if (key == null) return false;
+        return cxikStore.remove(key) != null;
+    }
 
     /**
      * Check if a node is registered to a network (whitelist check)

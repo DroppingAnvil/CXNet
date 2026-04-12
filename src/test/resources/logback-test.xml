@@ -1,0 +1,43 @@
+<configuration>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Route spam: ROUTE-TRY / ROUTE-FAIL / ROUTE-SUCCESS / Multi-Path / CXN Broadcast -->
+    <logger name="us.anvildevelopment.cxnet.network.nodemesh.OutConnectionController" level="WARN"/>
+    <logger name="us.anvildevelopment.cxnet.network.threads.SocketWatcher" level="WARN"/>
+
+    <!-- NodeMesh processing - keep INFO for visibility -->
+    <logger name="us.anvildevelopment.cxnet.network.nodemesh.NodeMesh" level="INFO"/>
+
+    <!-- IOThread loop chatter -->
+    <logger name="us.anvildevelopment.cxnet.io.IOThread" level="WARN"/>
+
+    <!-- Retry and peer directory - INFO for visibility -->
+    <logger name="us.anvildevelopment.cxnet.network.threads.RetryProcessor" level="INFO"/>
+    <logger name="us.anvildevelopment.cxnet.network.nodemesh.PeerDirectory" level="INFO"/>
+
+    <!-- Crypto provider - INFO to see verify/decrypt outcomes without stack traces -->
+    <logger name="us.anvildevelopment.cxnet.crypt.pgpainless.PainlessCryptProvider" level="INFO"/>
+
+    <!-- PGPainless / Bouncy Castle internals -->
+    <logger name="org.pgpainless" level="WARN"/>
+    <logger name="org.bouncycastle" level="WARN"/>
+
+    <!-- Netty (HTTP bridge) -->
+    <logger name="io.netty" level="WARN"/>
+
+    <!-- HTTP bridge -->
+    <logger name="us.anvildevelopment.cxnet.network.nodemesh.bridge.http" level="INFO"/>
+
+    <!-- Application-level logs -->
+    <logger name="us.anvildevelopment.cxnet" level="INFO"/>
+
+    <root level="WARN">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+</configuration>

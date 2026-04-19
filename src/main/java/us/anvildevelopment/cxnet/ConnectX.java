@@ -3127,20 +3127,18 @@ public class ConnectX {
     private void loadDataContainer() {
         File dataFile = new File(cxRoot, "data.cxd");
         if (!dataFile.exists()) {
-            // Create new container
             dataContainer = new DataContainer();
-            return;
+        } else {
+            try (FileInputStream fis = new FileInputStream(dataFile)) {
+                dataContainer = (DataContainer) deserialize(
+                    "cxJSON1", fis, DataContainer.class);
+            } catch (Exception e) {
+                log.error("[DataContainer] Failed to load data.cxd: {}", e.getMessage());
+                dataContainer = new DataContainer();
+            }
         }
-
-        try (FileInputStream fis = new FileInputStream(dataFile)) {
-            // Deserialize from JSON
-            dataContainer = (DataContainer) deserialize(
-                "cxJSON1", fis, DataContainer.class);
-        } catch (Exception e) {
-            log.error("[DataContainer] Failed to load data.cxd: {}", e.getMessage());
-            // Create new container on error
-            dataContainer = new DataContainer();
-        }
+        //This line is for testing / debug it should NOT be uncommented for production
+        // dataContainer.cxikStore.putIfAbsent("CHAT_NETWORK_CXIK", "chat-network");
     }
 
     /**

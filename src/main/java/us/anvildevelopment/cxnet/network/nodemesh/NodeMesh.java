@@ -2136,6 +2136,18 @@ public class NodeMesh {
                                     // Import the network from the creator-signed seed
                                     connectX.applySignedSeed(req.signedSeedBlob);
 
+                                    // Add EPOCH to the network's backendSet so it can sign seeds for it
+                                    CXNetwork imported = connectX.getNetwork(req.networkID);
+                                    if (imported != null && imported.configuration != null) {
+                                        String epochID = connectX.getOwnID();
+                                        if (!imported.configuration.backendSet.contains(epochID)) {
+                                            imported.configuration.backendSet.add(epochID);
+                                        }
+                                        if (!imported.networkDictionary.backendSet.contains(epochID)) {
+                                            imported.networkDictionary.backendSet.add(epochID);
+                                        }
+                                    }
+
                                     // Re-sign the seed with EPOCH's key so recipients can verify it
                                     byte[] epochSignedBlob = connectX.signAndPublishNetworkSeed(req.networkID);
                                     if (epochSignedBlob == null) {

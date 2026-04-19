@@ -1,10 +1,12 @@
 # ConnectX
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=DroppingAnvil_CXNet&metric=alert_status)](https://sonarcloud.io/project/overview?id=DroppingAnvil_CXNet)
-[![Maven](https://img.shields.io/badge/maven-0.4-blue)](https://repo.anvildevelopment.us/repository/maven-releases/)
+[![Maven](https://img.shields.io/badge/maven-0.4.1-blue)](https://repo.anvildevelopment.us/repository/maven-releases/)
 
 > **Early Development - Work in Progress**
 > The core networking, encryption, and event API are functional and tested. Many subsystems (blockchain sync, Zero Trust activation, LAN discovery, resource management, login, remote directory) are partially or not yet implemented.
+
+**[CXNexus](https://AnvilDevelopment.us/cxnexus)** is a Windows desktop application being built on CXNet as a proof of concept for the protocol. It includes a live node dashboard, peer and network management, and CXChat: decentralized E2E encrypted messaging with no central server. Coming soon.
 
 A decentralized P2P mesh network framework built around pluggable cryptography, serialization, and transports. Every event at every hop is signed or encrypted by the originating node before it leaves the process. The crypto, serialization, and bridge layers are all swappable interfaces so implementations can be replaced as better options become available.
 
@@ -45,7 +47,7 @@ Maven:
   <dependency>
     <groupId>us.anvildevelopment</groupId>
     <artifactId>ConnectX</artifactId>
-    <version>0.4</version>
+    <version>0.4.1</version>
   </dependency>
 </dependencies>
 ```
@@ -58,7 +60,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'us.anvildevelopment:ConnectX:0.4'
+    implementation 'us.anvildevelopment:ConnectX:0.4.1'
 }
 ```
 
@@ -181,6 +183,12 @@ ConnectX-Peer{1-5}/         Test peer runtime directories
 
 * [`CX-PROTOCOL.md`](CX-PROTOCOL.md) - full protocol spec: encryption layers, threading model, blockchain, event types, permissions, Zero Trust
 * [`CHANGELOG.md`](CHANGELOG.md) - release history
+
+---
+
+## Built on ConnectX
+
+**[CXNexus](https://AnvilDevelopment.us/cxnexus)** - a messaging platform built on top of CXNet. Coming soon.
 
 ---
 

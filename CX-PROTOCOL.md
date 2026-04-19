@@ -1,8 +1,40 @@
 # ConnectX (CX) Protocol Documentation
 
-**Version:** 3.6
-**Last Updated:** 2026-04-09 (Stream sessions, bridge negotiation, retry fixes, bootstrap verification hardening)
+**Version:** 0.4
+**Last Updated:** 2026-04-16 (Node temp-import security, discovery event retry fix, startup NPE fix, LAN/peer discovery scheduling)
 **Status:** Early Development. Core networking and event API are functional; many subsystems are incomplete or in progress.
+
+---
+
+## Recent Updates (v0.4)
+
+### Node temp-import verification
+
+Peer nodes are no longer written to disk before signature verification. All three import paths in NodeMesh (CXHELLO/NewNode first contact, PeerFinding, relayed NewNode) now do a cert-cache-only provisional load: `cacheKeyFromString` stores the public key in memory, verifications run, and `addNode` (disk write + PeerDirectory entry) only happens once everything passes. On failure, `removeCert` evicts the provisionally cached key. A `certAlreadyPresent` guard ensures a key that was in cache before the import started is never evicted on rollback.
+
+`CryptProvider` gains three new methods: `hasCert(cxID)`, `cacheKeyFromString(cxID, base64Key)`, and `removeCert(cxID)`. `PainlessCryptProvider` implements all three. `cacheKeyFromString` uses `putIfAbsent` so a cached key is never replaced.
+
+### Discovery event CXN fallback
+
+`RetryProcessor` was converting NewNode, CXHELLO, and CXHELLO_RESPONSE to E2E-encrypted CXN broadcasts on retry. These events carry the sender's public key, so encrypting them is circular and the receiver cannot strip the signature from an encrypted blob. They now fall back to a signed-only CXN broadcast. The already-signed `ne.d` is forwarded as-is. The old code re-applied `.signData()` which double-signed the payload and caused JSON parse failures on the receiver.
+
+### Non-clean startup NPE
+
+After a PGPainless update, `secretKeyRing()` returns `null` instead of throwing when handed an encrypted key file. The existing try/catch only caught exceptions so `secretKey` stayed null and `new OpenPGPKey(null)` NPE'd. Fixed with an explicit null check that falls through to the passphrase-decryption path.
+
+### LAN scanner and peer discovery backoff
+
+LAN scanner now runs once on startup (after a random 10-20s jitter) then every 15 minutes. Hook point left for a Global Scanner (not yet implemented).
+
+Persistence thread peer-discovery replaced with time-based backoff: first run at 30s, second at 60s, then 10-minute steady-state. Configurable via `NodeConfig`: `peerDiscoveryBackoff1Ms` (30 000), `peerDiscoveryBackoff2Ms` (60 000), `peerDiscoverySteadyMs` (600 000).
+
+### CXST stream mux
+
+`CXST` main-port mux is operational. The 4-byte magic prefix routes incoming TCP connections to the correct `CXStreamSession` without opening a separate port. See [Stream Sessions](#stream-sessions-cxstreamplugin) for full details.
+
+### Integration tests
+
+`MultiPeerTest` rewritten as JUnit 5 integration tests covering: E2E encryption, permission enforcement, spoofed-sender rejection, and signed/unsigned message delivery.
 
 ---
 
@@ -72,7 +104,7 @@ This also closed a silent delivery failure: NodeMesh always calls `verifyAndStri
 
 ### lowLevel() -- Only Supported Address-Only Dispatch Path
 
-`buildEvent().lowLevel(address)` is the only supported way to send an event to a known address without a peer ID (scope `CXS`, routes directly to `out.n.addr`). `.signData()` is required on all events including CXHELLO -- NodeMesh uses `stripSignature` (no verification) on the CXHELLO payload since the sender is unknown at receive time, but the signing is still required for protocol consistency. Manual `OutputBundle` construction for originating events is eliminated. `.encrypt(recipientID)` is also supported alongside `.signData()` for E2E delivery.
+`buildEvent().lowLevel(address)` is the only supported way to send an event to a known address without a peer ID (scope `CXS`, routes directly to `out.n.addr`). Either `.signData()` or `.encrypt()` must be called before `.queue()`. For CXHELLO, `.signData()` is used since the receiver runs `stripSignature` (no verification) on the payload and the sender is unknown at receive time. Manual `OutputBundle` construction for originating events is eliminated.
 
 Manual `OutputBundle` construction is now internal protocol mechanics only: relay uses it to preserve the original `signedEventBytes` without re-signing. Application code and persistence threads must use `buildEvent()`.
 
@@ -247,6 +279,82 @@ ConnectX (CX) is a decentralized peer-to-peer (P2P) mesh network protocol featur
 - **Permission-based access control** with weighted entries
 - **Privacy-preserving design** (no node-network association data)
 - **Cross-network communication** capabilities
+
+---
+
+## ConnectX Setup
+
+### Constructors
+
+Four constructors are available depending on how much control you need at construction time:
+
+```java
+// 1. Default: file system only, no network, no crypto.
+//    Root dir defaults to "./ConnectX".
+//    Call initializeCrypto() and connect() manually before use.
+ConnectX cx = new ConnectX();
+
+// 2. Root dir only: same as above but with a custom directory.
+ConnectX cx = new ConnectX("./MyNode");
+
+// 3. Root dir + port: initializes file system and connects immediately.
+//    Crypto is loaded from disk if a key file exists; generated otherwise.
+ConnectX cx = new ConnectX("./MyNode", 49152);
+
+// 4. Full: root dir, port, explicit cxID, and key password.
+//    Pass null for cxID to generate a random UUID.
+ConnectX cx = new ConnectX("./MyNode", 49152, null, "mypassword");
+```
+
+Constructor 3 is the standard path for nodes that already have keys on disk. Constructor 4 is used when creating a node for the first time with a known identity or password.
+
+`connect(int port)` triggers the full startup sequence: socket listener, IOThread pool, RetryProcessor, LAN scanner, persistence thread, and CXNET bootstrap attempt. Calling `connect()` with no argument uses port 49152.
+
+### What `connect()` starts
+
+1. `NodeMesh.initializeNetwork`: socket listener, IOThread pool, OutConnectionController, RetryProcessor.
+2. `attemptCXNETBootstrap`: tries to load `cxnet-bootstrap.cxn` from disk; falls back to fetching from `https://anvildevelopment.us/downloads/cxnet-bootstrap.cxn`; falls back to CXHELLO peer-supplied seed discovery.
+3. LAN scanner thread: runs once after a random 10-20s jitter, then every 15 minutes.
+4. Persistence thread: saves blockchain blocks every 30s and sends peer discovery requests on a 30s/60s/10min backoff schedule.
+
+### Creating a network
+
+`createNetwork(networkID)` makes this node the NMI for a new network. The node must have crypto initialized first.
+
+```java
+ConnectX cx = new ConnectX("./MyNode", 49152, null, "password");
+CXNetwork net = cx.createNetwork("MYNET");
+```
+
+This creates the three genesis blocks (c1 admin, c2 resources, c3 events), sets `nmiPub` to this node's public key, and adds this node to `backendSet`. The network is immediately available locally. Other peers join via seed distribution.
+
+`createNetwork` is for the NMI node only. Peer nodes join via `joinNetworkFromPeers` or by receiving a seed.
+
+### Joining a network
+
+`joinNetworkFromPeers(networkID)` sends a `SEED_REQUEST` to EPOCH first (authoritative seed source), then to all known HV peers as fallback. When a `SEED_RESPONSE` arrives, `applySeed` ingests it and the network becomes active on this node.
+
+```java
+cx.joinNetworkFromPeers("MYNET");
+```
+
+The method returns immediately. Seed delivery is async. If the node is not yet connected to any peers with knowledge of the target network, no one will answer the request. Make sure bootstrap has completed (CXNET loaded, HV peers known) before calling for non-CXNET networks.
+
+For CXNET itself, `attemptCXNETBootstrap` handles this automatically during `connect()`.
+
+### Bootstrap flow (CXNET)
+
+```
+connect()
+  └─ attemptCXNETBootstrap()
+       ├─ load cxnet-bootstrap.cxn from disk   (fast path, clean start)
+       ├─ fetch from anvildevelopment.us        (first-run or stale file fallback)
+       └─ bootstrapSearch = true               (CXHELLO peer-supplied seed fallback)
+```
+
+`bootstrapStarted` (`AtomicBoolean`) gates the entire flow so concurrent calls from LAN discovery or the persistence thread do not run bootstrap twice. It resets on failure so retries work.
+
+EPOCH's public key is cached immediately in `initializeCrypto()` so seed events can be verified as soon as they arrive, before the async bootstrap file load completes.
 
 ---
 
@@ -1606,7 +1714,7 @@ connectX.buildEvent(EventType.CXHELLO, payloadJson.getBytes(StandardCharsets.UTF
 
 **Why lowLevel() + signData() replaces manual construction here:**
 - We don't know the peer's ID -- `lowLevel(address)` handles address-only routing internally
-- `.signData()` is required; NodeMesh uses `stripSignature` (not `verifyAndStrip`) on the CXHELLO payload since the sender is unknown at receive time -- the signing is still required for protocol consistency and the key is verified later via the embedded `signedNode` blob
+- `.signData()` is used here (not `.encrypt()`); NodeMesh runs `stripSignature` (not `verifyAndStrip`) on the CXHELLO payload since the sender is unknown at receive time. The key is verified later via the embedded `signedNode` blob.
 - `buildEvent` correctly sets up the event ID, protocol fields, and output pipeline
 - Manual `OutputBundle` construction for originating events is no longer supported; it bypassed protocol setup and is now reserved for relay mechanics only (preserving `signedEventBytes`)
 
@@ -3838,7 +3946,7 @@ peer.buildEvent(EventType.MESSAGE, json.getBytes())
     .queue();
 ```
 
-`.signData()` is required -- raw byte payloads are rejected by NodeMesh signature verification before reaching any plugin.
+Either `.signData()` or `.encrypt()` must be called before `.queue()`. Raw byte payloads with neither are rejected by NodeMesh signature verification before reaching any plugin.
 
 ### Dispatch Flow
 

@@ -280,7 +280,11 @@ public class OutConnectionController {
                     int successfulPeers = 0;
                     int failedPeers = 0;
 
-                    for (Node n : connectXAPI.nodeMesh.peerDirectory.hv.values()) {
+                    java.util.List<Node> cxnPeers = new java.util.ArrayList<>(connectXAPI.nodeMesh.peerDirectory.hv.values());
+                    for (Node n : connectXAPI.nodeMesh.peerDirectory.seen.values()) {
+                        if (!connectXAPI.nodeMesh.peerDirectory.hv.containsKey(n.cxID)) cxnPeers.add(n);
+                    }
+                    for (Node n : cxnPeers) {
                         // Don't send to ourselves
                         if (n.cxID != null && !n.cxID.equals(connectXAPI.getOwnID())) {
                             totalPeers++;

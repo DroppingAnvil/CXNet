@@ -224,7 +224,6 @@ public class ConnectX {
             }
         }
         encryptionProvider = new PainlessCryptProvider(this);
-        //TODO network join
     }
     public static void checkSafety(String s) throws UnsafeKeywordException {
         //TODO filesystem safety
@@ -1029,6 +1028,15 @@ public class ConnectX {
     }
 
     /**
+     * Update self.networks to reflect current networkMap membership.
+     * Call after any networkMap.put so the signed node blob stays current.
+     */
+    private void refreshSelfNetworks() {
+        if (self == null) return;
+        self.networks = new java.util.ArrayList<>(networkMap.keySet());
+    }
+
+    /**
      * Sign this node's own Node object with its own key, returning the signed blob.
      * Same format as CXHELLO signedNode -- used when building seeds.
      * @return Signed node blob, or null on failure
@@ -1253,6 +1261,35 @@ public class ConnectX {
 
         } catch (Exception e) {
             log.error("[Bootstrap] Bootstrap attempt failed", e);
+        }
+    }
+
+    /**
+     * Restore previously joined non-CXNET networks from disk.
+     * Iterates dataContainer.watchedNetworks and loads each network's seed from
+     * networks/<networkID>/seed.cxn, applying it directly without peer contact.
+     */
+    private void restoreJoinedNetworks() {
+        if (dataContainer == null || dataContainer.watchedNetworks.isEmpty()) return;
+        for (String networkID : dataContainer.watchedNetworks) {
+            if (networkMap.containsKey(networkID)) continue;
+            File seedFile = new File(cxRoot, "networks" + File.separator + networkID + File.separator + "seed.cxn");
+            if (!seedFile.exists()) {
+                log.warn("[NetworkRestore] Seed file missing for watched network {}, will re-request from peers", networkID);
+                joinNetworkFromPeers(networkID);
+                continue;
+            }
+            try {
+                byte[] bytes = java.nio.file.Files.readAllBytes(seedFile.toPath());
+                String json = new String(bytes, StandardCharsets.UTF_8);
+                Seed seed = (Seed) deserialize("cxJSON1", json, Seed.class);
+                if (seed == null) continue;
+                applySeed(seed);
+                log.info("[NetworkRestore] Restored network {} from persisted seed", networkID);
+            } catch (Exception e) {
+                log.warn("[NetworkRestore] Could not restore network {}, falling back to peer join: {}", networkID, e.getMessage());
+                joinNetworkFromPeers(networkID);
+            }
         }
     }
 
@@ -1809,6 +1846,9 @@ public class ConnectX {
         // Attempt automatic CXNET bootstrap after network layer is ready
         attemptCXNETBootstrap();
 
+        // Restore any non-CXNET networks this node previously joined
+        restoreJoinedNetworks();
+
         // Initialize LAN scanner for local peer discovery.
         // Runs once on startup (after jitter), then every 15 minutes.
         // After steady-state is reached, Global Scanner will be started (not yet implemented).
@@ -1903,7 +1943,11 @@ public class ConnectX {
                         }
 
                         // TODO: Persist PeerDirectory
-                        // TODO: Persist DataContainer
+                        try {
+                            saveDataContainer();
+                        } catch (Exception e) {
+                            log.error("[Persistence] Failed to save DataContainer: {}", e.getMessage());
+                        }
 
                         if (System.currentTimeMillis() >= nextDiscoveryAt) {
                             discoveryRun++;
@@ -2119,6 +2163,7 @@ public class ConnectX {
 
         // Add network to global map
         networkMap.put(networkID, network);
+        refreshSelfNetworks();
 
         // Persist blockchain to disk
         try {
@@ -2414,6 +2459,7 @@ public class ConnectX {
 
         // Add to network map
         networkMap.put(networkID, network);
+        refreshSelfNetworks();
 
         // Try to load persisted blockchain data from disk
         try {

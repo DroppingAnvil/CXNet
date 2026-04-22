@@ -80,6 +80,15 @@ public class SocketWatcher implements Runnable {
                         long totalTime = System.currentTimeMillis() - acceptTime;
                         log.debug("{} TOTAL: {} bytes in {}ms", peerPrefix, data.length, totalTime);
 
+                        if (data.length > NodeConfig.IO_MAX_INPUT) {
+                            String ip = s.getInetAddress().getHostAddress();
+                            log.warn("[SocketWatcher] Oversized packet ({} bytes, limit {}) from {} - blacklisting IP",
+                                    data.length, NodeConfig.IO_MAX_INPUT, ip);
+                            NodeMesh.blacklist.put(ip, "Oversized packet: " + data.length + " bytes");
+                            s.close();
+                            continue;
+                        }
+
                         // Queue for IOThread -- CXST mux detection happens there where the
                         // still-open socket can be used to complete a partial header read.
                         java.io.ByteArrayInputStream bufferedStream = new java.io.ByteArrayInputStream(data);

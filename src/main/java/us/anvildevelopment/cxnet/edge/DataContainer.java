@@ -86,6 +86,13 @@ public class DataContainer implements Serializable {
      */
     public Map<String, String> cxikStore = new ConcurrentHashMap<>();
 
+    /**
+     * Non-CXNET networks this node has joined. Persisted so the node can restore membership
+     * on restart by re-applying the seed stored at networks/<networkID>/seed.cxn.
+     * CXNET is excluded; it bootstraps independently via cxnet-bootstrap.cxn.
+     */
+    public Set<String> watchedNetworks = new HashSet<>();
+
     /// CODE
 
     /**

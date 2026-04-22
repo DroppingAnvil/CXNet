@@ -1037,6 +1037,18 @@ public class ConnectX {
     }
 
     /**
+     * Record a network in watchedNetworks so it is restored on next startup.
+     */
+    private void trackWatchedNetwork(String networkID) {
+        if (dataContainer == null) return;
+        if (dataContainer.watchedNetworks.add(networkID)) {
+            try { saveDataContainer(); } catch (Exception e) {
+                log.warn("[NetworkWatch] Could not persist watchedNetworks for {}: {}", networkID, e.getMessage());
+            }
+        }
+    }
+
+    /**
      * Sign this node's own Node object with its own key, returning the signed blob.
      * Same format as CXHELLO signedNode -- used when building seeds.
      * @return Signed node blob, or null on failure
@@ -1265,13 +1277,15 @@ public class ConnectX {
     }
 
     /**
-     * Restore previously joined non-CXNET networks from disk.
+     * Restore previously joined networks from disk.
      * Iterates dataContainer.watchedNetworks and loads each network's seed from
      * networks/<networkID>/seed.cxn, applying it directly without peer contact.
+     * CXNET is skipped here as it bootstraps independently via cxnet-bootstrap.cxn.
      */
     private void restoreJoinedNetworks() {
         if (dataContainer == null || dataContainer.watchedNetworks.isEmpty()) return;
         for (String networkID : dataContainer.watchedNetworks) {
+            if ("CXNET".equals(networkID)) continue;
             if (networkMap.containsKey(networkID)) continue;
             File seedFile = new File(cxRoot, "networks" + File.separator + networkID + File.separator + "seed.cxn");
             if (!seedFile.exists()) {
@@ -1431,6 +1445,7 @@ public class ConnectX {
             log.info("[NetworkJoin] Already in network {}", networkID);
             return;
         }
+        trackWatchedNetwork(networkID);
         String reqJson;
         try {
             reqJson = serialize("cxJSON1", new SeedExchange(networkID));
@@ -2164,6 +2179,7 @@ public class ConnectX {
         // Add network to global map
         networkMap.put(networkID, network);
         refreshSelfNetworks();
+        trackWatchedNetwork(networkID);
 
         // Persist blockchain to disk
         try {
@@ -2460,6 +2476,7 @@ public class ConnectX {
         // Add to network map
         networkMap.put(networkID, network);
         refreshSelfNetworks();
+        trackWatchedNetwork(networkID);
 
         // Try to load persisted blockchain data from disk
         try {

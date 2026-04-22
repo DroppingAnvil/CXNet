@@ -285,7 +285,18 @@ public class HTTPBridgeProvider implements BridgeProvider {
         @Override
         protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
             try {
-                byte[] body = req.getInputStream().readAllBytes();
+                int contentLength = req.getContentLength();
+                if (contentLength > us.anvildevelopment.cxnet.network.nodemesh.NodeConfig.IO_MAX_INPUT) {
+                    log.warn("[cxHTTP1] Oversized Content-Length ({} bytes), dropping", contentLength);
+                    resp.sendError(413, "Payload too large");
+                    return;
+                }
+                byte[] body = req.getInputStream().readNBytes(us.anvildevelopment.cxnet.network.nodemesh.NodeConfig.IO_MAX_INPUT + 1);
+                if (body.length > us.anvildevelopment.cxnet.network.nodemesh.NodeConfig.IO_MAX_INPUT) {
+                    log.warn("[cxHTTP1] Oversized body ({} bytes), dropping", body.length);
+                    resp.sendError(413, "Payload too large");
+                    return;
+                }
                 connectX.nodeMesh.processNetworkInput(new ByteArrayInputStream(body), null);
                 resp.setStatus(200);
             } catch (Exception e) {

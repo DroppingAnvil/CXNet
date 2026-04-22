@@ -2671,6 +2671,28 @@ public class NodeMesh {
             // Apply seed to ConnectX (registers networks)
             seed.apply(connectX);
 
+            // Persist seed for non-CXNET networks so they are restored on next startup
+            if (!"CXNET".equals(targetNetwork)) {
+                try {
+                    java.io.File netDir = new java.io.File(connectX.cxRoot,
+                            "networks" + java.io.File.separator + targetNetwork);
+                    netDir.mkdirs();
+                    String seedJson = ConnectX.serialize("cxJSON1", seed);
+                    java.io.FileWriter fw = new java.io.FileWriter(new java.io.File(netDir, "seed.cxn"));
+                    fw.write(seedJson);
+                    fw.flush();
+                    fw.close();
+                    log.info("[SEED CONSENSUS] Persisted seed for {} to networks/{}/seed.cxn",
+                            targetNetwork, targetNetwork);
+                    if (connectX.dataContainer != null) {
+                        connectX.dataContainer.watchedNetworks.add(targetNetwork);
+                        connectX.saveDataContainer();
+                    }
+                } catch (Exception e) {
+                    log.warn("[SEED CONSENSUS] Could not persist seed for {}: {}", targetNetwork, e.getMessage());
+                }
+            }
+
             // Cache certificates
             int certsAdded = 0;
             for (Map.Entry<String, String> cert : seed.certificates.entrySet()) {

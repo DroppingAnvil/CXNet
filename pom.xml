@@ -17,7 +17,9 @@
     <repositories>
         <repository>
             <id>Sonatype</id>
-            <url>https://repo.anvildevelopment.us/repository/maven-releases/</url>
+            <url>https://repo.anvildevelopment.us/repository/maven-public/</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>true</enabled></snapshots>
         </repository>
     </repositories>
 

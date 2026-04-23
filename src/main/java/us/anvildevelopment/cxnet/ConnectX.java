@@ -2885,6 +2885,14 @@ public class ConnectX {
         return networkMap.get(networkID);
     }
 
+    public java.util.Map<String, CXNetwork> getNetworks() {
+        return java.util.Collections.unmodifiableMap(networkMap);
+    }
+
+    public java.util.Set<String> getNetworkIDs() {
+        return java.util.Collections.unmodifiableSet(networkMap.keySet());
+    }
+
     public void loadLan() {
         File lan = new File(cxRoot, "lan");
         if (!lan.exists()) lan.mkdir();

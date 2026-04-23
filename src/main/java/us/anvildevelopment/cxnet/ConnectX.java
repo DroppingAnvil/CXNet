@@ -549,6 +549,21 @@ public class ConnectX {
         }
 
         /**
+         * Route via CXN mesh to a specific peer (proxy routing).
+         * Unlike toPeer() (CXS direct), this travels through the network mesh so
+         * no direct route is required. Relay nodes forward toward the target cxID.
+         * Use when the target is known through the network but has no direct address.
+         * @param networkId The network to route through
+         * @param targetCxID The target peer's cxID
+         */
+        public EventBuilder toNetworkPeer(String networkId, String targetCxID) {
+            this.path.scope = "CXN";
+            this.path.network = networkId;
+            this.path.cxID = targetCxID;
+            return this;
+        }
+
+        /**
          * Route via a bridge provider
          * @param bridgeType The bridge provider type (e.g., "cxHTTP1")
          * @param bridgeArg The bridge-specific argument (e.g., URL)
@@ -1454,18 +1469,18 @@ public class ConnectX {
             return;
         }
 
-        // Always ask EPOCH first -- it is the authoritative seed source
+        // Always ask EPOCH first via CXNET mesh -- authoritative seed source, no direct route required
         try {
             buildEvent(EventType.SEED_REQUEST, reqJson.getBytes(StandardCharsets.UTF_8))
-                .toPeer(EPOCH_UUID)
+                .toNetworkPeer("CXNET", EPOCH_UUID)
                 .signData()
                 .queue();
-            log.info("[NetworkJoin] Sent SEED_REQUEST for {} to EPOCH", networkID);
+            log.info("[NetworkJoin] Sent SEED_REQUEST for {} to EPOCH via CXNET", networkID);
         } catch (Exception e) {
             log.warn("[NetworkJoin] Could not send SEED_REQUEST to EPOCH: {}", e.getMessage());
         }
 
-        // Also ask all other known HV peers as fallback
+        // Also ask all known HV peers via CXNET mesh as fallback
         if (nodeMesh == null || nodeMesh.peerDirectory == null
                 || nodeMesh.peerDirectory.hv == null || nodeMesh.peerDirectory.hv.isEmpty()) {
             return;
@@ -1473,10 +1488,10 @@ public class ConnectX {
         int sent = 0;
         for (Node peer : nodeMesh.peerDirectory.hv.values()) {
             if (self != null && peer.cxID.equals(self.cxID)) continue;
-            if (peer.cxID.equals(EPOCH_UUID)) continue; // already sent above
+            if (peer.cxID.equals(EPOCH_UUID)) continue;
             try {
                 buildEvent(EventType.SEED_REQUEST, reqJson.getBytes(StandardCharsets.UTF_8))
-                    .toPeer(peer.cxID)
+                    .toNetworkPeer("CXNET", peer.cxID)
                     .signData()
                     .queue();
                 sent++;
@@ -1486,7 +1501,7 @@ public class ConnectX {
             }
         }
         if (sent > 0) {
-            log.info("[NetworkJoin] Sent SEED_REQUEST for {} to {} additional peer(s)", networkID, sent);
+            log.info("[NetworkJoin] Sent SEED_REQUEST for {} to {} peer(s) via CXNET", networkID, sent);
         }
     }
 

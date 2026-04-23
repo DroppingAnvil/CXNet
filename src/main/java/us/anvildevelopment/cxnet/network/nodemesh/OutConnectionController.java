@@ -269,13 +269,40 @@ public class OutConnectionController {
                         }
                     }
                 } else {
-                    // Standard/peerProxy/peerBroad: P2P mesh transmission
-                    // Send to all available peers, relay logic handles:
-                    // - Backend priority (fireEvent)
-                    // - Blockchain recording (peerProxy)
-                    // - Global distribution (peerBroad)
-                    // IMPORTANT: Always try ALL peers even if some are unreachable
-                    // Other nodes might have different paths to unreachable peers
+                    // Targeted CXN: specific cxID set -- try direct route first, relay via mesh if unavailable
+                    String targetCxID = out.ne.p != null ? out.ne.p.cxID : null;
+                    if (targetCxID != null && !"*".equals(targetCxID)) {
+                        java.util.List<String> directAddresses = connectXAPI.nodeMesh.peerDirectory.getAllAddresses(targetCxID, connectXAPI);
+                        if (!directAddresses.isEmpty()) {
+                            for (String address : directAddresses) {
+                                try {
+                                    if (address.contains(":") && !address.matches("^\\d+\\.\\d+\\.\\d+\\.\\d+:.*")) {
+                                        String[] parts = address.split(":", 2);
+                                        BridgeProvider bridge = connectXAPI.getBridgeProvider(parts[0]);
+                                        if (bridge != null) {
+                                            CXPath peerPath = new CXPath();
+                                            peerPath.bridgeArg = parts[1];
+                                            bridge.transmitEvent(peerPath, cryptNetworkContainer);
+                                            log.debug("[CXN-Targeted] Delivered to {} via bridge", targetCxID.substring(0, 8));
+                                            return;
+                                        }
+                                    } else {
+                                        String[] addr = address.split(":");
+                                        Socket so = new Socket(addr[0], Integer.parseInt(addr[1]));
+                                        so.getOutputStream().write(cryptNetworkContainer);
+                                        so.close();
+                                        log.debug("[CXN-Targeted] Delivered to {} via direct route", targetCxID.substring(0, 8));
+                                        return;
+                                    }
+                                } catch (Exception e) {
+                                    // Route failed, try next
+                                }
+                            }
+                            log.debug("[CXN-Targeted] All direct routes failed for {}, falling back to mesh relay", targetCxID.substring(0, 8));
+                        }
+                    }
+
+                    // Standard broadcast: send to all peers, relay logic carries it to the target
                     int totalPeers = 0;
                     int successfulPeers = 0;
                     int failedPeers = 0;

@@ -26,6 +26,10 @@
             <id>Sonatype</id>
             <url>https://repo.anvildevelopment.us/repository/maven-releases/</url>
         </repository>
+        <snapshotRepository>
+            <id>Sonatype</id>
+            <url>https://repo.anvildevelopment.us/repository/maven-snapshots/</url>
+        </snapshotRepository>
     </distributionManagement>
 
     <build>

@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.4.3
+
+### Network state persistence fixes
+
+`DataContainer` had two public no-arg utility methods (`getAllLocalPeerAddresses`, `getLocalPeerCount`) that Jackson's default-typing serializer treated as typed properties. On load, Jackson found these properties but had no setter and threw a "setterless typed deser" exception, causing `loadDataContainer` to silently create a blank container. `watchedNetworks` was therefore always empty on restart and no non-CXNET network was ever restored. Both methods renamed to non-getter form.
+
+`restoreJoinedNetworks` was reading `networks/<networkID>/seed.cxn` as raw JSON. These are PGP-signed blobs -- the method now strips the signature before deserializing. Disk-resident seeds are trusted implicitly.
+
+`signAndPublishNetworkSeed("CXNET")` now also overwrites `cxnet-bootstrap.cxn`. Previously only `seeds/<uuid>.cxn` was written, so networks registered via NETEPOCH after first boot were lost on restart.
+
+### Seed trust: backendSet signature required
+
+Dynamic seeds in `SEED_RESPONSE` consensus are now verified against EPOCH + CXNET `backendSet` + target network `backendSet` (if loaded). Unsigned dynamic seeds are rejected with a "manual import required" log. `ConnectX.applyBackendSignedSeed` implements the multi-key verification. EPOCH's own signed blob still applies immediately in `SEED_RESPONSE` without waiting for consensus.
+
+### EPOCH peer directory bootstrap
+
+`CryptProvider.getNmiPublicKey()` added (default null); `PainlessCryptProvider` overrides it. `requestSeedFromEpoch` now populates EPOCH's stub node with the NMI public key so it passes `Node.validate` instead of producing a spurious null-publicKey warning on every bootstrap.
+
+### Session ID (sid) on NetworkEvent
+
+`NetworkEvent.sid` -- a UUID set automatically by `EventBuilder`. Response handlers in NodeMesh echo the request's `sid` back via `EventBuilder.withSid()`. Correlates request-response pairs in logs. Dispatch logic not yet implemented.
+
 ## Unreleased
 
 ### Security: node temp-import verification

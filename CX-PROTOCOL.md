@@ -6,7 +6,31 @@
 
 ---
 
-## Recent Updates (v0.4)
+## Recent Updates (v0.4.3)
+
+### Network state persistence fixes
+
+`DataContainer` had two public no-arg utility methods (`getAllLocalPeerAddresses()`, `getLocalPeerCount()`) that Jackson's default-typing serializer treated as properties and wrote into `data.cxd`. On load, Jackson found these properties but had no setter to assign them back and threw a "setterless typed deser" exception, causing `loadDataContainer` to silently fall back to a blank `DataContainer`. Since `watchedNetworks` was therefore always empty on restart, no non-CXNET network (e.g. CXChat) was ever restored. Both methods renamed to non-getter form (`localPeerAddressesCopy()`, `localPeerCount()`) so serialization ignores them.
+
+`restoreJoinedNetworks` was reading `networks/<networkID>/seed.cxn` as raw JSON. These files are PGP-signed blobs written by `signAndPublishNetworkSeed`. The method now strips the signature before deserializing. Disk-resident seeds are trusted implicitly; no verification overhead on startup.
+
+`signAndPublishNetworkSeed("CXNET")` now also overwrites `cxnet-bootstrap.cxn` on disk. Previously it only wrote to `seeds/<uuid>.cxn`. On restart, `attemptCXNETBootstrap` step 1 loads `cxnet-bootstrap.cxn` which was the stale initial file, so any networks registered via NETEPOCH after first boot were lost. The overwrite ensures the distribution bootstrap file always reflects the latest registered network set.
+
+### Seed trust: backendSet signature required
+
+Dynamic seeds received via `SEED_RESPONSE` consensus are no longer applied without cryptographic verification. The trusted key set is: EPOCH (always), CXNET `backendSet`, and the target network's own `backendSet` if already loaded. Sender identity is not used as a trust signal -- only the embedded PGP signature matters.
+
+`ConnectX.applyBackendSignedSeed(byte[] blob, String targetNetworkID)` implements this: tries `verifyAndStrip` against each trusted key, calls `applySeed` on the first that succeeds, returns false if none verify. `performSeedConsensus` now calls this instead of applying unsigned dynamic seeds. If no blob passes verification the method logs "manual import required" and does nothing.
+
+In `SEED_RESPONSE`, EPOCH's own signed blob still applies immediately (no consensus wait). All other responses -- including non-EPOCH peers forwarding EPOCH-signed blobs -- go into the consensus map where `performSeedConsensus` verifies them.
+
+### EPOCH peer directory bootstrap
+
+`requestSeedFromEpoch` was creating a stub EPOCH `Node` with no public key and attempting to add it to `PeerDirectory`. `Node.validate` rejects nodes with null public key, producing a spurious warn log on every bootstrap. `CryptProvider` now exposes `getNmiPublicKey()` (default null); `PainlessCryptProvider` overrides it to return the NMI key as Base64. The stub node is now populated with the NMI key so it passes validation and routes correctly from first contact.
+
+### Session ID on NetworkEvent
+
+`NetworkEvent` gains a `sid` (session ID) field -- a UUID string set automatically by `EventBuilder` on every outgoing event. Response handlers in NodeMesh copy the request's `ne.sid` back via `EventBuilder.withSid(String)`. This makes request-response pairs trivially correlatable in logs. Dispatch logic (matching responses to pending request callbacks) is not yet implemented.
 
 ### Node temp-import verification
 
@@ -307,6 +331,7 @@ ConnectX cx = new ConnectX("./MyNode", 49152, null, "mypassword");
 ```
 
 Constructor 3 is the standard path for nodes that already have keys on disk. Constructor 4 is used when creating a node for the first time with a known identity or password.
+As of 4/24/26 Constructor 4 is the most tested and recommended 
 
 `connect(int port)` triggers the full startup sequence: socket listener, IOThread pool, RetryProcessor, LAN scanner, persistence thread, and CXNET bootstrap attempt. Calling `connect()` with no argument uses port 49152.
 
@@ -493,6 +518,10 @@ NetworkEvent {
     byte[] d;           // Event data (payload)
     CXPath p;           // Routing path
     String iD;          // Event ID
+    String sid;         // Session ID (UUID) -- correlates request to response
+    boolean e2e;        // True: d is E2E encrypted; False: d is signed
+    boolean r;          // True: record to blockchain
+    boolean executeOnSync; // True: replay during blockchain sync
 }
 ```
 

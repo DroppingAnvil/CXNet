@@ -1,33 +1,42 @@
 # ConnectX
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=DroppingAnvil_CXNet&metric=alert_status)](https://sonarcloud.io/project/overview?id=DroppingAnvil_CXNet)
-[![Maven](https://img.shields.io/badge/maven-0.4.1-blue)](https://repo.anvildevelopment.us/repository/maven-releases/)
+[![Maven](https://img.shields.io/badge/maven-0.4.3--SNAPSHOT-blue)](https://repo.anvildevelopment.us/repository/maven-public/)
 
-> **Early Development - Work in Progress**
-> The core networking, encryption, and event API are functional and tested. Many subsystems (blockchain sync, Zero Trust activation, LAN discovery, resource management, login, remote directory) are partially or not yet implemented.
+> **Early Development.** Core networking, encryption, and event API are functional and tested. Blockchain sync, Zero Trust activation, and remote directory are partially implemented.
 
-**[CXNexus](https://AnvilDevelopment.us/cxnexus)** is a Windows desktop application being built on CXNet as a proof of concept for the protocol. It includes a live node dashboard, peer and network management, and CXChat: decentralized E2E encrypted messaging with no central server. Coming soon.
+A decentralized P2P mesh network framework with pluggable cryptography, serialization, and transports. Every event at every hop is signed or encrypted by the originating node before it leaves the process.
 
-A decentralized P2P mesh network framework built around pluggable cryptography, serialization, and transports. Every event at every hop is signed or encrypted by the originating node before it leaves the process. The crypto, serialization, and bridge layers are all swappable interfaces so implementations can be replaced as better options become available.
+**[CXNexus](https://AnvilDevelopment.us/cxnexus)** is a desktop application built on ConnectX as a proof of concept, featuring a live node dashboard, peer and network management, and CXChat: decentralized E2E encrypted messaging. Coming soon.
 
-Each network is governed by a Network Master Identity (NMI) that provisions nodes and manages permissions. Zero Trust mode permanently removes the NMI's ability to modify the trust structure when activated.
+---
 
-**CXNET** is the global bootstrap network. Private networks (`CXNetwork`) run on top of it with their own identity, permissions, and blockchain.
+## How it works
+
+Each node participates in **CXNET**, the global bootstrap network. Private networks (`CXNetwork`) run on top of CXNET with their own identity, permissions, and blockchain. Every network is governed by a **Network Master Identity (NMI)** that provisions nodes and manages permissions. Zero Trust mode permanently locks the trust structure when activated.
+
+Events flow through a [5-stage concurrent pipeline](CX-PROTOCOL.md#threading-model): SocketWatcher → IOThread (signature verify) → EventProcessor (logic + decrypt) → OutputProcessor (sign + route) → RetryProcessor. Signing and verification run on two independent 4-thread pools so ingress never blocks egress.
+
+A [three-layer signature chain](CX-PROTOCOL.md#three-layer-encryption-system) covers every message:
+
+1. **NetworkContainer** — hop signature, added and verified at each relay node
+2. **NetworkEvent** — origin signature, set by the sender and preserved through the entire relay chain
+3. **NetworkEvent.d** — payload, signed or E2E encrypted depending on the event type
 
 ---
 
 ## Features
 
-* **Three-layer signature chain** - hop signature (NetworkContainer), origin signature (NetworkEvent), optional E2E payload encryption. Tampering at any layer drops the message.
-* **Pluggable crypto, serialization, and bridges** - swap implementations without touching protocol logic
-* **Managed network governance** - NMI provisions nodes and controls permissions. Zero Trust mode locks the structure permanently when activated.
-* **Stream sessions** - bidirectional encrypted channels via `CXStreamPlugin`, TCP or WebSocket with automatic bridge negotiation
-* **Fluent event API** - `buildEvent().toPeer().signData().queue()`
-* **Concurrent crypto pipeline** - signing and verification across two independent 4-thread pools, ingress never blocks egress
-* **HTTP bridge** - punch through firewalls and NAT, no open port required on the connecting side
-* **LAN discovery** - automatic peer discovery via CXHELLO
-* **3-chain blockchain** per network - Admin (`c1`), Resources (`c2`), Events (`c3`)
-* **Per-instance design** - run multiple independent nodes in the same JVM
+- **Pluggable crypto, serialization, and transports.** Swap PGP for another scheme, Jackson for another serializer, or HTTP bridge for another transport without touching protocol logic.
+- **Managed network governance.** NMI provisions nodes, controls permissions, and issues Integration Keys (CXIK) for network registration. Zero Trust mode locks the structure permanently.
+- **Stream sessions.** Bidirectional encrypted channels via `CXStreamPlugin`, TCP or WebSocket with automatic bridge negotiation.
+- **Fluent event API.** `buildEvent().toPeer().signData().queue()`
+- **HTTP bridge.** Punch through firewalls and NAT with no open port required on the connecting side.
+- **LAN discovery.** Automatic peer discovery on startup via CXHELLO.
+- **3-chain blockchain per network.** Admin (`c1`), Resources (`c2`), Events (`c3`).
+- **Per-instance design.** Run multiple independent nodes in the same JVM.
+
+See [`CX-PROTOCOL.md`](CX-PROTOCOL.md) for the full protocol specification.
 
 ---
 
@@ -38,8 +47,9 @@ Maven:
 ```xml
 <repositories>
   <repository>
-    <id>Sonatype</id>
-    <url>https://repo.anvildevelopment.us/repository/maven-releases/</url>
+    <id>AnvilDevelopment</id>
+    <url>https://repo.anvildevelopment.us/repository/maven-public/</url>
+    <snapshots><enabled>true</enabled></snapshots>
   </repository>
 </repositories>
 
@@ -47,7 +57,7 @@ Maven:
   <dependency>
     <groupId>us.anvildevelopment</groupId>
     <artifactId>ConnectX</artifactId>
-    <version>0.4.1</version>
+    <version>0.4.3-SNAPSHOT</version>
   </dependency>
 </dependencies>
 ```
@@ -56,11 +66,11 @@ Gradle:
 
 ```groovy
 repositories {
-    maven { url 'https://repo.anvildevelopment.us/repository/maven-releases/' }
+    maven { url 'https://repo.anvildevelopment.us/repository/maven-public/' }
 }
 
 dependencies {
-    implementation 'us.anvildevelopment:ConnectX:0.4.1'
+    implementation 'us.anvildevelopment:ConnectX:0.4.3-SNAPSHOT'
 }
 ```
 
@@ -69,13 +79,20 @@ dependencies {
 ## Quick Start
 
 ```java
-ConnectX peer = new ConnectX("CX-PEER3", 49158, "03006000-0400-0500-0000-007000000001", "Peer3");
+ConnectX peer = new ConnectX("CX-PEER1", 49153, "03006000-0400-0500-0000-007000000001", "Peer1");
 peer.updateHTTPBridgePort(8081);
-peer.setPublicBridgeAddress("cxHTTP1", "https://cx7.anvildevelopment.us/cx");
-peer.buildEvent(EventType.MESSAGE, "Hello peer1!".getBytes()).toPeer("00000000-0000-0000-0000-000000000001").signData().queue();
+peer.setPublicBridgeAddress("cxHTTP1", "https://cx1.anvildevelopment.us/cx");
+peer.connect(49153);
 ```
 
-The constructor handles key generation, filesystem setup, HTTP bridge registration, and network connection automatically.
+Send a message:
+
+```java
+peer.buildEvent(EventType.MESSAGE, "Hello!".getBytes())
+    .toPeer("target-uuid")
+    .signData()
+    .queue();
+```
 
 Receive messages with a plugin:
 
@@ -87,13 +104,11 @@ peer.addPlugin(new CXMessagePlugin() {
 });
 ```
 
-**Note:** MESSAGE payloads must be sent as `CXMessage` with `.signData()` or `.encrypt(recipientID)`. Raw unsigned payloads are rejected by NodeMesh signature verification.
+> MESSAGE payloads must be sent as `CXMessage` with `.signData()` or `.encrypt(recipientID)`. Raw unsigned payloads are rejected at the receiver.
 
 ---
 
 ## Routing
-
-The `EventBuilder` supports three routing modes:
 
 ```java
 // Peer-to-peer (CXS)
@@ -106,18 +121,18 @@ peer.buildEvent(EventType.MESSAGE, data).toNetwork("CXNET").signData().queue();
 peer.buildEvent(EventType.MESSAGE, data).viaBridge("cxHTTP1", "https://example.com/cx").signData().queue();
 ```
 
-Failed CXS deliveries are retried with exponential backoff. After `CXS_TO_CXN_THRESHOLD` failures (default: 4) the event is promoted to a CXN broadcast with E2E encryption. After `MAX_RETRIES` total attempts (default: 50) the event is discarded.
+Failed CXS deliveries retry with exponential backoff and promote to CXN broadcast after `CXS_TO_CXN_THRESHOLD` failures (default: 4). See [routing details](CX-PROTOCOL.md#event-delivery-lifecycle).
 
 ---
 
 ## Plugin System
 
-Plugins intercept events by service name (matching `EventType`). Three data levels control what is passed to `handleEvent`:
+Plugins intercept events by service name. Three data levels control what is delivered:
 
 | `DataLevel` | Receives |
 |---|---|
 | `NETWORK_EVENT` | Raw `NetworkEvent` (default) |
-| `INPUT_BUNDLE` | Full `InputBundle` - signed bytes, container |
+| `INPUT_BUNDLE` | Full `InputBundle` (signed bytes, container) |
 | `OBJECT` | Deserialized typed object via `plugin.type` |
 
 ```java
@@ -127,6 +142,20 @@ CXPlugin plugin = new CXPlugin("MESSAGE") {{
 }};
 peer.addPlugin(plugin);
 ```
+
+---
+
+## Network Architecture
+
+```
+CXNET (Global Bootstrap Network)
+  └── CXNetwork  (e.g. "TESTNET", "CXChat")
+        ├── NMI  (Network Master Identity)
+        ├── backendSet  (trusted infrastructure nodes)
+        └── Peer nodes
+```
+
+Each node has its own `cxRoot` directory containing its keypair, bootstrap seed, per-network seeds, blockchain data, and local state (`data.cxd`). See [network architecture](CX-PROTOCOL.md#network-architecture) for full details.
 
 ---
 
@@ -140,22 +169,6 @@ peer.addPlugin(plugin);
 | `8081+` | HTTP bridge ports for additional peers |
 
 LAN discovery scans `49152-49162`. Peers outside that range must be reached via HTTP bridge.
-
----
-
-## Architecture
-
-```
-CXNET (Global Bootstrap Network)
-  |-- CXNetwork  (e.g. "TESTNET", "MyApp")
-       |-- NMI  (Network Master Identity)
-       |-- Backend nodes  (trusted infrastructure, priority routing)
-       |-- Peer nodes  (regular participants)
-```
-
-Each node runs a 5-stage concurrent pipeline: SocketWatcher, IOThread pool (sig verify), EventProcessor (logic + decrypt), OutputProcessor pool (sign + route), RetryProcessor. See [`CX-PROTOCOL.md`](CX-PROTOCOL.md) for the full pipeline and threading breakdown.
-
-[Interactive architecture analysis (SonarCloud)](https://sonarcloud.io/project/architecture/discovery?id=DroppingAnvil_CXNet&selectedNode=dev.droppinganvil.v3.ConnectX)
 
 ---
 
@@ -173,22 +186,14 @@ src/main/java/us/anvildevelopment/cxnet/
 src/test/java/
   MultiPeerTest.java        Full multi-peer integration test
   BootstrapServerTest.java  EPOCH bootstrap + CXNET seed test
-ConnectX-EPOCH/             EPOCH NMI node data (local, not committed)
-ConnectX-Peer{1-5}/         Test peer runtime directories
 ```
 
 ---
 
 ## Documentation
 
-* [`CX-PROTOCOL.md`](CX-PROTOCOL.md) - full protocol spec: encryption layers, threading model, blockchain, event types, permissions, Zero Trust
-* [`CHANGELOG.md`](CHANGELOG.md) - release history
-
----
-
-## Built on ConnectX
-
-**[CXNexus](https://AnvilDevelopment.us/cxnexus)** - a messaging platform built on top of CXNet. Coming soon.
+- [`CX-PROTOCOL.md`](CX-PROTOCOL.md) — full protocol spec: encryption layers, threading model, blockchain, event types, permissions, Zero Trust
+- [`CHANGELOG.md`](CHANGELOG.md) — release history
 
 ---
 

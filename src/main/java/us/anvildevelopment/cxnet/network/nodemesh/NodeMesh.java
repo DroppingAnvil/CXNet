@@ -557,6 +557,17 @@ public class NodeMesh {
 
                         if (senderCXID != null && originPub != null && o3.isVerifiedInlineSignedBy(originPub)) {
                             ib.verifiedObjectBytes = arr1;
+                            // Strip inner PGP signature if present (sign-then-encrypt pattern)
+                            ByteArrayInputStream innerBais = new ByteArrayInputStream(arr1);
+                            ByteArrayOutputStream innerStripped = new ByteArrayOutputStream();
+                            try {
+                                if (connectX.encryptionProvider.verifyAndStrip(innerBais, innerStripped, senderCXID)
+                                        && innerStripped.size() > 0) {
+                                    ib.strippedEventBytes = innerStripped.toByteArray();
+                                }
+                            } catch (Exception ignored) {
+                                // Not PGP-signed -- verifiedObjectBytes is already raw payload
+                            }
                         } else {
                             log.info("[NodeMesh] E2E Decryption validation failure, 005");
                             log.info(senderCXID);
@@ -1440,19 +1451,24 @@ public class NodeMesh {
                                 }
                             }
 
-                            CXNetwork network = connectX.getNetwork(requestedNetwork);
-                            if (network != null) {
+                            // "*" means all known networks; otherwise look up the specific one
+                            CXNetwork network = "*".equals(requestedNetwork) ? null : connectX.getNetwork(requestedNetwork);
+                            if ("*".equals(requestedNetwork) || network != null) {
                                 // Create dynamic seed from current peer state
                                 Seed dynamicSeed = Seed.fromCurrentPeers(peerDirectory);
                                 dynamicSeed.seedID = UUID.randomUUID().toString();
                                 dynamicSeed.timestamp = System.currentTimeMillis();
                                 dynamicSeed.networkID = requestedNetwork;
                                 dynamicSeed.networks = new ArrayList<>();
-                                dynamicSeed.networks.add(network);
+                                if ("*".equals(requestedNetwork)) {
+                                    dynamicSeed.networks.addAll(connectX.getNetworks().values());
+                                } else {
+                                    dynamicSeed.networks.add(network);
+                                }
 
                                 // Try to get signed EPOCH seed blob (prefer in-RAM copy, fall back to disk)
                                 byte[] epochSeedBlob = connectX.signedBootstrapSeed;
-                                if (epochSeedBlob == null && network.configuration != null
+                                if (epochSeedBlob == null && network != null && network.configuration != null
                                         && network.configuration.currentSeedID != null) {
                                     File seedFile = new File(new File(connectX.cxRoot, "seeds"),
                                             network.configuration.currentSeedID + ".cxn");
@@ -1467,7 +1483,7 @@ public class NodeMesh {
 
                                 // Determine if this peer is authoritative (NMI/backend)
                                 boolean isAuthoritative = false;
-                                if (network.configuration != null && network.configuration.backendSet != null) {
+                                if (network != null && network.configuration != null && network.configuration.backendSet != null) {
                                     isAuthoritative = network.configuration.backendSet.contains(connectX.getOwnID());
                                 }
 
@@ -2117,6 +2133,13 @@ public class NodeMesh {
                             ib.readyObject(NetworkEpoch.class, ib.nc.se, connectX);
                             NetworkEpoch req = (NetworkEpoch) ib.object;
 
+                            // Reject malformed or path-traversal network IDs before any file I/O
+                            if (req.networkID == null || !req.networkID.matches("[A-Za-z0-9_-]{1,64}")) {
+                                log.warn("[NETEPOCH] Rejected invalid networkID from {}: '{}'", nc.iD,
+                                        req.networkID == null ? "null" : req.networkID.substring(0, Math.min(32, req.networkID.length())));
+                                break;
+                            }
+
                             NetworkEpoch resp = new NetworkEpoch();
                             resp.networkID = req.networkID;
 
@@ -2133,8 +2156,8 @@ public class NodeMesh {
                                     // Persist the CXIK consumption
                                     connectX.saveDataContainer();
 
-                                    // Import the network from the creator-signed seed
-                                    connectX.applySignedSeed(req.signedSeedBlob);
+                                    // Import the network from the creator-signed seed (CXIK already authenticated)
+                                    connectX.importTrustedNetworkSeed(req.signedSeedBlob, nc.iD);
 
                                     // Add EPOCH to the network's backendSet so it can sign seeds for it
                                     CXNetwork imported = connectX.getNetwork(req.networkID);
@@ -2148,17 +2171,43 @@ public class NodeMesh {
                                         }
                                     }
 
-                                    // Re-sign the seed with EPOCH's key so recipients can verify it
-                                    byte[] epochSignedBlob = connectX.signAndPublishNetworkSeed(req.networkID);
-                                    if (epochSignedBlob == null) {
+                                    // Sign the individual network seed and persist it for restoreJoinedNetworks
+                                    byte[] netSignedBlob = connectX.signAndPublishNetworkSeed(req.networkID);
+                                    if (netSignedBlob == null) {
                                         resp.success = false;
                                         resp.message = "Network imported but NMI re-sign failed";
                                         log.error("[NETEPOCH] signAndPublishNetworkSeed returned null for {}", req.networkID);
                                     } else {
-                                        resp.success = true;
-                                        resp.message = "ok";
-                                        resp.signedSeedBlob = epochSignedBlob;
-                                        log.info("[NETEPOCH] Network {} imported and signed by EPOCH", req.networkID);
+                                        try {
+                                            java.io.File netSeedDir = new java.io.File(
+                                                    new java.io.File(connectX.cxRoot, "networks"), req.networkID);
+                                            netSeedDir.mkdirs();
+                                            try (java.io.FileOutputStream nfos = new java.io.FileOutputStream(
+                                                    new java.io.File(netSeedDir, "seed.cxn"))) {
+                                                nfos.write(netSignedBlob);
+                                            }
+                                        } catch (Exception saveEx) {
+                                            log.warn("[NETEPOCH] Could not persist seed for {}: {}", req.networkID, saveEx.getMessage());
+                                        }
+
+                                        // Re-publish CXNET distribution seed -- now includes the new network
+                                        // because signAndPublishNetworkSeed("CXNET") iterates all networkMap values.
+                                        // Send the updated CXNET seed back so the creator gets a full seed
+                                        // containing their network alongside all others EPOCH knows about.
+                                        byte[] updatedCxnetSeed = connectX.signAndPublishNetworkSeed("CXNET");
+                                        if (updatedCxnetSeed != null) {
+                                            connectX.signedBootstrapSeed = updatedCxnetSeed;
+                                            resp.success = true;
+                                            resp.message = "ok";
+                                            resp.signedSeedBlob = updatedCxnetSeed;
+                                            log.info("[NETEPOCH] Network {} registered; CXNET distribution seed updated", req.networkID);
+                                        } else {
+                                            // CXNET re-sign failed -- fall back to per-network blob
+                                            resp.success = true;
+                                            resp.message = "ok";
+                                            resp.signedSeedBlob = netSignedBlob;
+                                            log.warn("[NETEPOCH] Network {} registered but CXNET distribution seed update failed", req.networkID);
+                                        }
                                     }
                                 } catch (Exception e) {
                                     resp.success = false;

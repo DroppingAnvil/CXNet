@@ -1412,7 +1412,15 @@ public class ConnectX {
             seed.seedID = java.util.UUID.randomUUID().toString();
             seed.timestamp = System.currentTimeMillis();
             seed.networkID = networkID;
-            seed.addNetwork(network);
+            // CXNET distribution seed carries all registered networks so bootstrapping peers
+            // can discover every network EPOCH knows about in a single exchange.
+            if ("CXNET".equals(networkID)) {
+                for (CXNetwork net : networkMap.values()) {
+                    seed.addNetwork(net);
+                }
+            } else {
+                seed.addNetwork(network);
+            }
             if (self != null) {
                 byte[] signedSelfBlob = signSelfNode();
                 if (signedSelfBlob != null) {
@@ -1724,7 +1732,9 @@ public class ConnectX {
             String seedJson = strippedOutput.toString(StandardCharsets.UTF_8);
             Seed seed = (Seed) deserialize("cxJSON1", seedJson, Seed.class);
             applySeed(seed);
-            signedBootstrapSeed = signedBlob;
+            if ("CXNET".equals(seed.networkID)) {
+                signedBootstrapSeed = signedBlob;
+            }
             bootstrapSearch = false;
 
             // Queue async writes to persist blob on disk
@@ -1732,17 +1742,57 @@ public class ConnectX {
             seedsDir.mkdirs();
             final byte[] blobRef = signedBlob;
             final String seedID = seed.seedID;
+            final String seedNetworkID = seed.networkID;
             try {
                 jobQueue.add(new IOJob(new ByteArrayInputStream(blobRef),
                         new FileOutputStream(new File(seedsDir, seedID + ".cxn")), true));
-                jobQueue.add(new IOJob(new ByteArrayInputStream(blobRef),
-                        new FileOutputStream(new File(cxRoot, "cxnet-bootstrap.cxn")), true));
+                if ("CXNET".equals(seedNetworkID)) {
+                    jobQueue.add(new IOJob(new ByteArrayInputStream(blobRef),
+                            new FileOutputStream(new File(cxRoot, "cxnet-bootstrap.cxn")), true));
+                } else if (seedNetworkID != null) {
+                    // Persist non-CXNET seeds to networks/<networkID>/seed.cxn for restoreJoinedNetworks
+                    File netSeedDir = new File(new File(cxRoot, "networks"), seedNetworkID);
+                    netSeedDir.mkdirs();
+                    jobQueue.add(new IOJob(new ByteArrayInputStream(blobRef),
+                            new FileOutputStream(new File(netSeedDir, "seed.cxn")), true));
+                }
             } catch (FileNotFoundException e) {
                 log.error("[Bootstrap] Could not queue blob write", e);
             }
             log.info("[Bootstrap] Applied signed seed: {}", seedID);
         } catch (Exception e) {
             log.error("[Bootstrap] Failed to apply signed seed blob", e);
+        }
+    }
+
+    /**
+     * Import a creator-signed network seed on EPOCH's behalf during NETEPOCH processing.
+     * CXIK already authenticated the request; verification here is best-effort against the creator's
+     * cached key and falls back to signature-strip if the cert is unavailable.
+     */
+    public void importTrustedNetworkSeed(byte[] signedBlob, String creatorCxID) {
+        try {
+            ByteArrayInputStream bais = new ByteArrayInputStream(signedBlob);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            boolean verified = false;
+            try {
+                verified = encryptionProvider.verifyAndStrip(bais, baos, creatorCxID);
+            } catch (Exception ignored) {}
+            if (!verified) {
+                bais = new ByteArrayInputStream(signedBlob);
+                baos = new ByteArrayOutputStream();
+                encryptionProvider.stripSignature(bais, baos);
+            }
+            String seedJson = baos.toString(StandardCharsets.UTF_8);
+            Seed seed = (Seed) deserialize("cxJSON1", seedJson, Seed.class);
+            if (seed == null) {
+                log.error("[NETEPOCH] Failed to parse creator seed from {}", creatorCxID.substring(0, 8));
+                return;
+            }
+            applySeed(seed);
+            log.info("[NETEPOCH] Imported trusted network seed {} from {}", seed.seedID, creatorCxID.substring(0, 8));
+        } catch (Exception e) {
+            log.error("[NETEPOCH] importTrustedNetworkSeed failed: {}", e.getMessage());
         }
     }
 
@@ -2085,6 +2135,9 @@ public class ConnectX {
      * @throws IllegalAccessException if networkID is reserved or node is not initialized
      */
     public CXNetwork createNetwork(String networkID) throws IllegalAccessException {
+        if (networkID == null || networkID.equals("*") || !networkID.matches("[A-Za-z0-9_-]{1,64}")) {
+            throw new IllegalArgumentException("Invalid network ID: '" + networkID + "'");
+        }
         // TODO: Re-enable CXNET reservation after EPOCH NMI initialization
         // if (networkID.equalsIgnoreCase("CXNET")) {
         //     throw new IllegalAccessException("CXNET is reserved for the global network");
@@ -2487,6 +2540,9 @@ public class ConnectX {
      */
     private void registerNetwork(CXNetwork network) throws Exception {
         String networkID = network.configuration.netID;
+        if (networkID == null || networkID.equals("*") || !networkID.matches("[A-Za-z0-9_-]{1,64}")) {
+            throw new IllegalArgumentException("Invalid network ID in seed: '" + networkID + "'");
+        }
 
         // Add to network map
         networkMap.put(networkID, network);

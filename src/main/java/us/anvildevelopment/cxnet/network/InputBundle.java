@@ -57,8 +57,12 @@ public class InputBundle {
     public boolean readyObject(Class<?> clazz, String serializationMethod, ConnectX connectX) throws Exception {
         // If object was already set directly (e.g. CXHELLO path), no need to deserialize
         if (object != null) return true;
-        if (verifiedObjectBytes == null) return false;
-        ByteArrayInputStream bais = new ByteArrayInputStream(verifiedObjectBytes);
+        // For E2E events, prefer strippedEventBytes (inner PGP signature already stripped)
+        // over verifiedObjectBytes which may still contain the sign-then-encrypt PGP wrapper
+        byte[] sourceBytes = (ne != null && ne.e2e && strippedEventBytes != null)
+                ? strippedEventBytes : verifiedObjectBytes;
+        if (sourceBytes == null) return false;
+        ByteArrayInputStream bais = new ByteArrayInputStream(sourceBytes);
         Object o1 = connectX.deserialize(serializationMethod, bais, clazz);
         if (o1 != null) {
             object = o1;

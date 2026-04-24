@@ -95,7 +95,7 @@ public class PainlessCryptProvider extends CryptProvider {
     }
 
     @Override
-    public boolean verifyAndStrip(InputStream is, OutputStream os, String cxID) throws DecryptionFailureException {
+    public synchronized boolean verifyAndStrip(InputStream is, OutputStream os, String cxID) throws DecryptionFailureException {
         //TODO verify tryimport is best case
         if (cacheCert(cxID, true, true, super.connectX)) {
             try {

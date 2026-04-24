@@ -27,6 +27,10 @@ public abstract class CryptProvider {
         return null;
     }
 
+    public String getNmiPublicKey() {
+        return null;
+    }
+
     /**
      * @param is Signed input
      * @param os Output stripped of all encryption meta

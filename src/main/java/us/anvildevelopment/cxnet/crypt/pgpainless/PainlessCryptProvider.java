@@ -94,6 +94,17 @@ public class PainlessCryptProvider extends CryptProvider {
         }
     }
 
+    public String getNmiPublicKey() {
+        if (nmipubkey == null) return null;
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            nmipubkey.encode(baos);
+            return java.util.Base64.getEncoder().encodeToString(baos.toByteArray());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     @Override
     public synchronized boolean verifyAndStrip(InputStream is, OutputStream os, String cxID) throws DecryptionFailureException {
         //TODO verify tryimport is best case

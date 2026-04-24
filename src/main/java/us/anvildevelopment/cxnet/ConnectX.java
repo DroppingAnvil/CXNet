@@ -1309,10 +1309,17 @@ public class ConnectX {
                 continue;
             }
             try {
-                byte[] bytes = java.nio.file.Files.readAllBytes(seedFile.toPath());
-                String json = new String(bytes, StandardCharsets.UTF_8);
-                Seed seed = (Seed) deserialize("cxJSON1", json, Seed.class);
-                if (seed == null) continue;
+                byte[] signedBlob = java.nio.file.Files.readAllBytes(seedFile.toPath());
+                ByteArrayInputStream in = new ByteArrayInputStream(signedBlob);
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                //Trust already existing seeds, required for non CXIK nets 
+                encryptionProvider.stripSignature(in, out);
+                Seed seed = (Seed) deserialize("cxJSON1", out.toString(StandardCharsets.UTF_8), Seed.class);
+                if (seed == null) {
+                    log.warn("[NetworkRestore] Failed to deserialize seed for {}, requesting from peers", networkID);
+                    joinNetworkFromPeers(networkID);
+                    continue;
+                }
                 applySeed(seed);
                 log.info("[NetworkRestore] Restored network {} from persisted seed", networkID);
             } catch (Exception e) {
@@ -1857,15 +1864,15 @@ public class ConnectX {
             // Step 1: Create hardcoded EPOCH node with bridge address for bootstrap
             Node epochNode = new Node();
             epochNode.cxID = EPOCH_UUID;
-            epochNode.addr = EPOCH_BRIDGE_ADDRESS; // Use HTTP bridge for initial contact
-            // Note: EPOCH's public key will be cached when we receive signed responses
+            epochNode.addr = EPOCH_BRIDGE_ADDRESS;
+            //TODO evaluate better options
+            epochNode.publicKey = encryptionProvider.getNmiPublicKey();
 
-            // Add EPOCH to peer directory so we can reach it
+            // Add EPOCH to peer directory so we can route to it
             try {
                 nodeMesh.peerDirectory.addNode(epochNode);
                 log.info("[Bootstrap] Added EPOCH to peer directory");
             } catch (SecurityException e) {
-                // EPOCH already exists - this is fine
                 log.info("[Bootstrap] EPOCH already in peer directory");
             }
 

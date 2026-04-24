@@ -20,6 +20,11 @@ public class NetworkEvent implements Serializable {
     public CXPath p;
     public String iD;
     /**
+     * Session/request ID for correlating responses to their originating request.
+     * Set by the sender; responder copies it into the response payload.
+     */
+    public String sid;
+    /**
      * Method for processing
      */
     public String m;

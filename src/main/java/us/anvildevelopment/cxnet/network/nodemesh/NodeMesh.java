@@ -1012,6 +1012,7 @@ public class NodeMesh {
                                 String responsePayloadJson = ConnectX.serialize("cxJSON1", responsePayload);
 
                                 connectX.buildEvent(EventType.CXHELLO_RESPONSE, responsePayloadJson.getBytes(StandardCharsets.UTF_8))
+                                    .withSid(ib.ne.sid)
                                     .toPeer(ib.nc.iD)
                                     .signData()
                                     .queue();
@@ -1513,6 +1514,7 @@ public class NodeMesh {
 
                                 // Send response using EventBuilder pattern
                                 ConnectX.EventBuilder eb = connectX.buildEvent(EventType.SEED_RESPONSE, responseJson.getBytes(StandardCharsets.UTF_8))
+                                    .withSid(ne.sid)
                                     .toPeer(nc.iD)
                                     .signData();
                                 //I think this old method was to allow the original requester to provide a temporary address
@@ -1622,6 +1624,7 @@ public class NodeMesh {
 
                                 // Send response using EventBuilder pattern
                                 connectX.buildEvent(EventType.CHAIN_STATUS_RESPONSE, statusJson.getBytes(StandardCharsets.UTF_8))
+                                    .withSid(ne.sid)
                                     .toPeer(nc.iD)
                                     .signData()
                                     .queue();
@@ -1712,6 +1715,7 @@ public class NodeMesh {
 
                                         // Send response using EventBuilder pattern
                                         ConnectX.EventBuilder eb = connectX.buildEvent(EventType.BLOCK_RESPONSE, blockJson.getBytes(StandardCharsets.UTF_8))
+                                            .withSid(ne.sid)
                                             .toPeer(nc.iD)
                                             .signData();
                                             
@@ -2093,6 +2097,7 @@ public class NodeMesh {
 
                             // Send response using EventBuilder pattern
                             ConnectX.EventBuilder eb = connectX.buildEvent(EventType.PEER_LIST_RESPONSE, responseJson.getBytes(StandardCharsets.UTF_8))
+                                .withSid(ne.sid)
                                 .toPeer(nc.iD)
                                 .signData();
                             if (ne.p != null) {
@@ -2219,6 +2224,7 @@ public class NodeMesh {
 
                             String respJson = connectX.serialize("cxJSON1", resp);
                             connectX.buildEvent(EventType.NETEPOCH_RESPONSE, respJson.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                                    .withSid(ne.sid)
                                     .toPeer(nc.iD)
                                     .signData()
                                     .queue();
@@ -2267,6 +2273,7 @@ public class NodeMesh {
                             connectX.buildEvent(EventType.CHECK_NETWORK_NAME_RESPONSE,
                                             connectX.serialize("cxJSON1", nameResp)
                                                     .getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                                    .withSid(ne.sid)
                                     .toPeer(nc.iD)
                                     .signData()
                                     .queue();

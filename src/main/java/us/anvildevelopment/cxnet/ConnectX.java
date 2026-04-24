@@ -483,6 +483,7 @@ public class ConnectX {
             // Create event
             this.event = new NetworkEvent(eventType, data);
             this.event.eT = eventType.name();
+            this.event.sid = java.util.UUID.randomUUID().toString();
 
             // Create path with defaults
             this.path = new CXPath();
@@ -495,6 +496,14 @@ public class ConnectX {
         }
 
         // ========== Convenience Methods for Common Routing Patterns ==========
+
+        /**
+         * Override the auto-generated sid. Use on responses to echo back the request's sid.
+         */
+        public EventBuilder withSid(String sid) {
+            this.event.sid = sid;
+            return this;
+        }
 
         /**
          * Route to a specific network using CXN scope

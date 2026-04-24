@@ -1443,6 +1443,13 @@ public class ConnectX {
                 fos.write(signedBlob);
             }
 
+            if ("CXNET".equals(networkID)) {
+                try (FileOutputStream fos2 = new FileOutputStream(new File(cxRoot, "cxnet-bootstrap.cxn"))) {
+                    fos2.write(signedBlob);
+                }
+                log.info("[NetworkSeed] Updated cxnet-bootstrap.cxn with latest CXNET seed {}", seed.seedID);
+            }
+
             if (network.configuration.currentSeedID != null) {
                 network.configuration.lastSeedID = network.configuration.currentSeedID;
             }
@@ -1763,6 +1770,48 @@ public class ConnectX {
         } catch (Exception e) {
             log.error("[Bootstrap] Failed to apply signed seed blob", e);
         }
+    }
+
+    /**
+     * Attempt to apply a signed seed blob by verifying it against the backendSet of the target
+     * network (if already loaded) and/or the CXNET backendSet. The sender's identity is irrelevant --
+     * only the embedded signature is checked. Returns true if the seed was verified and applied.
+     */
+    public boolean applyBackendSignedSeed(byte[] signedBlob, String targetNetworkID) {
+        java.util.Set<String> trustedKeys = new java.util.LinkedHashSet<>();
+        // EPOCH is always trusted as the NMI authority
+        trustedKeys.add(EPOCH_UUID);
+        // CXNET backendSet members are trusted for all network seeds
+        CXNetwork cxnet = networkMap.get("CXNET");
+        if (cxnet != null && cxnet.configuration != null && cxnet.configuration.backendSet != null) {
+            trustedKeys.addAll(cxnet.configuration.backendSet);
+        }
+        // If the target network is already loaded, its backendSet is also trusted
+        CXNetwork targetNet = networkMap.get(targetNetworkID);
+        if (targetNet != null && targetNet.configuration != null && targetNet.configuration.backendSet != null) {
+            trustedKeys.addAll(targetNet.configuration.backendSet);
+        }
+        for (String trustedID : trustedKeys) {
+            try {
+                ByteArrayInputStream in = new ByteArrayInputStream(signedBlob);
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                boolean verified = encryptionProvider.verifyAndStrip(in, out, trustedID);
+                if (verified) {
+                    String seedJson = out.toString(StandardCharsets.UTF_8);
+                    Seed seed = (Seed) deserialize("cxJSON1", seedJson, Seed.class);
+                    if (seed != null) {
+                        applySeed(seed);
+                        log.info("[SeedVerify] Applied seed for {} verified by backendSet member {}",
+                                targetNetworkID, trustedID.substring(0, 8));
+                        return true;
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("[SeedVerify] Key {} did not verify blob for {}: {}", trustedID.substring(0, 8), targetNetworkID, e.getMessage());
+            }
+        }
+        log.error("[SeedVerify] No backendSet key verified seed blob for {} -- manual import required", targetNetworkID);
+        return false;
     }
 
     /**
@@ -3280,7 +3329,7 @@ public class ConnectX {
             }
         }
         //This line is for testing / debug it should NOT be uncommented for production
-        // dataContainer.cxikStore.putIfAbsent("CHAT_NETWORK_CXIK", "chat-network");
+        //dataContainer.cxikStore.putIfAbsent("", "chat-network");
     }
 
     /**

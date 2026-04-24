@@ -1565,18 +1565,18 @@ public class NodeMesh {
                                 responseData.epochSeedBlob != null ? responseData.epochSeedBlob.length + "b" : "none",
                                 responseData.dynamicSeed != null);
 
-                            // PRIORITY 1: If this is EPOCH or any peer with a signed blob, apply immediately
-                            if (responseData.epochSeedBlob != null) {
-                                log.info("[SEED CONSENSUS] Received signed seed blob ({} bytes) from {} -- applying",
-                                    responseData.epochSeedBlob.length,
-                                    responseData.authoritative ? "EPOCH (authoritative)" : "peer " + nc.iD.substring(0, 8));
+                            // PRIORITY 1: EPOCH's own signed blob -- apply immediately, no consensus needed
+                            if (responseData.epochSeedBlob != null && ConnectX.EPOCH_UUID.equals(nc.iD)) {
+                                log.info("[SEED CONSENSUS] Received signed seed blob ({} bytes) from EPOCH -- applying",
+                                    responseData.epochSeedBlob.length);
                                 connectX.applySignedSeed(responseData.epochSeedBlob);
                                 handledLocally = true;
                                 break;
                             }
 
-                            // PRIORITY 2: Multi-peer consensus for dynamic seeds only
-                            // Store response in consensus map
+                            // All other responses go into the consensus map. Blobs from non-EPOCH peers
+                            // are forwarded EPOCH-signed blobs; performSeedConsensus will verify the
+                            // embedded signature against the backendSet before applying anything.
                             if (!connectX.seedConsensusMap.containsKey(targetNetwork)) {
                                 connectX.seedConsensusMap.put(targetNetwork, new ConcurrentHashMap<>());
                             }
@@ -1585,8 +1585,9 @@ public class NodeMesh {
                             ConcurrentHashMap<String, ConnectX.SeedResponseData> responses =
                                 connectX.seedConsensusMap.get(targetNetwork);
 
-                            log.info("[SEED CONSENSUS] Stored dynamic response from {} ({}/3)",
-                                nc.iD.substring(0, 8), responses.size());
+                            log.info("[SEED CONSENSUS] Stored response from {} ({}/3) blob={}",
+                                nc.iD.substring(0, 8), responses.size(),
+                                responseData.epochSeedBlob != null ? responseData.epochSeedBlob.length + "b" : "none");
 
                             if (responses.size() >= 3) {
                                 log.info("[SEED CONSENSUS] Triggering consensus vote...");
@@ -2767,76 +2768,23 @@ public class NodeMesh {
     private static void performSeedConsensus(ConnectX connectX, String targetNetwork,
                                             ConcurrentHashMap<String, ConnectX.SeedResponseData> responses) {
         try {
-            log.info("[SEED CONSENSUS] Multi-peer voting for {} with {} responses", targetNetwork, responses.size());
+            log.info("[SEED CONSENSUS] Verifying seed blobs for {} from {} responses", targetNetwork, responses.size());
 
-            // Priority 1: Check if EPOCH responded with a dynamic seed (authoritative)
+            // Only signed blobs are accepted -- verify each against CXNET backendSet and, if already
+            // loaded, the target network's own backendSet. Sender identity is irrelevant; only the
+            // embedded PGP signature matters.
             for (ConnectX.SeedResponseData r : responses.values()) {
-                if (r.authoritative && r.dynamicSeed != null) {
-                    log.info("[SEED CONSENSUS] EPOCH authoritative dynamic seed -- applying");
-                    connectX.nodeMesh.applySeedConsensus(connectX, r.dynamicSeed, false,
-                        "EPOCH dynamic seed (authoritative)", targetNetwork);
+                if (r.epochSeedBlob == null) continue;
+                boolean applied = connectX.applyBackendSignedSeed(r.epochSeedBlob, targetNetwork);
+                if (applied) {
+                    log.info("[SEED CONSENSUS] Seed for {} applied via backendSet-verified blob", targetNetwork);
                     return;
                 }
             }
 
-            // Priority 2: Compare chain heights across peers for consensus
-            Map<String, Integer> heightVotes = new HashMap<>();
-            for (ConnectX.SeedResponseData r : responses.values()) {
-                if (r.chainHeights != null) {
-                    String heightSig = "c1:" + r.chainHeights.get("c1") +
-                                     ",c2:" + r.chainHeights.get("c2") +
-                                     ",c3:" + r.chainHeights.get("c3");
-                    heightVotes.put(heightSig, heightVotes.getOrDefault(heightSig, 0) + 1);
-                }
-            }
-
-            String majorityHeights = null;
-            int maxVotes = 0;
-            for (Map.Entry<String, Integer> vote : heightVotes.entrySet()) {
-                if (vote.getValue() > maxVotes) {
-                    maxVotes = vote.getValue();
-                    majorityHeights = vote.getKey();
-                }
-            }
-
-            double consensusPercent = responses.isEmpty() ? 0.0 : (double) maxVotes / responses.size();
-            log.info("[SEED CONSENSUS] Majority: {}/{} ({}%)", maxVotes, responses.size(),
-                String.format("%.0f", consensusPercent * 100));
-
-            if (consensusPercent >= 0.51) {
-                for (ConnectX.SeedResponseData r : responses.values()) {
-                    if (r.chainHeights != null) {
-                        String heightSig = "c1:" + r.chainHeights.get("c1") +
-                                         ",c2:" + r.chainHeights.get("c2") +
-                                         ",c3:" + r.chainHeights.get("c3");
-                        if (heightSig.equals(majorityHeights) && r.dynamicSeed != null) {
-                            connectX.nodeMesh.applySeedConsensus(connectX, r.dynamicSeed, false,
-                                "Peer consensus (" + String.format("%.0f%%", consensusPercent * 100) +
-                                " agreement) from " + r.senderID.substring(0, 8), targetNetwork);
-                            return;
-                        }
-                    }
-                }
-            } else {
-                // No consensus -- fall back to local signed seed blob if available
-                log.warn("[SEED CONSENSUS] Consensus failed ({}%) -- trying local seed blob fallback",
-                    String.format("%.0f", consensusPercent * 100));
-                File seedsDir = new File(connectX.cxRoot, "seeds");
-                if (seedsDir.exists()) {
-                    File[] seedFiles = seedsDir.listFiles((dir, name) -> name.endsWith(".cxn"));
-                    if (seedFiles != null && seedFiles.length > 0) {
-                        File latestSeed = seedFiles[0];
-                        for (File f : seedFiles) {
-                            if (f.lastModified() > latestSeed.lastModified()) latestSeed = f;
-                        }
-                        log.info("[SEED CONSENSUS] Loading local seed blob: {}", latestSeed.getName());
-                        byte[] blob = java.nio.file.Files.readAllBytes(latestSeed.toPath());
-                        connectX.applySignedSeed(blob);
-                        return;
-                    }
-                }
-                log.error("[SEED CONSENSUS] Cannot resolve -- no local seed blob available");
-            }
+            // No blob passed backendSet signature verification -- unsigned dynamic seeds are not trusted
+            log.error("[SEED CONSENSUS] No backendSet-verified seed blob received for {} -- manual import required",
+                    targetNetwork);
 
         } catch (Exception e) {
             log.error("[SEED CONSENSUS] Voting error", e);

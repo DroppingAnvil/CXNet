@@ -140,7 +140,7 @@ public class MultiPeerTest {
             log.info("  P" + (i+1) + " (" + p.getOwnID().substring(0, 8) + ")"
                 + "  state=" + p.state
                 + "  HV=" + p.nodeMesh.peerDirectory.hv.size()
-                + "  LAN-peers=" + p.dataContainer.getLocalPeerCount());
+                + "  LAN-peers=" + p.dataContainer.localPeerCount());
         }
 
         // Optionally send CXN messages during setup

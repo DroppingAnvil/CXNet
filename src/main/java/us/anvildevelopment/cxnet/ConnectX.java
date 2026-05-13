@@ -1247,12 +1247,23 @@ public class ConnectX {
                     public void doAfter(boolean success) {
                         if (success && o instanceof ByteArrayOutputStream) {
                             applySignedSeed(((ByteArrayOutputStream) o).toByteArray());
-                            // If the local file failed (unsigned legacy format or wrong key),
-                            // fall through to a fresh remote fetch in addition to P2P seed request
                             if (!networkMap.containsKey("CXNET")) {
                                 fetchBootstrapSeedAsync();
                             } else {
-                                requestSeedUpdateFromEpoch();
+                                CXNetwork cxnetRef = networkMap.get("CXNET");
+                                boolean authoritative = cxnetRef != null
+                                        && cxnetRef.configuration != null
+                                        && cxnetRef.configuration.backendSet != null
+                                        && cxnetRef.configuration.backendSet.contains(getOwnID());
+                                if (authoritative) {
+                                    // Republish so any networks restored by restoreJoinedNetworks
+                                    // (which ran before this IOJob) are included in the distributed
+                                    // bootstrap and signedBootstrapSeed. Skip requestSeedUpdateFromEpoch
+                                    // -- pulling the hosted seed would overwrite the fresh one.
+                                    signAndPublishNetworkSeed("CXNET");
+                                } else {
+                                    requestSeedUpdateFromEpoch();
+                                }
                             }
                         }
                     }
@@ -1345,6 +1356,7 @@ public class ConnectX {
      * Safe to call on restart -- no-op if a seed blob already exists on disk.
      */
     private void initEpochBootstrap() {
+        log.debug("[EpochBootstrap] initEpochBootstrap called");
         try {
             // Ensure CXNET exists in networkMap
             CXNetwork cxnet = networkMap.get("CXNET");
@@ -1432,7 +1444,27 @@ public class ConnectX {
             // can discover every network EPOCH knows about in a single exchange.
             if ("CXNET".equals(networkID)) {
                 for (CXNetwork net : networkMap.values()) {
-                    seed.addNetwork(net);
+                    String netID = net.configuration != null ? net.configuration.netID : null;
+                    if (netID != null && !"CXNET".equals(netID)) {
+                        // Re-apply the persisted seed for this network so the bundled config
+                        // reflects any updates written to disk since the last in-memory load.
+                        File netSeedFile = new File(new File(cxRoot, "networks"), netID + File.separator + "seed.cxn");
+                        if (netSeedFile.exists()) {
+                            try {
+                                byte[] blob = java.nio.file.Files.readAllBytes(netSeedFile.toPath());
+                                ByteArrayInputStream bais = new ByteArrayInputStream(blob);
+                                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                                encryptionProvider.stripSignature(bais, baos);
+                                Seed latestSeed = (Seed) deserialize("cxJSON1", baos.toString(StandardCharsets.UTF_8), Seed.class);
+                                if (latestSeed != null) {
+                                    applySeed(latestSeed);
+                                }
+                            } catch (Exception e) {
+                                log.warn("[NetworkSeed] Could not refresh seed for {} before bundling: {}", netID, e.getMessage());
+                            }
+                        }
+                    }
+                    seed.addNetwork(networkMap.getOrDefault(netID != null ? netID : "", net));
                 }
             } else {
                 seed.addNetwork(network);
@@ -1463,7 +1495,8 @@ public class ConnectX {
                 try (FileOutputStream fos2 = new FileOutputStream(new File(cxRoot, "cxnet-bootstrap.cxn"))) {
                     fos2.write(signedBlob);
                 }
-                log.info("[NetworkSeed] Updated cxnet-bootstrap.cxn with latest CXNET seed {}", seed.seedID);
+                signedBootstrapSeed = signedBlob;
+                log.info("[NetworkSeed] Updated cxnet-bootstrap.cxn and signedBootstrapSeed with latest CXNET seed {}", seed.seedID);
             }
 
             if (network.configuration.currentSeedID != null) {
@@ -1993,6 +2026,15 @@ public class ConnectX {
 
         // Restore any non-CXNET networks this node previously joined
         restoreJoinedNetworks();
+
+        // If authoritative for CXNET, republish so that any networks loaded above by
+        // restoreJoinedNetworks are folded into signedBootstrapSeed and cxnet-bootstrap.cxn.
+        CXNetwork cxnetForRepublish = networkMap.get("CXNET");
+        if (cxnetForRepublish != null && cxnetForRepublish.configuration != null
+                && cxnetForRepublish.configuration.backendSet != null
+                && cxnetForRepublish.configuration.backendSet.contains(getOwnID())) {
+            signAndPublishNetworkSeed("CXNET");
+        }
 
         // Initialize LAN scanner for local peer discovery.
         // Runs once on startup (after jitter), then every 15 minutes.

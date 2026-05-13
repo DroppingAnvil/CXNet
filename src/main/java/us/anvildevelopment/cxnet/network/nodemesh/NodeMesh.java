@@ -1463,6 +1463,8 @@ public class NodeMesh {
                                 dynamicSeed.networks = new ArrayList<>();
                                 if ("*".equals(requestedNetwork)) {
                                     dynamicSeed.networks.addAll(connectX.getNetworks().values());
+                                } else if ("CXNET".equals(requestedNetwork) && ConnectX.EPOCH_UUID.equals(connectX.getOwnID())) {
+                                    dynamicSeed.networks.addAll(connectX.getNetworks().values());
                                 } else {
                                     dynamicSeed.networks.add(network);
                                 }

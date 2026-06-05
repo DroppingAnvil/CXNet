@@ -2716,9 +2716,9 @@ public class ConnectX {
             createRecoveryMarker(networkBlockchainDir,
                 "One or more chain files for network " + networkID + " could not be read and may be corrupt.\n" +
                 "Saves for this network are BLOCKED until this file is removed.\n" +
-                "To recover:\n" +
-                "  1. Delete or fix the corrupt chain-*.json / block-*.json files in this directory.\n" +
-                "  2. Delete THIS file (recovery.txt) while the node is running.\n");
+                "Option A - Manual fix: Shut down the node, fix or replace the corrupt chain-*.json / block-*.json files,\n" +
+                "  delete this file, then restart.\n" +
+                "Option B - Self-recovery: Delete this file while the node is running and ConnectX will attempt rebuild from peers.\n");
             // Not fatal - network can still function with in-memory chains
         }
 
@@ -3400,9 +3400,9 @@ public class ConnectX {
                 createRecoveryMarker(cxRoot,
                     "data.cxd could not be read and may be corrupt.\n" +
                     "Saves for this node's local state are BLOCKED until this file is removed.\n" +
-                    "To recover:\n" +
-                    "  1. Delete or fix the corrupt data.cxd file.\n" +
-                    "  2. Delete THIS file (recovery.txt) while the node is running.\n");
+                    "Option A - Manual fix: Shut down the node, fix or replace data.cxd,\n" +
+                    "  delete this file, then restart.\n" +
+                    "Option B - Self-recovery: Delete this file while the node is running and ConnectX will attempt rebuild from peers.\n");
                 dataContainer = new DataContainer();
             }
         }

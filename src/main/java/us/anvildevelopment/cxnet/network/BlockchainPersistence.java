@@ -94,6 +94,12 @@ public class BlockchainPersistence {
 
         validateChainID(chainID);
 
+        File networkDir = new File(cxRoot, "blockchain" + File.separator + networkID);
+        if (recoveryMarkerExists(networkDir)) {
+            log.warn("[Blockchain] Save blocked for {} recovery.txt present. Delete it to resume.", networkID);
+            return;
+        }
+
         chainLocks[chainID.intValue()].lock();
         try {
             // Ensure blocks directory exists
@@ -178,6 +184,12 @@ public class BlockchainPersistence {
         }
 
         validateChainID(chain.chainID);
+
+        File networkDir2 = new File(cxRoot, "blockchain" + File.separator + networkID);
+        if (recoveryMarkerExists(networkDir2)) {
+            log.warn("[Blockchain] Metadata save blocked for {} recovery.txt present. Delete it to resume.", networkID);
+            return;
+        }
 
         chainLocks[chain.chainID.intValue()].lock();
         try {
@@ -370,6 +382,10 @@ public class BlockchainPersistence {
         if (chainID < 1 || chainID > MAX_CHAINS) {
             throw new IllegalArgumentException("chainID must be between 1 and " + MAX_CHAINS);
         }
+    }
+
+    static boolean recoveryMarkerExists(File dir) {
+        return new File(dir, "recovery.txt").exists();
     }
 
     /**

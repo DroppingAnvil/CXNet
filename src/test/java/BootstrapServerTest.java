@@ -183,16 +183,10 @@ public class BootstrapServerTest {
             signedOutput.close();
 
             // Save signed blob to seeds/{seedID}.cxn
-            java.io.File seedFile = new java.io.File(seedsDir, seed.seedID + ".cxn");
-            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(seedFile)) {
-                fos.write(signedBlob);
-            }
+            server.atomicWriteBytes(new java.io.File(seedsDir, seed.seedID + ".cxn"), signedBlob);
 
             // Save as distribution bootstrap file (picked up by other peers on startup)
-            java.io.File bootstrapFile = new java.io.File(server.cxRoot, "cxnet-bootstrap.cxn");
-            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(bootstrapFile)) {
-                fos.write(signedBlob);
-            }
+            server.atomicWriteBytes(new java.io.File(server.cxRoot, "cxnet-bootstrap.cxn"), signedBlob);
 
             // Load into RAM so EPOCH can include it in CXHELLO responses
             server.signedBootstrapSeed = signedBlob;

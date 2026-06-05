@@ -1391,14 +1391,10 @@ public class ConnectX {
             // Persist: seeds/{seedID}.cxn
             File seedsDir = new File(cxRoot, "seeds");
             seedsDir.mkdirs();
-            try (FileOutputStream fos = new FileOutputStream(new File(seedsDir, seed.seedID + ".cxn"))) {
-                fos.write(signedBlob);
-            }
+            atomicWriteBytes(new File(seedsDir, seed.seedID + ".cxn"), signedBlob);
 
             // Persist: cxnet-bootstrap.cxn (distribution copy)
-            try (FileOutputStream fos = new FileOutputStream(new File(cxRoot, "cxnet-bootstrap.cxn"))) {
-                fos.write(signedBlob);
-            }
+            atomicWriteBytes(new File(cxRoot, "cxnet-bootstrap.cxn"), signedBlob);
 
             // Record current seed ID in network config
             if (cxnet.configuration.currentSeedID != null) {
@@ -1487,14 +1483,10 @@ public class ConnectX {
 
             File seedsDir = new File(cxRoot, "seeds");
             seedsDir.mkdirs();
-            try (FileOutputStream fos = new FileOutputStream(new File(seedsDir, seed.seedID + ".cxn"))) {
-                fos.write(signedBlob);
-            }
+            atomicWriteBytes(new File(seedsDir, seed.seedID + ".cxn"), signedBlob);
 
             if ("CXNET".equals(networkID)) {
-                try (FileOutputStream fos2 = new FileOutputStream(new File(cxRoot, "cxnet-bootstrap.cxn"))) {
-                    fos2.write(signedBlob);
-                }
+                atomicWriteBytes(new File(cxRoot, "cxnet-bootstrap.cxn"), signedBlob);
                 signedBootstrapSeed = signedBlob;
                 log.info("[NetworkSeed] Updated cxnet-bootstrap.cxn and signedBootstrapSeed with latest CXNET seed {}", seed.seedID);
             }
@@ -1800,17 +1792,31 @@ public class ConnectX {
             final String seedID = seed.seedID;
             final String seedNetworkID = seed.networkID;
             try {
-                jobQueue.add(new IOJob(new ByteArrayInputStream(blobRef),
-                        new FileOutputStream(new File(seedsDir, seedID + ".cxn")), true));
+                File seedTarget = new File(seedsDir, seedID + ".cxn");
+                File seedTmp = new File(seedsDir, seedID + ".cxn.tmp");
+                jobQueue.add(new IOJob(new ByteArrayInputStream(blobRef), new FileOutputStream(seedTmp), true) {
+                    @Override public void doAfter(boolean success) {
+                        if (success) atomicFinalize(seedTmp, seedTarget);
+                    }
+                });
                 if ("CXNET".equals(seedNetworkID)) {
-                    jobQueue.add(new IOJob(new ByteArrayInputStream(blobRef),
-                            new FileOutputStream(new File(cxRoot, "cxnet-bootstrap.cxn")), true));
+                    File bsTarget = new File(cxRoot, "cxnet-bootstrap.cxn");
+                    File bsTmp = new File(cxRoot, "cxnet-bootstrap.cxn.tmp");
+                    jobQueue.add(new IOJob(new ByteArrayInputStream(blobRef), new FileOutputStream(bsTmp), true) {
+                        @Override public void doAfter(boolean success) {
+                            if (success) atomicFinalize(bsTmp, bsTarget);
+                        }
+                    });
                 } else if (seedNetworkID != null) {
-                    // Persist non-CXNET seeds to networks/<networkID>/seed.cxn for restoreJoinedNetworks
                     File netSeedDir = new File(new File(cxRoot, "networks"), seedNetworkID);
                     netSeedDir.mkdirs();
-                    jobQueue.add(new IOJob(new ByteArrayInputStream(blobRef),
-                            new FileOutputStream(new File(netSeedDir, "seed.cxn")), true));
+                    File nsTarget = new File(netSeedDir, "seed.cxn");
+                    File nsTmp = new File(netSeedDir, "seed.cxn.tmp");
+                    jobQueue.add(new IOJob(new ByteArrayInputStream(blobRef), new FileOutputStream(nsTmp), true) {
+                        @Override public void doAfter(boolean success) {
+                            if (success) atomicFinalize(nsTmp, nsTarget);
+                        }
+                    });
                 }
             } catch (FileNotFoundException e) {
                 log.error("[Bootstrap] Could not queue blob write", e);
@@ -2014,6 +2020,7 @@ public class ConnectX {
      */
     public void connect(int port) throws IOException {
         this.listeningPort = port;
+        warnExistingRecoveryMarkers();
         this.streamManager = new us.anvildevelopment.cxnet.network.stream.CXStreamManager(this);
         OutConnectionController outController =
             new OutConnectionController(this);
@@ -2705,6 +2712,13 @@ public class ConnectX {
             }
         } catch (Exception e) {
             log.error("[Blockchain] Failed to load persisted chains for {}: {}", networkID, e.getMessage());
+            File networkBlockchainDir = new File(new File(cxRoot, "blockchain"), networkID);
+            createRecoveryMarker(networkBlockchainDir,
+                "One or more chain files for network " + networkID + " could not be read and may be corrupt.\n" +
+                "Saves for this network are BLOCKED until this file is removed.\n" +
+                "To recover:\n" +
+                "  1. Delete or fix the corrupt chain-*.json / block-*.json files in this directory.\n" +
+                "  2. Delete THIS file (recovery.txt) while the node is running.\n");
             // Not fatal - network can still function with in-memory chains
         }
 
@@ -3383,6 +3397,12 @@ public class ConnectX {
                     "cxJSON1", fis, DataContainer.class);
             } catch (Exception e) {
                 log.error("[DataContainer] Failed to load data.cxd: {}", e.getMessage());
+                createRecoveryMarker(cxRoot,
+                    "data.cxd could not be read and may be corrupt.\n" +
+                    "Saves for this node's local state are BLOCKED until this file is removed.\n" +
+                    "To recover:\n" +
+                    "  1. Delete or fix the corrupt data.cxd file.\n" +
+                    "  2. Delete THIS file (recovery.txt) while the node is running.\n");
                 dataContainer = new DataContainer();
             }
         }
@@ -3397,13 +3417,77 @@ public class ConnectX {
         if (dataContainer == null) {
             throw new IllegalStateException("DataContainer not initialized");
         }
+        if (recoveryMarkerExists(cxRoot)) {
+            log.warn("[DataContainer] Save blocked recovery.txt present in {}. Delete it to resume.", cxRoot.getName());
+            return;
+        }
 
         File dataFile = new File(cxRoot, "data.cxd");
+        File tmpFile = new File(cxRoot, "data.cxd.tmp");
         String json = serialize("cxJSON1", dataContainer);
-        FileWriter writer = new FileWriter(dataFile);
-        writer.write(json);
-        writer.flush();
-        writer.close();
+        try (FileWriter writer = new FileWriter(tmpFile)) {
+            writer.write(json);
+        }
+        java.nio.file.Files.move(tmpFile.toPath(), dataFile.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    static void createRecoveryMarker(File dir, String message) {
+        try {
+            dir.mkdirs();
+            File marker = new File(dir, "recovery.txt");
+            if (!marker.exists()) {
+                try (FileWriter fw = new FileWriter(marker)) {
+                    fw.write(message);
+                }
+                LoggerFactory.getLogger(ConnectX.class).warn("[Recovery] Created recovery.txt in {}", dir.getName());
+            }
+        } catch (Exception e) {
+            LoggerFactory.getLogger(ConnectX.class).error("[Recovery] Could not create recovery.txt in {}: {}", dir.getName(), e.getMessage());
+        }
+    }
+
+    static boolean recoveryMarkerExists(File dir) {
+        return new File(dir, "recovery.txt").exists();
+    }
+
+    private void warnExistingRecoveryMarkers() {
+        File marker = new File(cxRoot, "recovery.txt");
+        if (marker.exists()) {
+            log.warn("[Recovery] RECOVERY MODE ACTIVE: {} delete recovery.txt to resume normal operation", cxRoot.getName());
+        }
+        File blockchainDir = new File(cxRoot, "blockchain");
+        if (blockchainDir.isDirectory()) {
+            File[] networks = blockchainDir.listFiles(File::isDirectory);
+            if (networks != null) {
+                for (File net : networks) {
+                    if (new File(net, "recovery.txt").exists()) {
+                        log.warn("[Recovery] RECOVERY MODE ACTIVE for network {}: delete blockchain/{}/recovery.txt to resume.", net.getName(), net.getName());
+                    }
+                }
+            }
+        }
+    }
+
+    public void atomicWriteBytes(File target, byte[] data) throws Exception {
+        File tmp = new File(target.getParent(), target.getName() + ".tmp");
+        try (FileOutputStream fos = new FileOutputStream(tmp)) {
+            fos.write(data);
+        }
+        java.nio.file.Files.move(tmp.toPath(), target.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    void atomicFinalize(File tmp, File target) {
+        try {
+            java.nio.file.Files.move(tmp.toPath(), target.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        } catch (Exception e) {
+            log.error("[IO] Failed to finalize atomic write for {}: {}", target.getName(), e.getMessage());
+        }
     }
 
     /**

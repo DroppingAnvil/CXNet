@@ -2190,10 +2190,7 @@ public class NodeMesh {
                                             java.io.File netSeedDir = new java.io.File(
                                                     new java.io.File(connectX.cxRoot, "networks"), req.networkID);
                                             netSeedDir.mkdirs();
-                                            try (java.io.FileOutputStream nfos = new java.io.FileOutputStream(
-                                                    new java.io.File(netSeedDir, "seed.cxn"))) {
-                                                nfos.write(netSignedBlob);
-                                            }
+                                            connectX.atomicWriteBytes(new java.io.File(netSeedDir, "seed.cxn"), netSignedBlob);
                                         } catch (Exception saveEx) {
                                             log.warn("[NETEPOCH] Could not persist seed for {}: {}", req.networkID, saveEx.getMessage());
                                         }

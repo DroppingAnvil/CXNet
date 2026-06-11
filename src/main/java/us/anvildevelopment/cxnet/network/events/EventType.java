@@ -226,6 +226,19 @@ public enum EventType {
      * Payload: {@code NetworkNameCheck} with requestId echoed, taken flag, and message.
      */
     CHECK_NETWORK_NAME_RESPONSE(30_000, 1_024, 3),
+    /**
+     * Request from a CXAppClient to a CXAppServer.
+     * Payload: {@code CXAppRequest} serialized as cxJSON1.
+     * Sent encrypted peer-to-peer via toPeer(serverCXID).encrypt(serverCXID).
+     * The server dispatches to the registered CXAppServer instance by appID.
+     */
+    APP_REQUEST(60_000, 1_048_576, 5),
+    /**
+     * Response from a CXAppServer to a CXAppClient.
+     * Payload: {@code CXAppResponse} serialized as cxJSON1.
+     * Contains a fields map with the result of the requested op.
+     */
+    APP_RESPONSE(60_000, 1_048_576, 5),
     ;
 
     /** How long (ms) this event may sit in the output/retry queue before being dropped. 0 means no expiry. */

@@ -73,6 +73,7 @@
                          The other *Test.java files are main()-style manual runners. -->
                     <includes>
                         <include>MultiPeerTest</include>
+                        <include>CXAppUnitTest</include>
                     </includes>
                 </configuration>
             </plugin>

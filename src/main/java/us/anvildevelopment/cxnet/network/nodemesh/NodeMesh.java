@@ -2303,6 +2303,60 @@ public class NodeMesh {
                         }
                         handledLocally = true;
                         break;
+
+                    case APP_REQUEST:
+                        try {
+                            ib.readyObject(us.anvildevelopment.cxnet.app.CXAppRequest.class, ib.nc.se, connectX);
+                            us.anvildevelopment.cxnet.app.CXAppRequest appReq =
+                                    (us.anvildevelopment.cxnet.app.CXAppRequest) ib.object;
+
+                            String senderCXID = (ne.p != null && ne.p.oCXID != null) ? ne.p.oCXID : nc.iD;
+                            us.anvildevelopment.cxnet.app.CXAppServer appServer =
+                                    connectX.getAppServer(appReq.appID);
+
+                            if (appServer == null) {
+                                log.warn("[CXApp] APP_REQUEST for unknown app '{}' from {}", appReq.appID, senderCXID);
+                            } else {
+                                us.anvildevelopment.cxnet.app.CXAppResponse appResp =
+                                        appServer.handle(appReq, senderCXID, connectX.dataContainer);
+                                String respJson = ConnectX.serialize(ib.nc.se, appResp);
+                                connectX.buildEvent(EventType.APP_RESPONSE, respJson.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                                        .withSid(ne.sid)
+                                        .toPeer(nc.iD)
+                                        .signData()
+                                        .queue();
+                                log.info("[CXApp] APP_REQUEST op={} app='{}' from {} -> success={}",
+                                        appReq.op, appReq.appID, senderCXID, appResp.success);
+                            }
+                        } catch (Exception e) {
+                            log.error("[CXApp] APP_REQUEST error: {}", e.getMessage());
+                        }
+                        handledLocally = true;
+                        break;
+
+                    case APP_RESPONSE:
+                        try {
+                            ib.readyObject(us.anvildevelopment.cxnet.app.CXAppResponse.class, ib.nc.se, connectX);
+                            us.anvildevelopment.cxnet.app.CXAppResponse appResp =
+                                    (us.anvildevelopment.cxnet.app.CXAppResponse) ib.object;
+
+                            us.anvildevelopment.cxnet.app.CXAppClient appClient =
+                                    connectX.getAppClient(appResp.appID);
+
+                            if (appClient == null) {
+                                log.warn("[CXApp] APP_RESPONSE for unknown app '{}' from {}", appResp.appID, nc.iD);
+                            } else {
+                                String html = appClient.applyAndRender(appResp);
+                                log.info("[CXApp] APP_RESPONSE app='{}' success={} html={} chars",
+                                        appResp.appID, appResp.success, html.length());
+                                // Deliver to eventQueue for the HTTP bridge or application layer to pick up
+                                connectX.eventQueue.add(ib);
+                            }
+                        } catch (Exception e) {
+                            log.error("[CXApp] APP_RESPONSE error: {}", e.getMessage());
+                        }
+                        handledLocally = true;
+                        break;
                 }
             } catch (IllegalArgumentException ignored) {
                 // Not a known EventType constant, already tried plugins above

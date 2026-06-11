@@ -6,6 +6,7 @@
 package us.anvildevelopment.cxnet.edge;
 
 import us.anvildevelopment.cxnet.network.nodemesh.Node;
+import us.anvildevelopment.util.tools.permissions.BasicPermissionContainer;
 
 import java.io.Serializable;
 import java.util.*;
@@ -85,6 +86,17 @@ public class DataContainer implements Serializable {
      * SECURITY: Only the CXNET NMI node should populate this store.
      */
     public Map<String, String> cxikStore = new ConcurrentHashMap<>();
+
+    /**
+     * Machine-scoped CXApp permissions.
+     * Key: CXID of the peer being granted access.
+     * Value: permission entries keyed by permission string (e.g. "rprox.admin").
+     *
+     * Set locally by the sysadmin -- never distributed over the network.
+     * Use ConnectX.grantCXIDPermission() / revokeCXIDPermission() to modify.
+     * Checked by CXAppServer on every READ, WRITE, and INVOKE that declares a permission.
+     */
+    public BasicPermissionContainer cxidAppPermissions = new BasicPermissionContainer();
 
     /**
      * Non-CXNET networks this node has joined. Persisted so the node can restore membership

@@ -85,6 +85,8 @@ public class ConnectX {
     private transient Node self;
     public int listeningPort = 0;
     private final ConcurrentHashMap<String, CXPlugin> plugins = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, us.anvildevelopment.cxnet.app.CXAppServer> appServers = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, us.anvildevelopment.cxnet.app.CXAppClient> appClients = new ConcurrentHashMap<>();
     private static final transient List<String> reserved = Arrays.asList("SYSTEM", "CX", "cxJSON1", "CXNET");
 
     /**
@@ -2846,6 +2848,79 @@ public class ConnectX {
             return false;
         }
     }
+
+    // -------------------------------------------------------------------------
+    // CXApp registry
+    // -------------------------------------------------------------------------
+
+    /**
+     * Register a CXAppServer on this node. Builds the reflection cache immediately.
+     * Incoming APP_REQUEST events matching this appID will be dispatched here.
+     */
+    public void registerApp(us.anvildevelopment.cxnet.app.CXAppServer server) {
+        server.buildCache();
+        appServers.put(server.getAppID(), server);
+        log.info("[CXApp] Registered server app '{}'", server.getAppID());
+    }
+
+    /**
+     * Register a CXAppClient on this node. Builds the reflection cache immediately.
+     * Incoming APP_RESPONSE events matching this appID will be dispatched here.
+     */
+    public void registerApp(us.anvildevelopment.cxnet.app.CXAppClient client) {
+        client.buildCache();
+        appClients.put(client.getAppID(), client);
+        log.info("[CXApp] Registered client app '{}'", client.getAppID());
+    }
+
+    public us.anvildevelopment.cxnet.app.CXAppServer getAppServer(String appID) {
+        return appServers.get(appID);
+    }
+
+    public us.anvildevelopment.cxnet.app.CXAppClient getAppClient(String appID) {
+        return appClients.get(appID);
+    }
+
+    // -------------------------------------------------------------------------
+    // CXApp machine-scoped permissions
+    // -------------------------------------------------------------------------
+
+    /**
+     * Grant a CXID permission to invoke protected CXApp operations.
+     * Persisted immediately to DataContainer.
+     *
+     * @param cxid       the peer CXID to grant access to
+     * @param permission the permission string (e.g. "rprox.admin")
+     * @param weight     weight for relational delegation -- higher weight can grant lower weights
+     */
+    public void grantCXIDPermission(String cxid, String permission, int weight) throws Exception {
+        us.anvildevelopment.util.tools.permissions.BasicEntry entry =
+                new us.anvildevelopment.util.tools.permissions.BasicEntry(permission, true, weight);
+        // Using permissionSet directly -- Util1 BasicPermissionContainer.addEntry() has two bugs:
+        // 1. Private addEntry(id, e) guards on permissionSet.containsKey(id), silently dropping grants for new IDs
+        // 2. Inner map key uses `id` instead of `e.getName()`, so entries land under the wrong key even when the outer map exists
+        // Util1 fix needed: remove the containsKey guard (use computeIfAbsent) and change putIfAbsent(id, e) -> put(e.getName(), e)
+        dataContainer.cxidAppPermissions.permissionSet
+                .computeIfAbsent(cxid, k -> new java.util.HashMap<>())
+                .put(permission, entry);
+        saveDataContainer();
+        log.info("[CXApp] Granted permission '{}' (weight {}) to {}", permission, weight, cxid);
+    }
+
+    /**
+     * Revoke a CXID's permission for a CXApp operation.
+     * Flips allow to false -- entry is retained for weight bookkeeping.
+     * Full entry cleanup will be available in a future Util release.
+     * Persisted immediately to DataContainer.
+     */
+    public void revokeCXIDPermission(String cxid, String permission, int weight) throws Exception {
+        us.anvildevelopment.util.tools.permissions.BasicEntry denyEntry =
+                new us.anvildevelopment.util.tools.permissions.BasicEntry(permission, false, weight);
+        dataContainer.cxidAppPermissions.editPermission("SYSTEM", cxid, denyEntry);
+        saveDataContainer();
+        log.info("[CXApp] Revoked permission '{}' from {}", permission, cxid);
+    }
+
     /**
      * Record a NetworkEvent to the blockchain
      * @param ne NetworkEvent to record

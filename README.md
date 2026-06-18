@@ -30,6 +30,7 @@ A [three-layer signature chain](CX-PROTOCOL.md#three-layer-encryption-system) co
 - **Pluggable crypto, serialization, and transports.** Swap PGP for another scheme, Jackson for another serializer, or HTTP bridge for another transport without touching protocol logic.
 - **Managed network governance.** NMI provisions nodes, controls permissions, and issues Integration Keys (CXIK) for network registration. Zero Trust mode locks the structure permanently.
 - **Stream sessions.** Bidirectional encrypted channels via `CXStreamPlugin`, TCP or WebSocket with automatic bridge negotiation.
+- **CXApps.** A human-facing application layer built on the CX network. Apps render interactive HTML UI in a browser or natively in CXNexus, with all identity, permissions, and logic handled on the CX network.
 - **Fluent event API.** `buildEvent().toPeer().signData().queue()`
 - **HTTP bridge.** Punch through firewalls and NAT with no open port required on the connecting side.
 - **LAN discovery.** Automatic peer discovery on startup via CXHELLO.
@@ -125,6 +126,54 @@ Failed CXS deliveries retry with exponential backoff and promote to CXN broadcas
 
 ---
 
+## CXApps
+
+CXApps extend CXNet to serve humans directly, not just pre-built programmatic solutions. An app consists of a server-side `CXAppServer` (running on any CX node) and a client-side `CXAppClient` (local to the user's node), connected over the standard CX event pipeline with full signing and verification at every hop.
+
+The client holds an HTML template. Field values from the server travel over CX, are substituted into the template locally, and the rendered HTML is delivered to the user. No raw HTML ever crosses the network.
+
+### Security posture
+
+The central design tradeoff for CXApps is security versus developer flexibility. Compromising security in this system is equivalent to compromising the entire system's purpose. Rather than weakening the security model to increase convenience, the rendering surface is split and the choice is left to the app developer.
+
+**CXNexus (secure surface)**
+
+Apps with `browserEnabled()` returning `false` are restricted to CXNexus, the official desktop client that embeds the ConnectX node in-process. CXNexus renders HTML with JavaScript disabled. This surface is appropriate for pages that edit critical or authenticated data, manage permissions, or have any other reason to avoid browser-level attack surface.
+
+**Browser (open surface)**
+
+Apps with `browserEnabled()` returning `true` (the default) may be rendered in Chrome via the extension. JavaScript is permitted, but with one hard constraint: scripts may only be loaded from `.js` files packed alongside the app at install time. Scripts may not be provided by the server or injected through field values. Field values substituted into templates are HTML-escaped by the framework before rendering to prevent injection from a remote peer.
+
+**Design rule for app developers**
+
+All core functionality must work through the structured placeholder and invoke system with no dependency on JavaScript. CXNexus renders with JavaScript disabled. JavaScript in the browser surface is for visual effects and progressive enhancement only.
+
+### Session isolation
+
+Each browser tab receives an independent session token (`X-CXApp-Session` header) on first load. Multiple tabs for the same app, even pointing at different server peers, are fully isolated.
+
+### Wire protocol
+
+Four operations are supported: `READ`, `WRITE`, `INVOKE`, `REFRESH`. All travel as signed CX events (`APP_REQUEST` / `APP_RESPONSE`) through the standard NodeMesh pipeline.
+
+```java
+// Register a server-side app
+connectX.registerApp(new MyAppServer());
+
+// Register a client-side app
+connectX.registerApp(new MyAppClient());
+
+// Start the internal loopback HTTP server for the Chrome extension
+connectX.startAppServer(8079);
+
+// Grant a peer permission to invoke protected operations
+connectX.grantCXIDPermission(peerCXID, "admin", 100);
+```
+
+See `src/main/java/us/anvildevelopment/cxnet/app/` and [`CX-PROTOCOL.md`](CX-PROTOCOL.md#cxapps) for the full specification.
+
+---
+
 ## Plugin System
 
 Plugins intercept events by service name. Three data levels control what is delivered:
@@ -182,6 +231,8 @@ src/main/java/us/anvildevelopment/cxnet/
   network/nodemesh/         NodeMesh, PeerDirectory, bridges
   network/events/           Typed event payloads (CXMessage, CXHello, PeerFinding, ...)
   crypt/                    CryptProvider abstraction + PGPainless implementation
+  app/                      CXAppServer, CXAppClient, CXAppRequest, CXAppResponse
+  annotations/              @CXAppField, @CXAppMethod
   edge/                     DataContainer, ConnectXClient
 src/test/java/
   MultiPeerTest.java        Full multi-peer integration test

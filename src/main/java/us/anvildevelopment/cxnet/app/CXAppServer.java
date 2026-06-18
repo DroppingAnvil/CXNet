@@ -55,6 +55,14 @@ public abstract class CXAppServer {
     /** Unique identifier for this app. Must match the client's appID. */
     public abstract String getAppID();
 
+    /**
+     * Whether this app accepts requests from the browser (Chrome extension via loopback HTTP bridge).
+     * Override and return false to restrict this app to in-process CXNexus calls only.
+     * When false, browser-originated requests are rejected and the extension shows an "Open in CX" prompt.
+     * Defaults to true.
+     */
+    public boolean browserEnabled() { return true; }
+
     // -------------------------------------------------------------------------
     // Framework internals
     // -------------------------------------------------------------------------
@@ -102,6 +110,10 @@ public abstract class CXAppServer {
     public final CXAppResponse handle(CXAppRequest request, String senderCXID, DataContainer dataContainer) {
         if (request == null || request.op == null) {
             return CXAppResponse.fail(appID, "Malformed request");
+        }
+
+        if (request.fromBrowser && !browserEnabled()) {
+            return CXAppResponse.fail(appID, "BROWSER_NOT_ALLOWED");
         }
 
         try {

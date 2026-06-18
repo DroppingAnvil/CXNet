@@ -56,8 +56,33 @@ public class HTTPBridgeProvider implements BridgeProvider {
 
     private ConnectX connectX;
     private Server jettyServer;
+    private Server appJettyServer;
     private OkHttpClient httpClient;
     private int serverPort = -1;
+
+    // Pending HTML responses for the app servlet: sid -> queue of rendered HTML
+    // The AppServlet blocks on this queue after firing an APP_REQUEST.
+    // NodeMesh APP_RESPONSE handler delivers the rendered HTML here to unblock.
+    private static final ConcurrentHashMap<String, LinkedBlockingQueue<String>> pendingAppHTML
+            = new ConcurrentHashMap<>();
+
+    private static final long APP_RESPONSE_TIMEOUT_MS = 5000;
+
+    // Per-tab session state: sessionToken -> AppSession.
+    // Each GET /app/{appID} creates a new session token returned as X-CXApp-Session header.
+    // POST requests must supply the same header to identify their targetCXID.
+    // This ensures multiple browser tabs for the same appID are fully isolated.
+    // TODO: add session expiry for long-running deployments.
+    private static final ConcurrentHashMap<String, AppSession> appSessions = new ConcurrentHashMap<>();
+
+    private static class AppSession {
+        final String appID;
+        final String targetCXID;
+        AppSession(String appID, String targetCXID) {
+            this.appID       = appID;
+            this.targetCXID  = targetCXID;
+        }
+    }
 
     // Response queues for synchronous HTTP handling (request ID -> response queue)
     private static final ConcurrentHashMap<String, LinkedBlockingQueue<NetworkContainer>> responseQueues
@@ -193,8 +218,50 @@ public class HTTPBridgeProvider implements BridgeProvider {
         log.info("  Stream endpoint: ws://0.0.0.0:{}/cxstream", port);
     }
 
+    /**
+     * Start the internal CXApp HTTP server, bound exclusively to 127.0.0.1.
+     * Only the local Chrome extension (or other localhost clients) can reach this server.
+     * External traffic cannot reach a loopback-bound socket at the OS level.
+     *
+     * @param internalPort port for the internal app server (e.g. 8079)
+     */
+    public void startAppServer(int internalPort) throws Exception {
+        appJettyServer = new Server();
+        ServerConnector connector = new ServerConnector(appJettyServer);
+        connector.setHost("127.0.0.1");
+        connector.setPort(internalPort);
+        appJettyServer.addConnector(connector);
+
+        ServletContextHandler context = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
+        context.setContextPath("/");
+        context.addServlet(new ServletHolder(new AppServlet()), "/app/*");
+
+        appJettyServer.setHandler(context);
+        appJettyServer.start();
+
+        log.info("[CXApp] Internal app server started on 127.0.0.1:{}", internalPort);
+        log.info("[CXApp]   App endpoint: http://127.0.0.1:{}/app/{{appID}}", internalPort);
+    }
+
+    /**
+     * Deliver rendered HTML to a pending AppServlet request.
+     * Called by the NodeMesh APP_RESPONSE handler after applyAndRender().
+     *
+     * @param sid  the event sid used to correlate request and response
+     * @param html the rendered HTML to return to the browser
+     */
+    public static void deliverAppHTML(String sid, String html) {
+        LinkedBlockingQueue<String> queue = pendingAppHTML.get(sid);
+        if (queue != null) queue.offer(html);
+    }
+
     @Override
     public void stopServer() {
+        if (appJettyServer != null) {
+            try { appJettyServer.stop(); } catch (Exception e) {
+                log.error("Error stopping internal app server", e);
+            }
+        }
         if (jettyServer != null) {
             try {
                 jettyServer.stop();
@@ -308,6 +375,145 @@ public class HTTPBridgeProvider implements BridgeProvider {
         @Override
         protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
             resp.sendError(405, "Method not allowed, use CX Protocol");
+        }
+    }
+
+    /**
+     * Internal CXApp servlet. Only reachable on 127.0.0.1 (loopback-bound port).
+     * A secondary address check is applied as defense-in-depth.
+     *
+     * Wire behavior: only field values cross the CX network. HTML is generated
+     * locally by the registered CXAppClient using its template. The servlet returns
+     * locally-rendered HTML to Chrome. No HTML ever travels over CX.
+     *
+     * GET  /app/{appID}?cxid={peerCXID}[&amp;addr={bridgeAddr}]
+     *   Fires a REFRESH and returns fully rendered HTML.
+     *   addr is optional. If provided, the peer is registered directly without PeerFind.
+     *
+     * POST /app/{appID}
+     *   Body JSON: {"op":"INVOKE","target":"methodName","args":["arg0",...]}
+     *   Fires the op and returns re-rendered HTML after fields are updated.
+     */
+    class AppServlet extends HttpServlet {
+
+        private static final String LOOPBACK_V4 = "127.0.0.1";
+        private static final String LOOPBACK_V6 = "::1";
+
+        private static final String SESSION_HEADER = "X-CXApp-Session";
+
+        @Override
+        protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+            if (!isLoopback(req)) { resp.sendError(403, "Forbidden"); return; }
+
+            String appID = extractAppID(req);
+            if (appID == null) { resp.sendError(400, "Missing appID"); return; }
+
+            String cxid = req.getParameter("cxid");
+            String addr = req.getParameter("addr");
+            if (cxid == null || cxid.isEmpty()) { resp.sendError(400, "Missing cxid"); return; }
+
+            if (connectX.getAppClient(appID) == null) { resp.sendError(404, "Unknown app: " + appID); return; }
+
+            if (addr != null && !addr.isEmpty()) registerPeerHint(cxid, addr);
+
+            String sessionToken = java.util.UUID.randomUUID().toString();
+            appSessions.put(sessionToken, new AppSession(appID, cxid));
+
+            String html = fireAndWait(appID, cxid, "REFRESH", null, null);
+            if (html == null) { resp.sendError(504, "CXApp server did not respond in time"); return; }
+
+            resp.setHeader(SESSION_HEADER, sessionToken);
+            writeHTML(resp, html);
+        }
+
+        @Override
+        protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+            if (!isLoopback(req)) { resp.sendError(403, "Forbidden"); return; }
+
+            String sessionToken = req.getHeader(SESSION_HEADER);
+            if (sessionToken == null || sessionToken.isEmpty()) {
+                resp.sendError(401, "Missing " + SESSION_HEADER + " header. Open the app first.");
+                return;
+            }
+
+            AppSession session = appSessions.get(sessionToken);
+            if (session == null) { resp.sendError(401, "Unknown session. Open the app again."); return; }
+
+            if (connectX.getAppClient(session.appID) == null) {
+                resp.sendError(404, "Unknown app: " + session.appID);
+                return;
+            }
+
+            byte[] body = req.getInputStream().readAllBytes();
+            us.anvildevelopment.cxnet.app.CXAppRequest appReq;
+            try {
+                appReq = (us.anvildevelopment.cxnet.app.CXAppRequest)
+                        ConnectX.deserialize("cxJSON1", new String(body, "UTF-8"),
+                                us.anvildevelopment.cxnet.app.CXAppRequest.class);
+            } catch (Exception e) {
+                resp.sendError(400, "Invalid request body: " + e.getMessage());
+                return;
+            }
+
+            String html = fireAndWait(session.appID, session.targetCXID, appReq.op, appReq.target, appReq.args);
+            if (html == null) { resp.sendError(504, "CXApp server did not respond in time"); return; }
+
+            resp.setHeader(SESSION_HEADER, sessionToken);
+            writeHTML(resp, html);
+        }
+
+        private String fireAndWait(String appID, String targetCXID, String op, String target, String[] args) {
+            String sid = java.util.UUID.randomUUID().toString();
+            LinkedBlockingQueue<String> queue = new LinkedBlockingQueue<>();
+            pendingAppHTML.put(sid, queue);
+            try {
+                us.anvildevelopment.cxnet.app.CXAppRequest appReq =
+                        new us.anvildevelopment.cxnet.app.CXAppRequest(appID, op, target, args, true);
+                String json = ConnectX.serialize("cxJSON1", appReq);
+                connectX.buildEvent(us.anvildevelopment.cxnet.network.events.EventType.APP_REQUEST,
+                                json.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                        .withSid(sid)
+                        .toPeer(targetCXID)
+                        .signData()
+                        .queue();
+                return queue.poll(APP_RESPONSE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            } catch (Exception e) {
+                log.error("[CXApp] AppServlet fireAndWait error: {}", e.getMessage());
+                return null;
+            } finally {
+                pendingAppHTML.remove(sid);
+            }
+        }
+
+        private void registerPeerHint(String cxid, String addr) {
+            try {
+                us.anvildevelopment.cxnet.network.nodemesh.Node hint =
+                        new us.anvildevelopment.cxnet.network.nodemesh.Node();
+                hint.cxID = cxid;
+                hint.addr = addr;
+                connectX.nodeMesh.peerDirectory.addNode(hint);
+                log.info("[CXApp] Registered peer hint: {} -> {}", cxid, addr);
+            } catch (Exception e) {
+                log.warn("[CXApp] Could not register peer hint for {}: {}", cxid, e.getMessage());
+            }
+        }
+
+        private void writeHTML(HttpServletResponse resp, String html) throws IOException {
+            resp.setContentType("text/html;charset=UTF-8");
+            resp.setStatus(200);
+            resp.getOutputStream().write(html.getBytes("UTF-8"));
+        }
+
+        private String extractAppID(HttpServletRequest req) {
+            String path = req.getPathInfo();
+            if (path == null || path.length() < 2) return null;
+            String id = path.startsWith("/") ? path.substring(1) : path;
+            return id.isEmpty() ? null : id;
+        }
+
+        private boolean isLoopback(HttpServletRequest req) {
+            String addr = req.getRemoteAddr();
+            return LOOPBACK_V4.equals(addr) || LOOPBACK_V6.equals(addr);
         }
     }
 

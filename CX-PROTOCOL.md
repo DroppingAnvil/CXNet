@@ -291,6 +291,7 @@ Moving verifications earlier means pre-verified data objects sit in the eventQue
 8. [Plugin System](#plugin-system)
 9. [Threading Model](#threading-model)
 10. [Implementation Notes](#implementation-notes)
+11. [CXApps](#cxapps)
 
 ---
 
@@ -5131,6 +5132,86 @@ All network type transitions must be recorded to c1 (Admin) chain:
 - Registration events (REGISTER_NODE)
 
 This provides an **immutable audit trail** of network access policy changes.
+
+---
+
+## CXApps
+
+CXApps are a human-facing application layer built on the CX event system. They allow developers to expose interactive UI driven by CX network data, with identity, permissions, and transport handled by the existing CX infrastructure.
+
+### Architecture
+
+An app consists of two sides:
+
+- `CXAppServer`: runs on the node that owns the data. Annotated fields and methods are cached via reflection at registration time. Incoming `APP_REQUEST` events are dispatched here.
+- `CXAppClient`: runs on the user's local node. Holds an HTML template. Receives `APP_RESPONSE` events containing field values, substitutes them into the template locally, and returns rendered HTML. No HTML ever crosses the CX wire.
+
+Both sides are registered with `ConnectX.registerApp()`.
+
+### Wire protocol
+
+| Op | target | args | Response fields |
+|---|---|---|---|
+| `READ` | field name | null | `{fieldName: value}` |
+| `WRITE` | field name | `[newValue]` | `{fieldName: confirmedValue}` |
+| `INVOKE` | method name | method params as strings | `{_return: value}` or empty if void |
+| `REFRESH` | null | null | all readable fields |
+
+Events travel as `APP_REQUEST` / `APP_RESPONSE` through the standard NodeMesh pipeline: signed, verified, routed identically to any other CX event.
+
+### Permissions
+
+Field and method access is gated by a permission string set on the `@CXAppField` or `@CXAppMethod` annotation. Permissions are weighted and stored in `DataContainer.cxidAppPermissions` (a `BasicPermissionContainer`), scoped to this machine.
+
+```java
+connectX.grantCXIDPermission(peerCXID, "admin", 100);
+connectX.revokeCXIDPermission(peerCXID, "admin", 100);
+```
+
+REFRESH silently omits fields the caller lacks permission to read.
+
+### Rendering surfaces and security posture
+
+The core design tradeoff is security versus developer flexibility. CXNet's entire value depends on its security model, so rather than weaken it, the rendering surface is split. The decision is left to the app developer via `CXAppServer.browserEnabled()`.
+
+#### CXNexus (secure surface, `browserEnabled() = false`)
+
+Requests are dispatched by CXNexus via an in-process method call, never over a network socket. JavaScript is disabled in CXNexus's embedded WebView. This surface is appropriate for pages that edit critical or authenticated data, manage permissions, or require the full trust of the local process.
+
+#### Browser (open surface, `browserEnabled() = true`)
+
+Requests arrive from the Chrome extension via the loopback HTTP server (`127.0.0.1` only, bound at the OS level). JavaScript is permitted in the browser, with one hard constraint: scripts may only be loaded from `.js` files packed alongside the app at install time. The server may not provide scripts, and field values may not inject executable content. The framework HTML-escapes all field values before substitution into the template.
+
+**Developer rule:** all core functionality must work with JavaScript disabled. JavaScript is for visual effects and progressive enhancement only. Apps that depend on JavaScript for core functionality will break in CXNexus.
+
+#### `fromBrowser` flag
+
+Every request built by the loopback HTTP bridge sets `CXAppRequest.fromBrowser = true`. `CXAppServer.handle()` checks this against `browserEnabled()` before dispatching. This flag is a client-managed policy marker, not a cryptographic guarantee. A client modified against spec can set it arbitrarily. That is considered out of scope: the trust boundary for CXApps and CXNet is the code itself.
+
+### Session isolation
+
+Each browser tab that opens an app receives a unique session token returned as the `X-CXApp-Session` response header. Subsequent POST requests from that tab must supply the same header. The session maps to a specific `{appID, targetCXID}` pair, so multiple tabs for the same app (even against different server peers) are fully isolated. Sessions currently persist in memory for the lifetime of the node process.
+
+### Chrome extension bridge
+
+The loopback HTTP server started by `connectX.startAppServer(port)` exposes:
+
+```
+GET  /app/{appID}?cxid={peerCXID}[&addr={bridgeAddr}]
+     Creates a session, fires REFRESH, returns rendered HTML.
+     Response header: X-CXApp-Session: {token}
+
+POST /app/{appID}
+     Header: X-CXApp-Session: {token}
+     Body JSON: {"op":"INVOKE","target":"method","args":["arg0"]}
+     Returns re-rendered HTML after the op is applied.
+```
+
+The server is bound to `127.0.0.1` at the OS level. An additional `isLoopback()` check is applied inside the servlet as defense-in-depth.
+
+### App registration
+
+Official CXApp registration will be available at AnvilDevelopment.US. App IDs are not enforced at the protocol level to keep the network open. Loading an unregistered or unofficial CXApp carries risk: an ID collision with a malicious or poorly written app can result in unintended behavior. Only load CXApps from sources you trust.
 
 ---
 

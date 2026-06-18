@@ -2349,7 +2349,8 @@ public class NodeMesh {
                                 String html = appClient.applyAndRender(appResp);
                                 log.info("[CXApp] APP_RESPONSE app='{}' success={} html={} chars",
                                         appResp.appID, appResp.success, html.length());
-                                // Deliver to eventQueue for the HTTP bridge or application layer to pick up
+                                us.anvildevelopment.cxnet.network.nodemesh.bridge.http.HTTPBridgeProvider
+                                        .deliverAppHTML(ne.sid, html);
                                 connectX.eventQueue.add(ib);
                             }
                         } catch (Exception e) {

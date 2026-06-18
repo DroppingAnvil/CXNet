@@ -54,10 +54,30 @@ public abstract class CXAppClient {
     public abstract String getAppID();
 
     /**
-     * HTML template string. Use {@code {{fieldName}}} to embed field values.
-     * Use {@code {{invoke:methodName:ButtonLabel}}} for a no-arg action button.
-     * Use {@code {{invoke:methodName:ButtonLabel:argLabel1,argLabel2}}} for a form with labeled inputs.
-     * The framework replaces all placeholders during {@link #buildHTML()}.
+     * HTML template string defining this app's UI.
+     *
+     * <p>Placeholder syntax:
+     * <ul>
+     *   <li>{@code {{fieldName}}} - replaced with the current value of the named {@code @CXAppField} field.</li>
+     *   <li>{@code {{invoke:methodName:ButtonLabel}}} - generates a no-arg action button.</li>
+     *   <li>{@code {{invoke:methodName:ButtonLabel:argLabel1,argLabel2}}} - generates a form with labeled inputs.</li>
+     * </ul>
+     *
+     * <p><b>Surface contract:</b> all core functionality (data display, field edits, method invocations)
+     * must work through the structured placeholder system above, with no dependency on JavaScript.
+     * CXNexus renders templates with JavaScript disabled. Chrome renders the same template and
+     * additionally allows JavaScript for visual effects and progressive enhancement only.
+     * An app that requires JavaScript for core functionality will break in CXNexus.
+     *
+     * <p><b>JavaScript source restriction (browser surface):</b> scripts may only be loaded from
+     * {@code .js} files packed alongside the app at install time. Scripts must not be embedded
+     * inline in the template and must not be sourced from the server or any remote origin.
+     * Field values are HTML-escaped by the framework and cannot inject executable content.
+     * This restriction exists because field values originate from a remote peer and cannot be
+     * fully trusted as safe markup, even over a verified CX connection.
+     *
+     * <p>Field values substituted into this template are HTML-escaped by the framework.
+     * Do not double-escape values you expect to appear as plain text.
      */
     public abstract String getTemplate();
 
@@ -104,7 +124,7 @@ public abstract class CXAppClient {
         for (Map.Entry<String, Field> e : fieldCache.entrySet()) {
             try {
                 Object val = e.getValue().get(this);
-                html = html.replace("{{" + e.getKey() + "}}", val != null ? String.valueOf(val) : "");
+                html = html.replace("{{" + e.getKey() + "}}", escapeHtml(val != null ? String.valueOf(val) : ""));
             } catch (Exception ignored) {}
         }
 
@@ -211,6 +231,8 @@ public abstract class CXAppClient {
 
     // -------------------------------------------------------------------------
     // HTML escaping
+    // TODO: promote escapeHtml and escapeAttr to a shared sanitizer utility so
+    // CXNexus and other surfaces can reuse them without duplicating this logic.
     // -------------------------------------------------------------------------
 
     private String escapeHtml(String s) {

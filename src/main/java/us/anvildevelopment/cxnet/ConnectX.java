@@ -3658,4 +3658,19 @@ public class ConnectX {
         }
     }
 
+    /**
+     * Start the internal CXApp HTTP server on the given port, bound to 127.0.0.1 only.
+     * Must be called after connect(). The Chrome extension communicates with this server.
+     *
+     * @param internalPort port for the loopback app server (e.g. 8079)
+     */
+    public void startAppServer(int internalPort) throws Exception {
+        BridgeProvider bridge = bridgeProviders.get("cxHTTP1");
+        if (bridge instanceof HTTPBridgeProvider) {
+            ((HTTPBridgeProvider) bridge).startAppServer(internalPort);
+        } else {
+            throw new IllegalStateException("cxHTTP1 bridge not available. Call connect() first.");
+        }
+    }
+
 }

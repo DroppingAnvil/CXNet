@@ -1,8 +1,34 @@
 # ConnectX (CX) Protocol Documentation
 
 **Version:** 0.4
-**Last Updated:** 2026-04-16 (Node temp-import security, discovery event retry fix, startup NPE fix, LAN/peer discovery scheduling)
+**Last Updated:** 2026-06-18 (CXApp system: human-facing app layer, browser surface security split, per-tab session isolation, injection fix)
 **Status:** Early Development. Core networking and event API are functional; many subsystems are incomplete or in progress.
+
+---
+
+## Recent Updates (CXApp system)
+
+### CXApp framework
+
+Introduces the CXApp system: a human-facing application layer on the CX network. `CXAppServer` (abstract, server node) and `CXAppClient` (abstract, user node) are registered via `ConnectX.registerApp()`. Fields and methods are exposed via `@CXAppField` and `@CXAppMethod` annotations, cached once via reflection at registration time. Four ops: `READ`, `WRITE`, `INVOKE`, `REFRESH`. All traffic travels as `APP_REQUEST` / `APP_RESPONSE` events through the standard signed NodeMesh pipeline.
+
+### Security: browser surface split
+
+`CXAppServer.browserEnabled()` (default `true`) gates whether the Chrome extension bridge can load an app. When `false`, the server returns `BROWSER_NOT_ALLOWED` and the extension prompts the user to open the app in CXNexus instead, where JS is disabled and the node is in-process.
+
+`CXAppRequest.fromBrowser` is set by the loopback HTTP bridge transport layer. It is a policy flag, not cryptographically enforced. Clients modified against spec can set it; that is accepted as out of scope.
+
+### Security fix: field value injection
+
+`CXAppClient.buildHTML()` previously substituted field values raw into the template. A malicious remote peer could return a crafted field value containing markup or script. Field values are now HTML-escaped before substitution. Templates from the local developer are not escaped (template structure is trusted local code; only the data from the remote peer is untrusted).
+
+### Chrome extension bridge: per-tab session isolation
+
+`HTTPBridgeProvider` gains an `AppServlet` on a second Jetty server bound to `127.0.0.1` only. Each `GET /app/{appID}?cxid=...` creates a UUID session token (`X-CXApp-Session` response header) mapping `{appID, targetCXID}` in `appSessions`. Each `POST /app/{appID}` reads the token to look up its session. Multiple browser tabs for the same app are fully isolated.
+
+`fireAndWait()` fires an `APP_REQUEST`, blocks on a `LinkedBlockingQueue<String>` keyed by `sid`. The NodeMesh `APP_RESPONSE` handler calls `HTTPBridgeProvider.deliverAppHTML(sid, html)` to unblock it after local HTML rendering.
+
+`connectX.startAppServer(int port)` activates the bridge after `connect()`.
 
 ---
 

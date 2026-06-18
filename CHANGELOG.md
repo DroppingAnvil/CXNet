@@ -24,6 +24,59 @@ Dynamic seeds in `SEED_RESPONSE` consensus are now verified against EPOCH + CXNE
 
 ## Unreleased
 
+### CXApp system
+
+Introduces the CXApp framework: a human-facing application layer built on the CX event pipeline. Apps expose interactive HTML UI driven by CX network data, with identity, permissions, and transport handled entirely by the existing CX infrastructure.
+
+**Architecture**
+
+`CXAppServer` (abstract) runs on the data-owning node. Fields annotated with `@CXAppField` and methods annotated with `@CXAppMethod` are cached via reflection at registration time (`buildCache()`). Incoming `APP_REQUEST` events are dispatched to `handle()` which routes to one of four ops: `READ`, `WRITE`, `INVOKE`, `REFRESH`.
+
+`CXAppClient` (abstract) runs on the user's local node. Holds an HTML template via `getTemplate()`. Receives `APP_RESPONSE` field values, substitutes them locally via `buildHTML()`, and returns rendered HTML. No HTML ever crosses the CX wire.
+
+`CXAppRequest` and `CXAppResponse` are the wire types, serialized as cxJSON1 and carried as `APP_REQUEST` / `APP_RESPONSE` event payloads through the standard signed NodeMesh pipeline.
+
+**Permissions**
+
+Field and method access is gated per `@CXAppField(permission="...")` and `@CXAppMethod(permission="...")`. Permissions are stored in `DataContainer.cxidAppPermissions` (a `BasicPermissionContainer`), machine-scoped. `REFRESH` silently omits fields the caller lacks permission to read.
+
+```java
+connectX.grantCXIDPermission(peerCXID, "admin", 100);
+connectX.revokeCXIDPermission(peerCXID, "admin", 100);
+```
+
+Note: `BasicPermissionContainer.addEntry()` has two bugs in the current Util1 release (containsKey guard silently drops new CXIDs; inner map key uses `id` instead of `e.getName()`). `grantCXIDPermission` uses `permissionSet.computeIfAbsent().put()` directly as a workaround. A TODO is left for when Util1 is fixed.
+
+**Browser surface and security split**
+
+`CXAppServer.browserEnabled()` (default `true`) controls whether a browser extension may load the app. When `false`, browser requests return `BROWSER_NOT_ALLOWED` and the extension shows an "Open in CX" prompt.
+
+`CXAppRequest.fromBrowser` is set `true` by the loopback HTTP bridge on every browser-originated request. It is a client-managed policy flag with no cryptographic enforcement. A client modified against spec can set it arbitrarily; that is considered out of scope.
+
+**Injection fix**
+
+`CXAppClient.buildHTML()` previously substituted field values raw into the template string. A malicious remote peer could return a field value containing markup or script that would execute in any rendering surface. Field values are now HTML-escaped via `escapeHtml()` before substitution. A TODO notes that `escapeHtml` and `escapeAttr` should be promoted to a shared sanitizer utility for reuse in CXNexus.
+
+**Chrome extension bridge**
+
+`HTTPBridgeProvider` gains an internal `AppServlet` (second Jetty server bound to `127.0.0.1` only, started via `connectX.startAppServer(port)`). The servlet enforces loopback at the OS level and applies an `isLoopback()` check as defense-in-depth.
+
+Per-tab session isolation: each `GET /app/{appID}` generates a UUID session token returned as `X-CXApp-Session` response header. The session maps `{appID, targetCXID}` in `appSessions` (`ConcurrentHashMap`). Every `POST /app/{appID}` must supply the token to look up its session. Multiple tabs for the same app are fully isolated.
+
+`fireAndWait()` builds a `CXAppRequest` with `fromBrowser=true`, fires it as an `APP_REQUEST` event, and blocks on a `LinkedBlockingQueue<String>` keyed by the event sid. The NodeMesh `APP_RESPONSE` handler calls `HTTPBridgeProvider.deliverAppHTML(sid, html)` to unblock it after `CXAppClient.applyAndRender()` renders the HTML locally.
+
+**EventType additions**
+
+`APP_REQUEST(60_000, 1_048_576, 5)` and `APP_RESPONSE(60_000, 1_048_576, 5)` added to `EventType`.
+
+**Unit tests**
+
+`CXAppUnitTest` (JUnit 5, 19 tests): READ, WRITE, WRITE-rejected, WRITE-missing-args, INVOKE with arg, INVOKE void, INVOKE unknown, REFRESH unpermissioned, REFRESH admin, permission READ denied, READ allowed, INVOKE denied, INVOKE allowed, revoke by allow=false, buildHTML field placeholders, button generation, form generation, no leftover placeholders. All 19 pass. Added to Surefire includes alongside `MultiPeerTest`.
+
+**Documentation**
+
+`package-info.java` added for `us.anvildevelopment.cxnet.app` covering origin, design rationale, and the security/flexibility tradeoff. `getTemplate()` Javadoc updated with the surface contract and JS-from-file-only restriction. `README.md` and `CX-PROTOCOL.md` updated with the CXApp spec, two-surface security posture, session model, wire protocol table, and app registration policy.
+
 ### Security: node temp-import verification
 
 Peer nodes are no longer written to disk before signature verification. The old pattern added nodes to `PeerDirectory` and persisted `.cxi` files before the signing key was checked, then called `removeNode` on failure. `CryptProvider` now exposes `hasCert`, `cacheKeyFromString`, and `removeCert`. All three NodeMesh temp-import paths (CXHELLO/NewNode first contact, PeerFinding, relayed NewNode) now do a cert-cache-only provisional load -- no disk write, no PeerDirectory entry -- and only persist via `addNode` once all verifications pass. Rollback calls `removeCert` guarded by `certAlreadyPresent` so a key that was already cached before the import is never evicted.

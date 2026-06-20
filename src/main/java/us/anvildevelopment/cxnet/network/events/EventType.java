@@ -239,6 +239,19 @@ public enum EventType {
      * Contains a fields map with the result of the requested op.
      */
     APP_RESPONSE(60_000, 1_048_576, 5),
+    /**
+     * Request a cosigned identity for a peer this node has not met directly.
+     * Payload: {@code PeerLookup} with targetCXID set, serialized as cxJSON1.
+     * Sent to EPOCH and known HV peers; any peer holding a cosigned copy may answer.
+     */
+    PEER_LOOKUP_REQUEST(30_000, 4_096, 3),
+    /**
+     * Response to PEER_LOOKUP_REQUEST.
+     * Payload: {@code PeerLookup} with cosignedBlob set, serialized as cxJSON1.
+     * Outer signature must verify against EPOCH or a CXNET backendSet member before the
+     * inner self-signed Node is trusted for anything beyond further relay.
+     */
+    PEER_LOOKUP_RESPONSE(30_000, 1_048_576, 3),
     ;
 
     /** How long (ms) this event may sit in the output/retry queue before being dropped. 0 means no expiry. */

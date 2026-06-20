@@ -492,6 +492,7 @@ public class NodeMesh {
                     if (importedNode != null) {
                         if (signedNodeBlobForPersistence != null) {
                             peerDirectory.addNode(importedNode, signedNodeBlobForPersistence, connectX.cxRoot);
+                            cosignIfAuthoritative(importedNode, signedNodeBlobForPersistence);
                             log.info("[NodeMesh] Verified and PERSISTED CXHELLO node: {}", importedNode.cxID.substring(0, 8));
                         } else {
                             peerDirectory.addNode(importedNode);
@@ -975,6 +976,7 @@ public class NodeMesh {
 
                             // Verification passed -- overwrite temp entry with signed blob and persist to disk
                             peerDirectory.addNode(node, signedNodeBlob, connectX.cxRoot);
+                            cosignIfAuthoritative(node, signedNodeBlob);
                             log.info("[NodeMesh] Imported NewNode: {}", node.cxID.substring(0, 8));
                             log.info("[NodeMesh] NewNode signature VERIFIED and SAVED for relay");
                             break;
@@ -1395,6 +1397,7 @@ public class NodeMesh {
 
                                                 // Verification passed -- persist now
                                                 peerDirectory.addNode(discoveredPeer, signedNodeBytes, connectX.cxRoot);
+                                                cosignIfAuthoritative(discoveredPeer, signedNodeBytes);
 
                                                 imported++;
                                                 log.info("[PeerFinding]   + " + discoveredPeer.cxID.substring(0, 8) +
@@ -2358,6 +2361,69 @@ public class NodeMesh {
                         }
                         handledLocally = true;
                         break;
+
+                    case PEER_LOOKUP_REQUEST:
+                        try {
+                            ib.readyObject(us.anvildevelopment.cxnet.network.events.PeerLookup.class, ib.nc.se, connectX);
+                            us.anvildevelopment.cxnet.network.events.PeerLookup lookupReq =
+                                    (us.anvildevelopment.cxnet.network.events.PeerLookup) ib.object;
+
+                            if (lookupReq != null && lookupReq.targetCXID != null) {
+                                byte[] cosignedBlob = peerDirectory.getCosignedNode(lookupReq.targetCXID);
+                                if (cosignedBlob != null) {
+                                    us.anvildevelopment.cxnet.network.events.PeerLookup lookupResp =
+                                            new us.anvildevelopment.cxnet.network.events.PeerLookup(lookupReq.targetCXID);
+                                    lookupResp.cosignedBlob = cosignedBlob;
+                                    String respJson = ConnectX.serialize("cxJSON1", lookupResp);
+                                    connectX.buildEvent(EventType.PEER_LOOKUP_RESPONSE, respJson.getBytes(StandardCharsets.UTF_8))
+                                            .withSid(ne.sid)
+                                            .toPeer(nc.iD)
+                                            .signData()
+                                            .queue();
+                                    log.info("[PeerLookup] Responded to {} with cosigned identity for {}",
+                                            nc.iD.substring(0, 8), lookupReq.targetCXID.substring(0, 8));
+                                }
+                            }
+                        } catch (Exception e) {
+                            log.warn("[PeerLookup] REQUEST error: {}", e.getMessage());
+                        }
+                        handledLocally = true;
+                        break;
+
+                    case PEER_LOOKUP_RESPONSE:
+                        try {
+                            ib.readyObject(us.anvildevelopment.cxnet.network.events.PeerLookup.class, ib.nc.se, connectX);
+                            us.anvildevelopment.cxnet.network.events.PeerLookup lookupResp =
+                                    (us.anvildevelopment.cxnet.network.events.PeerLookup) ib.object;
+
+                            if (lookupResp != null && lookupResp.cosignedBlob != null) {
+                                Node imported = verifyAndImportCosignedIdentity(lookupResp.cosignedBlob);
+                                if (imported != null) {
+                                    String selfJson = ConnectX.serialize("cxJSON1", connectX.getSelf());
+                                    connectX.buildEvent(EventType.NewNode, selfJson.getBytes(StandardCharsets.UTF_8))
+                                            .signData()
+                                            .toPeer(imported.cxID)
+                                            .queue();
+                                    log.info("[PeerLookup] Imported and contacted: {}", imported.cxID.substring(0, 8));
+
+                                    // Resolve any pending lookup: queue each registered completion job onto
+                                    // jobQueue so IOThread runs doAfter() with the resolved Node, instead of
+                                    // running caller logic inline here on EventProcessor.
+                                    us.anvildevelopment.cxnet.network.nodemesh.PeerDirectory.PendingPeerLookup pending =
+                                            peerDirectory.pendingPeerLookups.remove(imported.cxID);
+                                    if (pending != null) {
+                                        for (us.anvildevelopment.cxnet.io.IOJob job : pending.completionJobs) {
+                                            job.o = imported;
+                                            connectX.jobQueue.add(job);
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            log.warn("[PeerLookup] RESPONSE error: {}", e.getMessage());
+                        }
+                        handledLocally = true;
+                        break;
                 }
             } catch (IllegalArgumentException ignored) {
                 // Not a known EventType constant, already tried plugins above
@@ -2822,6 +2888,140 @@ public class NodeMesh {
     }
 
     /**
+     * If this node is EPOCH or a CXNET backendSet member, wrap an already-verified peer's
+     * self-signed Node blob with an additional outer signature and store it for relay via
+     * PEER_LOOKUP_RESPONSE. Never recreates or alters the inner self-signed bytes; only adds
+     * an outer layer. Wire structure produced: {signedByTrusted{signedByPeer{Node}}}.
+     */
+    private void cosignIfAuthoritative(Node node, byte[] selfSignedBlob) {
+        if (node == null || node.cxID == null || selfSignedBlob == null) return;
+        try {
+            if (!isAuthoritativeForCosign()) return;
+            ByteArrayInputStream in = new ByteArrayInputStream(selfSignedBlob);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            connectX.encryptionProvider.sign(in, out);
+            in.close();
+            byte[] cosignedBlob = out.toByteArray();
+            out.close();
+            peerDirectory.addCosignedNode(node.cxID, cosignedBlob, connectX.cxRoot);
+            log.debug("[PeerLookup] Cosigned and stored identity for {}", node.cxID.substring(0, 8));
+        } catch (Exception e) {
+            log.warn("[PeerLookup] Could not cosign identity for {}: {}", node.cxID, e.getMessage());
+        }
+    }
+
+    private boolean isAuthoritativeForCosign() {
+        if (ConnectX.EPOCH_UUID.equals(connectX.getOwnID())) return true;
+        CXNetwork cxnet = connectX.getNetwork("CXNET");
+        return cxnet != null && cxnet.configuration != null && cxnet.configuration.backendSet != null
+                && cxnet.configuration.backendSet.contains(connectX.getOwnID());
+    }
+
+    /**
+     * Verify and import a cosigned identity received via PEER_LOOKUP_RESPONSE.
+     * Wire structure: {signedByTrusted{signedByPeer{Node}}}.
+     *
+     * Step 1 (outer layer): verifyAndStrip against each trusted key (EPOCH, CXNET backendSet)
+     *   until one succeeds. The responder's identity is irrelevant, only the embedded
+     *   signature matters, mirroring applyBackendSignedSeed's trust model.
+     * Step 2 (inner layer): the stripped bytes are the target's own self-signed Node blob.
+     *   Peek cxID/publicKey without verification, cache the key (never overrides an existing
+     *   different key), then verify the inner self-signature against that key.
+     * Step 3: only import if Node.signedAt is newer than any existing entry for this cxID,
+     *   so the most recent self-signed copy across however many peers respond always wins.
+     *
+     * A cosigned identity can never overwrite an existing entry signed under a different key;
+     * PeerDirectory.addNode already enforces that. This method only ever writes the verified
+     * inner self-signed bytes, never the outer cosignature wrapper, into normal .cxi storage.
+     *
+     * @return the imported Node on success, or null if verification failed or a newer entry already exists
+     */
+    Node verifyAndImportCosignedIdentity(byte[] cosignedBlob) {
+        if (cosignedBlob == null) return null;
+
+        java.util.Set<String> trustedKeys = new java.util.LinkedHashSet<>();
+        trustedKeys.add(ConnectX.EPOCH_UUID);
+        CXNetwork cxnet = connectX.getNetwork("CXNET");
+        if (cxnet != null && cxnet.configuration != null && cxnet.configuration.backendSet != null) {
+            trustedKeys.addAll(cxnet.configuration.backendSet);
+        }
+
+        byte[] selfSignedInnerBlob = null;
+        for (String trustedID : trustedKeys) {
+            try {
+                ByteArrayInputStream in = new ByteArrayInputStream(cosignedBlob);
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                if (connectX.encryptionProvider.verifyAndStrip(in, out, trustedID)) {
+                    selfSignedInnerBlob = out.toByteArray();
+                    break;
+                }
+            } catch (Exception ignored) {}
+        }
+
+        if (selfSignedInnerBlob == null) {
+            log.warn("[PeerLookup] Outer cosignature did not verify against any trusted key, discarding");
+            return null;
+        }
+
+        Node claimedNode;
+        try {
+            claimedNode = (Node) connectX.getSignedObjectNoVerify(
+                    new ByteArrayInputStream(selfSignedInnerBlob), Node.class, "cxJSON1");
+        } catch (Exception e) {
+            log.warn("[PeerLookup] Could not peek inner Node from cosigned blob: {}", e.getMessage());
+            return null;
+        }
+        if (claimedNode == null || claimedNode.cxID == null || claimedNode.publicKey == null) {
+            log.warn("[PeerLookup] Cosigned blob missing cxID or publicKey after outer strip");
+            return null;
+        }
+
+        byte[] existingBlob = peerDirectory.getSignedNode(claimedNode.cxID);
+        if (existingBlob != null) {
+            try {
+                Node existingNode = (Node) connectX.getSignedObjectNoVerify(
+                        new ByteArrayInputStream(existingBlob), Node.class, "cxJSON1");
+                if (existingNode != null && existingNode.signedAt >= claimedNode.signedAt) {
+                    log.debug("[PeerLookup] Cosigned candidate for {} is not newer than the existing entry, skipping",
+                            claimedNode.cxID.substring(0, 8));
+                    return null;
+                }
+            } catch (Exception ignored) {}
+        }
+
+        boolean certAlreadyPresent = connectX.encryptionProvider.hasCert(claimedNode.cxID);
+        connectX.encryptionProvider.cacheKeyFromString(claimedNode.cxID, claimedNode.publicKey);
+
+        Node verifiedNode;
+        try {
+            verifiedNode = (Node) connectX.getSignedObject(
+                    claimedNode.cxID, new ByteArrayInputStream(selfSignedInnerBlob), Node.class, "cxJSON1");
+        } catch (Exception e) {
+            verifiedNode = null;
+        }
+
+        if (verifiedNode == null || verifiedNode.cxID == null) {
+            if (!certAlreadyPresent) connectX.encryptionProvider.removeCert(claimedNode.cxID);
+            log.warn("[PeerLookup] Inner self-signature verification FAILED for {} (cosigner vouched for an unverifiable blob)",
+                    claimedNode.cxID.substring(0, 8));
+            return null;
+        }
+
+        peerDirectory.addNode(verifiedNode, selfSignedInnerBlob, connectX.cxRoot);
+
+        // Retain the cosigned wrapper itself (not just the verified inner blob) so this node
+        // can also answer PEER_LOOKUP_REQUEST for this cxID. Relaying a cosigned blob does not
+        // require being EPOCH or a backendSet member; trust is rooted in the outer signature,
+        // not in whoever relays it. Without this, propagation would stop after a single hop
+        // from the original authoritative producer.
+        peerDirectory.addCosignedNode(verifiedNode.cxID, cosignedBlob, connectX.cxRoot);
+
+        log.info("[PeerLookup] Verified and imported cosigned identity: {} (signedAt={})",
+                verifiedNode.cxID.substring(0, 8), verifiedNode.signedAt);
+        return verifiedNode;
+    }
+
+    /**
      * Perform multi-peer consensus voting on dynamic seeds
      * Compares chain heights, detects conflicts, applies majority consensus
      * If conflicts detected, requests fresh seed from EPOCH as tiebreaker
@@ -2843,9 +3043,59 @@ public class NodeMesh {
                 }
             }
 
-            // No blob passed backendSet signature verification -- unsigned dynamic seeds are not trusted
-            log.error("[SEED CONSENSUS] No backendSet-verified seed blob received for {} -- manual import required",
-                    targetNetwork);
+            // No blob passed backendSet signature verification. Likely cause: we have never
+            // joined this network before, so we don't yet hold its NMI's key and the blob
+            // wasn't EPOCH-signed either. Try to resolve the claimed NMI's identity via the
+            // network. epochOnly=false: ask EPOCH and all known HV peers, not just EPOCH.
+            // This is a fully decentralized system; trust is held entirely in the outer
+            // cosignature, not in who answers, so a broader search costs nothing in security
+            // and only improves the odds of finding a relayed copy if EPOCH itself is
+            // unreachable. Worst case if nobody answers is identical to asking EPOCH alone:
+            // the seed remains unverified and manual import is required.
+            String claimedNmiCxID = null;
+            for (ConnectX.SeedResponseData r : responses.values()) {
+                if (r.dynamicSeed == null || r.dynamicSeed.networks == null) continue;
+                for (CXNetwork network : r.dynamicSeed.networks) {
+                    if (network.configuration != null && targetNetwork.equals(network.configuration.netID)
+                            && network.networkDictionary != null && network.networkDictionary.nmi != null) {
+                        claimedNmiCxID = network.networkDictionary.nmi;
+                        break;
+                    }
+                }
+                if (claimedNmiCxID != null) break;
+            }
+
+            if (claimedNmiCxID == null) {
+                log.error("[SEED CONSENSUS] No backendSet-verified seed blob received for {} and no claimed NMI " +
+                        "identity found to look up -- manual import required", targetNetwork);
+                return;
+            }
+
+            log.warn("[SEED CONSENSUS] No backendSet-verified seed blob received for {} -- attempting peer lookup " +
+                    "for claimed NMI {}", targetNetwork, claimedNmiCxID.substring(0, 8));
+
+            final ConcurrentHashMap<String, ConnectX.SeedResponseData> responsesRef = responses;
+            final String targetNetworkRef = targetNetwork;
+            connectX.requestPeerLookupAsync(claimedNmiCxID, false, new us.anvildevelopment.cxnet.io.IOJob() {
+                @Override
+                public void doAfter(boolean success) {
+                    if (!success) {
+                        log.warn("[SEED CONSENSUS] Peer lookup for {}'s NMI did not resolve -- seed remains unverified",
+                                targetNetworkRef);
+                        return;
+                    }
+                    for (ConnectX.SeedResponseData r : responsesRef.values()) {
+                        if (r.epochSeedBlob == null) continue;
+                        if (connectX.applyBackendSignedSeed(r.epochSeedBlob, targetNetworkRef)) {
+                            log.info("[SEED CONSENSUS] Seed for {} applied after peer lookup resolved its NMI",
+                                    targetNetworkRef);
+                            return;
+                        }
+                    }
+                    log.error("[SEED CONSENSUS] Seed for {} still unverifiable after peer lookup resolved its NMI",
+                            targetNetworkRef);
+                }
+            });
 
         } catch (Exception e) {
             log.error("[SEED CONSENSUS] Voting error", e);

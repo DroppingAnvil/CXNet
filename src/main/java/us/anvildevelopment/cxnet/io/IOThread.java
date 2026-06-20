@@ -42,13 +42,13 @@ public class IOThread implements Runnable {
             if (ioJob != null) {
                 try {
                     processJob(ioJob, true);
+                    ioJob.success = true;
+                    ioJob.doAfter(true);
                 } catch (Exception e) {
                     log.error("Unexpected error processing IO job", e);
                     ioJob.success = false;
                     ioJob.doAfter(false);
                 }
-                ioJob.success = true;
-                ioJob.doAfter(true);
             } else {
                 try {
                     Thread.sleep(sleep);
@@ -144,6 +144,10 @@ public class IOThread implements Runnable {
                     break;
                 case BUILD_OUTPUT:
                     ((ConnectX.EventBuilder) ioJob.o).execute();
+                    break;
+                case CALLBACK:
+                    // No I/O. doAfter(true) below carries out the actual work using the
+                    // already-resolved data set on o/o1 before this job was queued.
                     break;
             }
             if (ioJob.next != null) {

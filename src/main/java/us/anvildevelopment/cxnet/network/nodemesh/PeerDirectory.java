@@ -92,8 +92,30 @@ public class PeerDirectory implements Serializable {
                         //TODO async
                   //  }
                 }
+
+                // No directly-verified .cxi entry. Check for a cosigned identity (.cxic) instead.
+                // This is a local disk read plus cryptographic verification only, no network I/O,
+                // so it is safe to run synchronously regardless of the caller's thread.
+                File cosigned = new File(peerGroup, cxID + ".cxic");
+                if (cosigned.exists() && cx != null && cx.nodeMesh != null) {
+                    try {
+                        byte[] cosignedBytes = java.nio.file.Files.readAllBytes(cosigned.toPath());
+                        Node imported = cx.nodeMesh.verifyAndImportCosignedIdentity(cosignedBytes);
+                        if (imported != null) {
+                            peerCache.put(cxID, imported);
+                            seen.put(cxID, imported);
+                            return imported;
+                        }
+                    } catch (Exception e) {
+                        log.error("Error loading cosigned identity from disk", e);
+                    }
+                }
             } else if (tryImport & sync) {
-                //TODO implement peer import
+                // Network-based peer lookup (PEER_LOOKUP_REQUEST) is intentionally NOT implemented
+                // here. lookup() is called from single-threaded and pooled hot paths (EventProcessor,
+                // IOThread, OutConnectionController, RetryProcessor) where blocking on a network
+                // round-trip could deadlock or starve the pool. Use a dedicated network-aware lookup
+                // method from a safe calling context instead (e.g. ConnectX.joinNetworkFromPeers).
             }
         return null;
     }
@@ -207,6 +229,106 @@ public class PeerDirectory implements Serializable {
             log.warn("[PeerDirectory] Rejected invalid node for signed add (cxID={}, publicKey={})",
                 n.cxID, n.publicKey != null ? n.publicKey.substring(0, Math.min(16, n.publicKey.length())) : "null");
         }
+    }
+
+    /**
+     * Tracks an in-flight network identity lookup for one cxID: retry bookkeeping plus any
+     * IOJobs waiting on resolution. Never blocks anything; callers register a completion job
+     * and move on. ConnectX.requestPeerLookupAsync() creates these; NodeMesh's
+     * PEER_LOOKUP_RESPONSE handler resolves them by queuing each registered job onto
+     * jobQueue once verification succeeds.
+     */
+    public static class PendingPeerLookup {
+        public final boolean epochOnly;
+        public final long firstAttemptAt;
+        public volatile long lastAttemptAt;
+        public volatile int attempts;
+        public final java.util.List<us.anvildevelopment.cxnet.io.IOJob> completionJobs =
+                new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        public PendingPeerLookup(boolean epochOnly) {
+            this.epochOnly = epochOnly;
+            this.firstAttemptAt = System.currentTimeMillis();
+            this.lastAttemptAt = this.firstAttemptAt;
+            this.attempts = 0;
+        }
+    }
+
+    // Pending network identity lookups: targetCXID -> retry state + registered completion jobs.
+    // Populated by ConnectX.requestPeerLookupAsync(); resolved (and removed) by NodeMesh's
+    // PEER_LOOKUP_RESPONSE handler once a verified cosigned identity arrives, or expired by
+    // the periodic retry sweep if no answer arrives within the retry limit.
+    public ConcurrentHashMap<String, PendingPeerLookup> pendingPeerLookups = new ConcurrentHashMap<>();
+
+    // Cache of cosigned identity blobs: an already-self-signed Node blob wrapped with an
+    // additional outer signature from EPOCH or a trusted CXNET backend. Used to bootstrap
+    // trust for nodes this peer has not met directly. Stored alongside regular signed nodes
+    // with a distinct extension (.cxic) so the same directory walk/relay code can be reused,
+    // and so a cosigned entry can never be confused with or overwrite a directly-verified
+    // .cxi entry. See Node.signedAt for the trust and replacement rules.
+    public ConcurrentHashMap<String, byte[]> cosignedNodeCache = new ConcurrentHashMap<>();
+
+    /**
+     * Store a cosigned identity blob for relaying to other peers.
+     * Does NOT add the node to PeerDirectory or signedNodeCache. The outer cosignature must
+     * be verified and the inner blob imported via the normal addNode(Node, byte[], File) path
+     * before this identity is trusted for anything beyond further relay.
+     *
+     * @param targetCXID  the cxID this cosigned blob identifies
+     * @param cosignedBlob the outer-signed bytes (inner payload is the target's self-signed Node blob)
+     * @param cxRoot      instance-specific root directory
+     */
+    public void addCosignedNode(String targetCXID, byte[] cosignedBlob, File cxRoot) {
+        if (targetCXID == null || cosignedBlob == null) return;
+        cosignedNodeCache.put(targetCXID, cosignedBlob);
+        try {
+            File peerDir = cxRoot != null ? new File(cxRoot, "nodemesh") : peers;
+            if (peerDir == null) return;
+            char firstChar = targetCXID.charAt(0);
+            File peerGroup = new File(peerDir, String.valueOf(firstChar));
+            if (!peerGroup.exists()) peerGroup.mkdirs();
+            File peerFile = new File(peerGroup, targetCXID + ".cxic");
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(peerFile);
+            fos.write(cosignedBlob);
+            fos.flush();
+            fos.close();
+            log.info("[PeerDirectory] Persisted cosigned identity: {} to {} ({} bytes)",
+                targetCXID.substring(0, 8), peerFile.getAbsolutePath(), cosignedBlob.length);
+        } catch (Exception e) {
+            log.error("[PeerDirectory] Failed to persist cosigned identity {}: {}", targetCXID, e.getMessage());
+        }
+    }
+
+    /**
+     * Get a cosigned identity blob from cache or disk, for relaying to a peer that requested it.
+     * Returns the raw outer-signed bytes. Callers must verify the outer signature against a
+     * trusted key before treating the inner Node as anything more than an unverified claim.
+     *
+     * @param cxID the cxID to look up
+     * @return cosigned bytes, or null if not available
+     */
+    public byte[] getCosignedNode(String cxID) {
+        if (cosignedNodeCache != null && cosignedNodeCache.containsKey(cxID)) {
+            return cosignedNodeCache.get(cxID);
+        }
+        if (peers != null) {
+            try {
+                char firstChar = cxID.charAt(0);
+                File peerGroup = new File(peers, String.valueOf(firstChar));
+                File peerFile = new File(peerGroup, cxID + ".cxic");
+                if (peerFile.exists()) {
+                    java.io.FileInputStream fis = new java.io.FileInputStream(peerFile);
+                    byte[] cosignedBytes = fis.readAllBytes();
+                    fis.close();
+                    if (cosignedNodeCache == null) cosignedNodeCache = new ConcurrentHashMap<>();
+                    cosignedNodeCache.put(cxID, cosignedBytes);
+                    return cosignedBytes;
+                }
+            } catch (Exception e) {
+                log.error("[PeerDirectory] Failed to load cosigned identity {}: {}", cxID, e.getMessage());
+            }
+        }
+        return null;
     }
 
     /**

@@ -1082,6 +1082,10 @@ public class ConnectX {
     public byte[] signSelfNode() {
         if (self == null) return null;
         try {
+            // signedAt becomes part of the signed payload here. This is the only place this
+            // field is ever set. A cosigning backend only wraps these bytes; it never
+            // recreates or alters them.
+            self.signedAt = System.currentTimeMillis();
             String nodeJson = serialize("cxJSON1", self);
             java.io.ByteArrayInputStream in = new java.io.ByteArrayInputStream(
                 nodeJson.getBytes(StandardCharsets.UTF_8));
@@ -1560,6 +1564,121 @@ public class ConnectX {
         }
         if (sent > 0) {
             log.info("[NetworkJoin] Sent SEED_REQUEST for {} to {} peer(s) via CXNET", networkID, sent);
+        }
+    }
+
+    /**
+     * Request a peer's identity via the network without blocking. Fires a PEER_LOOKUP_REQUEST
+     * and registers completionJob to run once a verified response arrives (or never, if it
+     * doesn't). The retry sweep (see startPeerLookupRetrySweep) re-fires unresolved requests
+     * on a backoff schedule and expires registrations that exceed the retry limit.
+     *
+     * Safe to call concurrently for the same targetCXID from multiple independent callers
+     * (e.g. two networks both waiting on the same NMI): each gets its own completionJob
+     * appended to a shared retry entry, and the initial network request is only sent once
+     * per registration window, not once per caller.
+     *
+     * completionJob.doAfter(true) will be invoked on an IOThread with the resolved Node set on
+     * completionJob.o. completionJob.doAfter(false) is invoked (also on an IOThread) if the
+     * lookup is abandoned after exceeding the retry limit. Never block inside doAfter().
+     *
+     * @param targetCXID   the cxID to look up
+     * @param epochOnly    if true, only ask EPOCH; if false, also fan out to all known HV peers
+     * @param completionJob job to queue once resolved or abandoned; o is set to the resolved Node on success
+     */
+    public void requestPeerLookupAsync(String targetCXID, boolean epochOnly, us.anvildevelopment.cxnet.io.IOJob completionJob) {
+        if (nodeMesh == null || nodeMesh.peerDirectory == null || targetCXID == null || completionJob == null) return;
+
+        us.anvildevelopment.cxnet.network.nodemesh.PeerDirectory.PendingPeerLookup pending =
+                nodeMesh.peerDirectory.pendingPeerLookups.computeIfAbsent(targetCXID,
+                        k -> new us.anvildevelopment.cxnet.network.nodemesh.PeerDirectory.PendingPeerLookup(epochOnly));
+        boolean isFirstRegistration = pending.completionJobs.isEmpty();
+        pending.completionJobs.add(completionJob);
+
+        if (isFirstRegistration) {
+            sendPeerLookupRequest(targetCXID, epochOnly);
+        }
+    }
+
+    /**
+     * Fire (or refire) a PEER_LOOKUP_REQUEST for targetCXID. Internal: called by
+     * requestPeerLookupAsync() on first registration and by the retry sweep on subsequent
+     * attempts. Does not touch pendingPeerLookups bookkeeping.
+     */
+    private void sendPeerLookupRequest(String targetCXID, boolean epochOnly) {
+        String reqJson;
+        try {
+            reqJson = serialize("cxJSON1", new us.anvildevelopment.cxnet.network.events.PeerLookup(targetCXID));
+        } catch (Exception e) {
+            log.error("[PeerLookup] Failed to serialize PEER_LOOKUP_REQUEST for {}: {}", targetCXID, e.getMessage());
+            return;
+        }
+
+        try {
+            buildEvent(EventType.PEER_LOOKUP_REQUEST, reqJson.getBytes(StandardCharsets.UTF_8))
+                .toNetworkPeer("CXNET", EPOCH_UUID)
+                .signData()
+                .queue();
+            log.info("[PeerLookup] Sent PEER_LOOKUP_REQUEST for {} to EPOCH", targetCXID.substring(0, 8));
+        } catch (Exception e) {
+            log.warn("[PeerLookup] Could not send PEER_LOOKUP_REQUEST to EPOCH: {}", e.getMessage());
+        }
+
+        if (epochOnly || nodeMesh == null || nodeMesh.peerDirectory.hv == null) return;
+
+        for (Node peer : nodeMesh.peerDirectory.hv.values()) {
+            if (self != null && peer.cxID.equals(self.cxID)) continue;
+            if (peer.cxID.equals(EPOCH_UUID)) continue;
+            try {
+                buildEvent(EventType.PEER_LOOKUP_REQUEST, reqJson.getBytes(StandardCharsets.UTF_8))
+                    .toNetworkPeer("CXNET", peer.cxID)
+                    .signData()
+                    .queue();
+            } catch (Exception e) {
+                log.warn("[PeerLookup] Failed to queue PEER_LOOKUP_REQUEST to {}: {}",
+                    peer.cxID.substring(0, 8), e.getMessage());
+            }
+        }
+    }
+
+    /** Max attempts before a pending peer lookup is abandoned and its completion jobs notified of failure. */
+    private static final int PEER_LOOKUP_MAX_ATTEMPTS = 5;
+    /** Minimum time between retry attempts for the same pending lookup. */
+    private static final long PEER_LOOKUP_RETRY_INTERVAL_MS = 15_000;
+
+    /**
+     * Scan pendingPeerLookups: re-fire requests that are due for a retry, and abandon (notify
+     * failure to) any that have exceeded the retry limit. Intended to be called periodically
+     * from the same backoff loop already driving LAN scanning and peer discovery, never from
+     * EventProcessor/IOThread.
+     */
+    public void sweepPendingPeerLookups() {
+        if (nodeMesh == null || nodeMesh.peerDirectory == null) return;
+        long now = System.currentTimeMillis();
+
+        for (java.util.Map.Entry<String, us.anvildevelopment.cxnet.network.nodemesh.PeerDirectory.PendingPeerLookup> entry
+                : nodeMesh.peerDirectory.pendingPeerLookups.entrySet()) {
+            String cxID = entry.getKey();
+            us.anvildevelopment.cxnet.network.nodemesh.PeerDirectory.PendingPeerLookup pending = entry.getValue();
+
+            if (pending.attempts >= PEER_LOOKUP_MAX_ATTEMPTS) {
+                nodeMesh.peerDirectory.pendingPeerLookups.remove(cxID, pending);
+                log.warn("[PeerLookup] Abandoning lookup for {} after {} attempts", cxID.substring(0, 8), pending.attempts);
+                for (us.anvildevelopment.cxnet.io.IOJob job : pending.completionJobs) {
+                    job.o = null;
+                    job.success = false;
+                    jobQueue.add(job);
+                }
+                continue;
+            }
+
+            if (now - pending.lastAttemptAt >= PEER_LOOKUP_RETRY_INTERVAL_MS) {
+                pending.lastAttemptAt = now;
+                pending.attempts++;
+                log.info("[PeerLookup] Retrying lookup for {} (attempt {}/{})",
+                        cxID.substring(0, 8), pending.attempts, PEER_LOOKUP_MAX_ATTEMPTS);
+                sendPeerLookupRequest(cxID, pending.epochOnly);
+            }
         }
     }
 
@@ -2143,6 +2262,12 @@ public class ConnectX {
                             saveDataContainer();
                         } catch (Exception e) {
                             log.error("[Persistence] Failed to save DataContainer: {}", e.getMessage());
+                        }
+
+                        try {
+                            sweepPendingPeerLookups();
+                        } catch (Exception e) {
+                            log.error("[Persistence] Error during peer lookup retry sweep: {}", e.getMessage());
                         }
 
                         if (System.currentTimeMillis() >= nextDiscoveryAt) {
@@ -3656,6 +3781,28 @@ public class ConnectX {
             bridge.stopServer();
             bridge.startServer(port);
         }
+    }
+
+    /**
+     * Load a CXApp bundle from a directory and register its server and client with this node.
+     * The bundle directory must contain a manifest.json and app.jar. See
+     * {@link us.anvildevelopment.cxnet.app.bundle.CXAppLoader} for the full bundle format.
+     *
+     * @param bundleDir the bundle directory (e.g. new File("apps/rprox.cxapp"))
+     * @return the loaded bundle (contains server, client, CSS, and JS resource info)
+     */
+    public us.anvildevelopment.cxnet.app.bundle.CXAppBundle loadApp(java.io.File bundleDir) throws Exception {
+        return us.anvildevelopment.cxnet.app.bundle.CXAppLoader.load(bundleDir, this);
+    }
+
+    /**
+     * Load a CXApp bundle from a path string and register its server and client with this node.
+     *
+     * @param bundlePath path to the bundle directory (e.g. "apps/rprox.cxapp")
+     * @return the loaded bundle
+     */
+    public us.anvildevelopment.cxnet.app.bundle.CXAppBundle loadApp(String bundlePath) throws Exception {
+        return loadApp(new java.io.File(bundlePath));
     }
 
     /**

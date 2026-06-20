@@ -43,6 +43,16 @@ public class IOJob {
     }
 
     /**
+     * No-I/O completion job. Set o/o1 to whatever already-resolved data the callback needs,
+     * queue it via cx.jobQueue, and IOThread will run doAfter(true) for it on its next poll.
+     * Never block inside doAfter(); IOThread is a shared pool also used for verifying
+     * incoming traffic.
+     */
+    public IOJob() {
+        this.jt = JobType.CALLBACK;
+    }
+
+    /**
      * This method will be fired after an IO operation on an IOJob unless it has a next IOJob, in this case it will be fired after all jobs contained are completed.
      * Fires on completion of all IO operations in an IOJob in their respective order
      * @param success true unless an exception has occurred

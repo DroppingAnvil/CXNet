@@ -43,6 +43,9 @@ public abstract class CXAppClient {
     /** CXID of the server node this client is connected to. Set at registration or after peer resolution. */
     public volatile String targetCXID;
 
+    // Set by CXAppLoader when loading a bundle; overrides getTemplate() if non-null.
+    private String bundledTemplate = null;
+
     // Built once at registerApp() time
     private final Map<String, Field> fieldCache = new HashMap<>();
 
@@ -54,7 +57,19 @@ public abstract class CXAppClient {
     public abstract String getAppID();
 
     /**
+     * Inject the HTML template loaded from a bundle's template.html.
+     * Called by {@link us.anvildevelopment.cxnet.app.bundle.CXAppLoader} at bundle load time.
+     * If this is called, the result takes precedence over any {@link #getTemplate()} override.
+     */
+    public final void loadTemplate(String html) {
+        this.bundledTemplate = html;
+    }
+
+    /**
      * HTML template string defining this app's UI.
+     * When loaded from a bundle via {@link us.anvildevelopment.cxnet.app.bundle.CXAppLoader},
+     * this is populated from template.html and does not need to be overridden.
+     * Inline subclasses (not using bundles) should override this method.
      *
      * <p>Placeholder syntax:
      * <ul>
@@ -79,7 +94,9 @@ public abstract class CXAppClient {
      * <p>Field values substituted into this template are HTML-escaped by the framework.
      * Do not double-escape values you expect to appear as plain text.
      */
-    public abstract String getTemplate();
+    public String getTemplate() {
+        return bundledTemplate != null ? bundledTemplate : "";
+    }
 
     // -------------------------------------------------------------------------
     // Framework internals

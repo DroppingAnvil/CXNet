@@ -3057,8 +3057,8 @@ public class NodeMesh {
                 if (r.dynamicSeed == null || r.dynamicSeed.networks == null) continue;
                 for (CXNetwork network : r.dynamicSeed.networks) {
                     if (network.configuration != null && targetNetwork.equals(network.configuration.netID)
-                            && network.networkDictionary != null && network.networkDictionary.nmi != null) {
-                        claimedNmiCxID = network.networkDictionary.nmi;
+                            && network.configuration.nmiCxID != null) {
+                        claimedNmiCxID = network.configuration.nmiCxID;
                         break;
                     }
                 }

@@ -63,9 +63,23 @@ public class Seed {
     public List<byte[]> peerFindingNodeBlobs;
 
     /**
-     * List of network configurations to import
+     * Informational only, never independently trusted. Raw network configurations for
+     * display/discovery hints (e.g. chain heights in a dynamic seed). Never passed through
+     * ConnectX.applySeed()'s import path; a network only ever gets registered via a verified
+     * entry in networkBlobs.
      */
     public List<CXNetwork> networks;
+
+    /**
+     * Independently signed network blobs. Each entry is a single CXNetwork, serialized and
+     * signed standalone by whoever was authoritative for that specific network at sign time
+     * (see ConnectX.signNetworkBlob). This is the only network field ConnectX.applySeed()
+     * trusts: each blob is verified independently against trust keys for the network it
+     * claims to be, never against the outer seed's signature alone. This prevents a signer
+     * who is only authoritative for this seed's own subject (e.g. CXNET) from smuggling in
+     * a fabricated config for an unrelated network under the cover of the outer signature.
+     */
+    public List<byte[]> networkBlobs;
 
     /**
      * Map of cxID -> PGP public key certificate for non-node keys (e.g., NMI keys)
@@ -76,6 +90,7 @@ public class Seed {
         this.hvPeerBlobs = new ArrayList<>();
         this.peerFindingNodeBlobs = new ArrayList<>();
         this.networks = new ArrayList<>();
+        this.networkBlobs = new ArrayList<>();
         this.certificates = new HashMap<>();
     }
 
@@ -101,11 +116,21 @@ public class Seed {
     }
 
     /**
-     * Add a network to the seed.
+     * Add a network to the seed. Informational only; see the networks field Javadoc.
      */
     public void addNetwork(CXNetwork network) {
         if (network != null) {
             networks.add(network);
+        }
+    }
+
+    /**
+     * Add an independently signed network blob to the seed. This is the trust-bearing
+     * network field; see the networkBlobs field Javadoc.
+     */
+    public void addNetworkBlob(byte[] signedBlob) {
+        if (signedBlob != null) {
+            networkBlobs.add(signedBlob);
         }
     }
 

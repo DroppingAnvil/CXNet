@@ -12,6 +12,13 @@ public class Configuration implements Serializable {
     public String SDF_FORMAT = "S-m-H-a-EEE-F-M-y";
     public String netID;
     public String nmiPub;
+    /**
+     * cxID of this network's Network Master Identity. Set explicitly at creation time
+     * (createNetwork()). Do not infer this from backendSet position; "NMI is first backend"
+     * is a convention some code historically relied on, but list order is not a reliable
+     * identity signal (reordering, alternate construction paths, etc).
+     */
+    public String nmiCxID;
     public List<String> backendSet;
     public Boolean active = true;
     public Boolean unlimitedUpload = false;

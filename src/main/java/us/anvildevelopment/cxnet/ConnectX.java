@@ -1144,6 +1144,14 @@ public class ConnectX {
         // Initialize encryption provider
         encryptionProvider.setup(cxID, password, cxRoot);
 
+        // Cache our own public key under our own cxID so we can verify signatures we produced.
+        // cacheCert resolves unknown keys through the peer directory, which never contains this
+        // node's own entry, so without this a node cannot verify its own signature. That breaks
+        // an NMI serving its own network: the inner layer of its cosigned blob is signed by this
+        // key, so restoreJoinedNetworks rejects its own cosigned.cxnb and readCosignedNetworkBlob
+        // has nothing to serve. Interface-only call so any CryptProvider gets the same behaviour.
+        encryptionProvider.cacheKeyFromString(cxID, encryptionProvider.getPublicKey());
+
         // Pre-cache EPOCH's NMI key immediately so events from the seed node can be
         // verified before the async bootstrap file load completes
         if (encryptionProvider instanceof PainlessCryptProvider) {

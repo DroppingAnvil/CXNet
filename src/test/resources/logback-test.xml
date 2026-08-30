@@ -11,10 +11,10 @@
     <logger name="us.anvildevelopment.cxnet.network.threads.SocketWatcher" level="WARN"/>
 
     <!-- NodeMesh processing - keep INFO for visibility -->
-    <logger name="us.anvildevelopment.cxnet.network.nodemesh.NodeMesh" level="INFO"/>
+    <logger name="us.anvildevelopment.cxnet.network.nodemesh.NodeMesh" level="DEBUG"/>
 
     <!-- IOThread loop chatter -->
-    <logger name="us.anvildevelopment.cxnet.io.IOThread" level="WARN"/>
+    <logger name="us.anvildevelopment.cxnet.io.IOThread" level="DEBUG"/>
 
     <!-- Retry and peer directory - INFO for visibility -->
     <logger name="us.anvildevelopment.cxnet.network.threads.RetryProcessor" level="INFO"/>
@@ -34,10 +34,10 @@
     <logger name="us.anvildevelopment.cxnet.network.nodemesh.bridge.http" level="INFO"/>
 
     <!-- Application-level logs -->
-    <logger name="us.anvildevelopment.cxnet" level="INFO"/>
+    <logger name="us.anvildevelopment.cxnet" level="DEBUG"/>
 
     <!-- Test runners -->
-    <logger name="BootstrapServerTest" level="INFO"/>
+    <logger name="BootstrapServerTest" level="DEBUG"/>
     <logger name="MultiPeerTest" level="INFO"/>
     <logger name="MigrateEpochCXNET" level="INFO"/>
     <logger name="MigrateCXChatForEpoch" level="INFO"/>

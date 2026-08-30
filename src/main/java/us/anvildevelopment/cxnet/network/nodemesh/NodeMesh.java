@@ -1444,16 +1444,27 @@ public class NodeMesh {
                     case SEED_REQUEST:
                         log.info("[" + connectX.getOwnID() + "] Seed request received from " + nc.iD);
                         try {
-                            // Parse request to get network ID
-                            String requestedNetwork = "CXNET";
+                            // Parse request to get network ID. There is deliberately no default:
+                            // a request whose network cannot be read is malformed, not a CXNET
+                            // request, and answering it with some other network's seed is worse
+                            // than not answering. Defaulting here silently served CXNET seeds to
+                            // peers asking for another network, which left the requester waiting
+                            // forever for a network that was never in the response.
+                            String requestedNetwork = null;
                             ib.readyObject(SeedExchange.class, ib.nc.se, connectX);
                             if (ib.object != null) {
                                 SeedExchange seedReq =
                                     (SeedExchange) ib.object;
-                                if (seedReq.network != null) {
-                                    requestedNetwork = seedReq.network;
-                                }
+                                requestedNetwork = seedReq.network;
+                            } else {
+                                log.warn("[SEED] Seed request from {} could not be deserialized", nc.iD);
                             }
+                            if (requestedNetwork == null || requestedNetwork.isBlank()) {
+                                log.warn("[SEED] Seed request from {} carries no network, ignoring", nc.iD);
+                                handledLocally = true;
+                                break;
+                            }
+                            log.info("[{}] Seed request is for network {}", connectX.getOwnID(), requestedNetwork);
 
                             // "*" means all known networks; otherwise look up the specific one
                             CXNetwork network = "*".equals(requestedNetwork) ? null : connectX.getNetwork(requestedNetwork);
@@ -1519,9 +1530,10 @@ public class NodeMesh {
                                     for (int i = 0; i < Math.min(16, epochSeedBlob.length); i++) hex.append(String.format("%02X ", epochSeedBlob[i]));
                                     log.debug("[SEED] epochSeedBlob first bytes: {}", hex.toString().trim());
                                 }
-                                log.info("[SEED] Responding to {}: dynamic={} peer blobs, epochBlob={}, authoritative={}",
-                                    nc.iD.substring(0, 8), dynamicSeed.hvPeerBlobs.size(),
+                                log.info("[SEED] Responding to {} for {}: dynamic={} peer blobs, epochBlob={}, cosigned={}, authoritative={}",
+                                    nc.iD.substring(0, 8), requestedNetwork, dynamicSeed.hvPeerBlobs.size(),
                                     epochSeedBlob != null ? epochSeedBlob.length + " bytes" : "none",
+                                    cosignedNetworkBlob != null ? cosignedNetworkBlob.length + " bytes" : "none",
                                     isAuthoritative);
 
                                 String responseJson = ConnectX.serialize("cxJSON1", response);
@@ -1555,6 +1567,12 @@ public class NodeMesh {
                             ib.readyObject(SeedExchange.class, ib.nc.se, connectX);
                             SeedExchange seedResp =
                                 (SeedExchange) ib.object;
+                            if (seedResp == null) {
+                                log.warn("[SEED CONSENSUS] Seed response from {} could not be deserialized, ignoring", nc.iD);
+                                handledLocally = true;
+                                break;
+                            }
+                            log.info("[{}] Seed response is for network {}", connectX.getOwnID(), seedResp.network);
 
                             // Map wire object to consensus tracker
                             ConnectX.SeedResponseData responseData = new ConnectX.SeedResponseData();
@@ -1569,11 +1587,20 @@ public class NodeMesh {
                             chainHeights.put("c3", seedResp.c3 != null ? seedResp.c3 : 0L);
                             responseData.chainHeights = chainHeights;
 
-                            // Determine target network from wire field (always present in SeedExchange)
-                            String targetNetwork = seedResp.network != null ? seedResp.network : "CXNET";
-                            if (targetNetwork.isBlank() && responseData.dynamicSeed != null
+                            // Determine target network from the wire field, falling back only to the
+                            // dynamic seed's own networkID. As on the request side there is no CXNET
+                            // default: mislabelling a response as CXNET would apply it to the wrong
+                            // network and silently strand whatever join was actually waiting.
+                            String targetNetwork = seedResp.network;
+                            if ((targetNetwork == null || targetNetwork.isBlank())
+                                    && responseData.dynamicSeed != null
                                     && responseData.dynamicSeed.networkID != null) {
                                 targetNetwork = responseData.dynamicSeed.networkID;
+                            }
+                            if (targetNetwork == null || targetNetwork.isBlank()) {
+                                log.warn("[SEED CONSENSUS] Seed response from {} carries no network, ignoring", nc.iD);
+                                handledLocally = true;
+                                break;
                             }
 
                             log.info("[SEED CONSENSUS] Response for {} from {} | authoritative={} epochBlob={} cosigned={} dynamicSeed={}",

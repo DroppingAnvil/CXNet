@@ -1328,7 +1328,28 @@ public class ConnectX {
         for (String networkID : dataContainer.watchedNetworks) {
             if ("CXNET".equals(networkID)) continue;
             if (networkMap.containsKey(networkID)) continue;
-            File seedFile = new File(cxRoot, "networks" + File.separator + networkID + File.separator + "seed.cxn");
+            File netDir = new File(cxRoot, "networks" + File.separator + networkID);
+
+            // Prefer cosigned.cxnb: standalone verified blob that doesn't need the Seed wrapper.
+            // This handles networks that were migrated via MigrateCXChatForEpoch (or similar) and
+            // have a {signedByEPOCH{CXNetwork}} blob on disk without a valid new-format seed.cxn.
+            File cosignedFile = new File(netDir, "cosigned.cxnb");
+            if (cosignedFile.exists()) {
+                try {
+                    byte[] blob = java.nio.file.Files.readAllBytes(cosignedFile.toPath());
+                    CXNetwork network = verifyNetworkBlob(blob);
+                    if (network != null) {
+                        registerNetwork(network);
+                        log.info("[NetworkRestore] Restored network {} from cosigned blob", networkID);
+                        continue;
+                    }
+                    log.warn("[NetworkRestore] cosigned.cxnb for {} did not verify, falling through to seed.cxn", networkID);
+                } catch (Exception e) {
+                    log.warn("[NetworkRestore] Could not read cosigned blob for {}: {}", networkID, e.getMessage());
+                }
+            }
+
+            File seedFile = new File(netDir, "seed.cxn");
             if (!seedFile.exists()) {
                 log.warn("[NetworkRestore] Seed file missing for watched network {}, will re-request from peers", networkID);
                 joinNetworkFromPeers(networkID);
@@ -1338,7 +1359,7 @@ public class ConnectX {
                 byte[] signedBlob = java.nio.file.Files.readAllBytes(seedFile.toPath());
                 ByteArrayInputStream in = new ByteArrayInputStream(signedBlob);
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
-                //Trust already existing seeds, required for non CXIK nets 
+                //Trust already existing seeds, required for non CXIK nets
                 encryptionProvider.stripSignature(in, out);
                 Seed seed = (Seed) deserialize("cxJSON1", out.toString(StandardCharsets.UTF_8), Seed.class);
                 if (seed == null) {
@@ -1588,40 +1609,57 @@ public class ConnectX {
      * layer, or if the verified payload's network ID does not match the claimed ID.
      */
     private CXNetwork verifyNetworkBlob(byte[] blob) {
-        // Peek claimedNetworkID. Single-layer: one strip gives JSON.
-        // Cosigned (two-layer): one strip gives another signed blob; strip again to reach JSON.
-        String claimedNetworkID = null;
+        // Ensure EPOCH's own public key is cached so cosigned blobs can be self-verified.
+        // applySignedSeed normally does this, but some startup paths (e.g. BootstrapServerTest)
+        // load CXNET without going through applySignedSeed.
+        if (encryptionProvider instanceof PainlessCryptProvider) {
+            PainlessCryptProvider pcp = (PainlessCryptProvider) encryptionProvider;
+            if (pcp.nmipubkey != null) pcp.certCache.putIfAbsent(EPOCH_UUID, pcp.nmipubkey);
+        }
+        //TODO fix provider, this is a hack
+
+        // Peek layering. Single-layer: one strip gives CXNetwork JSON.
+        // Cosigned (two-layer): one strip gives another signed blob -- delegate to
+        // verifyAndStoreCosignedBlob, which verifies BOTH layers and handles persistence.
+        // NOTE: deserialize THROWS on non-JSON input (it does not return null), so the
+        // peek deserialize must be isolated or a cosigned blob would bail out here.
+        byte[] peekPayload;
         try {
             ByteArrayInputStream peekIn = new ByteArrayInputStream(blob);
             ByteArrayOutputStream peekOut = new ByteArrayOutputStream();
             encryptionProvider.stripSignature(peekIn, peekOut);
-            byte[] peekPayload = peekOut.toByteArray();
-            CXNetwork peeked = (CXNetwork) deserialize("cxJSON1", new String(peekPayload, StandardCharsets.UTF_8), CXNetwork.class);
-            if (peeked != null && peeked.configuration != null && peeked.configuration.netID != null) {
-                claimedNetworkID = peeked.configuration.netID;
-            } else {
-                ByteArrayInputStream innerIn = new ByteArrayInputStream(peekPayload);
-                ByteArrayOutputStream innerOut = new ByteArrayOutputStream();
-                encryptionProvider.stripSignature(innerIn, innerOut);
-                peeked = (CXNetwork) deserialize("cxJSON1", innerOut.toString(StandardCharsets.UTF_8), CXNetwork.class);
-                if (peeked != null && peeked.configuration != null && peeked.configuration.netID != null) {
-                    claimedNetworkID = peeked.configuration.netID;
-                }
-            }
+            peekPayload = peekOut.toByteArray();
         } catch (Exception e) {
             return null;
         }
-        if (claimedNetworkID == null) return null;
-
-        java.util.Set<String> trustedKeys = new java.util.LinkedHashSet<>();
-        trustedKeys.add(EPOCH_UUID);
-        CXNetwork cxnet = networkMap.get("CXNET");
-        if (cxnet != null && cxnet.configuration != null && cxnet.configuration.backendSet != null) {
-            trustedKeys.addAll(cxnet.configuration.backendSet);
+        CXNetwork peeked = null;
+        try {
+            peeked = (CXNetwork) deserialize("cxJSON1", new String(peekPayload, StandardCharsets.UTF_8), CXNetwork.class);
+        } catch (Exception ignored) {
+            // Not JSON: nested signed blob, handled below as cosigned
         }
-        CXNetwork targetNet = networkMap.get(claimedNetworkID);
-        if (targetNet != null && targetNet.configuration != null && targetNet.configuration.backendSet != null) {
-            trustedKeys.addAll(targetNet.configuration.backendSet);
+        if (peeked == null || peeked.configuration == null || peeked.configuration.netID == null) {
+            return verifyAndStoreCosignedBlob(blob);
+        }
+        String claimedNetworkID = peeked.configuration.netID;
+
+        // Single-layer trust store: ONLY the subject network's own authorities may sign
+        // its config. EPOCH/CXNET backends are cosigner authorities (outer layer of a
+        // cosigned blob), NOT config signers -- they must not be able to vouch for
+        // another network's single-layer blob.
+        // Trust-disk rule: when a version of this network is already registered, its
+        // stored nmiCxID/backendSet are the ONLY accepted signers; a blob that verifies
+        // is accepted as the new version, one that fails is dropped by the caller.
+        // With nothing on disk there is no trust anchor -- the caller queues the blob
+        // as an unverified hint. CXNET prepopulates EPOCH_UUID (its NMI by definition,
+        // key is pinned) so first boot verifies before any disk data exists.
+        java.util.Set<String> trustedKeys = new java.util.LinkedHashSet<>();
+        //TODO revise for possible kechanges in the future
+        if ("CXNET".equals(claimedNetworkID)) trustedKeys.add(EPOCH_UUID);
+        CXNetwork registered = networkMap.get(claimedNetworkID);
+        if (registered != null && registered.configuration != null) {
+            if (registered.configuration.nmiCxID != null) trustedKeys.add(registered.configuration.nmiCxID);
+            if (registered.configuration.backendSet != null) trustedKeys.addAll(registered.configuration.backendSet);
         }
 
         for (String trustedID : trustedKeys) {
@@ -1629,24 +1667,113 @@ public class ConnectX {
                 ByteArrayInputStream in = new ByteArrayInputStream(blob);
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
                 if (encryptionProvider.verifyAndStrip(in, out, trustedID)) {
-                    byte[] payload = out.toByteArray();
-                    // Single-layer: payload is CXNetwork JSON
-                    CXNetwork network = (CXNetwork) deserialize("cxJSON1", new String(payload, StandardCharsets.UTF_8), CXNetwork.class);
+                    CXNetwork network = (CXNetwork) deserialize("cxJSON1", out.toString(StandardCharsets.UTF_8), CXNetwork.class);
                     if (network != null && network.configuration != null && claimedNetworkID.equals(network.configuration.netID)) {
                         return network;
                     }
-                    // Two-layer (cosigned): payload is the NMI-signed blob; strip the inner layer
-                    try {
-                        ByteArrayInputStream innerIn = new ByteArrayInputStream(payload);
-                        ByteArrayOutputStream innerOut = new ByteArrayOutputStream();
-                        encryptionProvider.stripSignature(innerIn, innerOut);
-                        network = (CXNetwork) deserialize("cxJSON1", innerOut.toString(StandardCharsets.UTF_8), CXNetwork.class);
-                        if (network != null && network.configuration != null && claimedNetworkID.equals(network.configuration.netID)) {
-                            return network;
-                        }
-                    } catch (Exception ignored) {}
                 }
             } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    /**
+     * Verify a cosigned network blob {COSIGNER{NMI{CXNetwork}}} and handle its persistence.
+     * Both layers must verify, each against its OWN trust store:
+     *
+     * Outer (cosigner authorities): EPOCH and CXNET backendSet members only. The subject
+     * network's own keys are deliberately excluded -- a network must not be able to
+     * cosign itself into trust.
+     *
+     * Inner (subject authorities), trust-disk rule:
+     * - Network already registered: the REGISTERED config's nmiCxID/backendSet are the
+     *   only accepted signers. A blob that fails against disk is logged and dropped
+     *   entirely -- disk wins.
+     * - First import (nothing on disk): the blob's declared nmiCxID/backendSet are used,
+     *   safe because the verified outer cosignature covers the inner bytes and thereby
+     *   endorses the netID/NMI/backendSet pairing. Failure caches the blob as an
+     *   unverified discovery hint for later retry.
+     * Missing keys resolve via cacheCert -> peerDirectory -> sync peer lookup.
+     *
+     * On full verification the ENTIRE cosigned blob is persisted to
+     * networks/<netID>/cosigned.cxnb for redistribution and the verified network returned.
+     */
+    private CXNetwork verifyAndStoreCosignedBlob(byte[] cosignedBlob) {
+        // Peek: strip outer -> inner signed blob, strip inner -> claimed CXNetwork.
+        // deserialize THROWS on non-JSON, so it stays isolated from the strip try.
+        byte[] strippedOuter;
+        try {
+            ByteArrayInputStream outerIn = new ByteArrayInputStream(cosignedBlob);
+            ByteArrayOutputStream outerOut = new ByteArrayOutputStream();
+            encryptionProvider.stripSignature(outerIn, outerOut);
+            strippedOuter = outerOut.toByteArray();
+        } catch (Exception e) {
+            return null;
+        }
+        CXNetwork claimed = null;
+        try {
+            ByteArrayInputStream peekIn = new ByteArrayInputStream(strippedOuter);
+            ByteArrayOutputStream peekOut = new ByteArrayOutputStream();
+            encryptionProvider.stripSignature(peekIn, peekOut);
+            claimed = (CXNetwork) deserialize("cxJSON1", peekOut.toString(StandardCharsets.UTF_8), CXNetwork.class);
+        } catch (Exception ignored) {}
+        if (claimed == null || claimed.configuration == null || claimed.configuration.netID == null) return null;
+        String networkID = claimed.configuration.netID;
+        CXNetwork registered = networkMap.get(networkID);
+        boolean haveDisk = registered != null && registered.configuration != null;
+
+        // Outer store: cosigner authorities only
+        java.util.Set<String> outerTrusted = new java.util.LinkedHashSet<>();
+        outerTrusted.add(EPOCH_UUID);
+        CXNetwork cxnet = networkMap.get("CXNET");
+        if (cxnet != null && cxnet.configuration != null && cxnet.configuration.backendSet != null) {
+            outerTrusted.addAll(cxnet.configuration.backendSet);
+        }
+        byte[] innerBlob = null;
+        for (String cosignerID : outerTrusted) {
+            try {
+                ByteArrayInputStream in = new ByteArrayInputStream(cosignedBlob);
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                if (encryptionProvider.verifyAndStrip(in, out, cosignerID)) {
+                    innerBlob = out.toByteArray();
+                    break;
+                }
+            } catch (Exception ignored) {}
+        }
+        if (innerBlob == null) {
+            if (haveDisk) {
+                log.warn("[Seed] Cosigned blob for {}: outer cosignature did not verify, dropping (network already registered)", networkID);
+            } else {
+                log.warn("[Seed] Cosigned blob for {}: outer cosignature did not verify, caching as unverified hint", networkID);
+                cacheDiscoverableNetworkBlob(networkID, cosignedBlob);
+            }
+            return null;
+        }
+
+        // Inner store: subject authorities, trust-disk
+        Configuration trustCfg = haveDisk ? registered.configuration : claimed.configuration;
+        java.util.Set<String> innerTrusted = new java.util.LinkedHashSet<>();
+        if (trustCfg.nmiCxID != null) innerTrusted.add(trustCfg.nmiCxID);
+        if (trustCfg.backendSet != null) innerTrusted.addAll(trustCfg.backendSet);
+        for (String innerID : innerTrusted) {
+            try {
+                ByteArrayInputStream in = new ByteArrayInputStream(innerBlob);
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                if (encryptionProvider.verifyAndStrip(in, out, innerID)) {
+                    CXNetwork network = (CXNetwork) deserialize("cxJSON1", out.toString(StandardCharsets.UTF_8), CXNetwork.class);
+                    if (network != null && network.configuration != null
+                            && networkID.equals(network.configuration.netID)) {
+                        storeCosignedNetworkBlob(networkID, cosignedBlob);
+                        return network;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        if (haveDisk) {
+            log.warn("[Seed] Cosigned blob for {}: inner signature failed against disk-trusted NMI/backendSet, dropping", networkID);
+        } else {
+            log.warn("[Seed] Cosigned blob for {}: inner signature did not verify against declared NMI/backendSet, caching as unverified hint", networkID);
+            cacheDiscoverableNetworkBlob(networkID, cosignedBlob);
         }
         return null;
     }
@@ -1680,6 +1807,12 @@ public class ConnectX {
             encryptionProvider.stripSignature(peekIn, peekOut);
             CXNetwork peeked = (CXNetwork) deserialize("cxJSON1", peekOut.toString(StandardCharsets.UTF_8), CXNetwork.class);
             if (peeked == null || peeked.configuration == null || peeked.configuration.netID == null) return;
+            // Trust-disk: a blob that failed verification for a network we already hold
+            // is garbage or hostile -- drop it rather than letting it shadow trusted data.
+            if (networkMap.containsKey(peeked.configuration.netID)) {
+                log.warn("[Seed] Dropping unverified blob for already-registered network {}", peeked.configuration.netID);
+                return;
+            }
             cacheDiscoverableNetworkBlob(peeked.configuration.netID, blob);
         } catch (Exception e) {
             log.debug("[Seed] Dropping unclaimed, unverifiable network blob: {}", e.getMessage());
@@ -2037,6 +2170,32 @@ public class ConnectX {
             if (blob == null) continue;
 
             CXNetwork network = verifyNetworkBlob(blob);
+            // NETEPOCH import: the submitting NMI is in no trust store yet, so standard
+            // verification cannot vouch for the subject blob. Verify it directly against
+            // creatorCxID (CXIK-authenticated upstream), restricted to this seed's own
+            // subject network. Guards: the config must declare creatorCxID as its NMI,
+            // and if a version is already registered its stored nmiCxID must match
+            // creatorCxID (trust-disk spoofing guard).
+            if (network == null && creatorCxID != null && seed.networkID != null) {
+                try {
+                    CXNetwork priorVersion = networkMap.get(seed.networkID);
+                    boolean diskOk = priorVersion == null || priorVersion.configuration == null
+                            || creatorCxID.equals(priorVersion.configuration.nmiCxID);
+                    ByteArrayInputStream creatorIn = new ByteArrayInputStream(blob);
+                    ByteArrayOutputStream creatorOut = new ByteArrayOutputStream();
+                    if (diskOk && encryptionProvider.verifyAndStrip(creatorIn, creatorOut, creatorCxID)) {
+                        CXNetwork candidate = (CXNetwork) deserialize("cxJSON1", creatorOut.toString(StandardCharsets.UTF_8), CXNetwork.class);
+                        if (candidate != null && candidate.configuration != null
+                                && seed.networkID.equals(candidate.configuration.netID)
+                                && creatorCxID.equals(candidate.configuration.nmiCxID)) {
+                            network = candidate;
+                            log.info("[Seed] Subject network blob verified against NETEPOCH creator {}", creatorCxID.substring(0, 8));
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("[Seed] Creator verification for subject blob failed: {}", e.getMessage());
+                }
+            }
             if (network == null) {
                 log.warn("[Seed] Bundled network blob did not verify against any trusted key, caching as unverified hint only");
                 cacheUnclaimedNetworkBlob(blob);
@@ -2233,8 +2392,10 @@ public class ConnectX {
             }
 
             // Cosign the subject blob with EPOCH's key: {signedByEPOCH{signedByNMI{CXNetwork}}}.
-            // Replace in-place so applySeed sees the cosigned version and verifyNetworkBlob
-            // can verify it via the two-layer path using EPOCH's always-cached key.
+            // The full cosigned blob is persisted for redistribution (cosigned.cxnb, bundled
+            // into CXNET bootstrap seeds and verified two-layer by receivers). The original
+            // NMI-signed blob stays in the seed; applySeed verifies it against creatorCxID
+            // (the CXIK-authenticated submitter).
             for (int i = 0; i < seed.networkBlobs.size(); i++) {
                 byte[] blob = seed.networkBlobs.get(i);
                 if (blob == null) continue;
@@ -2250,14 +2411,26 @@ public class ConnectX {
                 ByteArrayOutputStream cosignOut = new ByteArrayOutputStream();
                 encryptionProvider.sign(new ByteArrayInputStream(blob), cosignOut);
                 byte[] cosigned = cosignOut.toByteArray();
-                seed.networkBlobs.set(i, cosigned);
+                // Store cosigned blob to disk for redistribution via restoreJoinedNetworks /
+                // signAndPublishNetworkSeed; do NOT replace in seed.networkBlobs -- verification
+                // of the subject blob uses creatorCxID (the NETEPOCH submitter) as the trust
+                // anchor, so the original NMI-signed blob must remain.
                 storeCosignedNetworkBlob(seed.networkID, cosigned);
                 log.info("[NETEPOCH] Cosigned blob for {} stored for redistribution", seed.networkID);
                 break;
             }
 
-            applySeed(seed);
+            applySeed(seed, creatorCxID);
             log.info("[NETEPOCH] Imported trusted network seed {} from {}", seed.seedID, creatorCxID.substring(0, 8));
+
+            // Immediately republish CXNET bootstrap so the new network is included for peers
+            // that connect without restarting EPOCH.
+            CXNetwork cxnet = networkMap.get("CXNET");
+            if (cxnet != null && cxnet.configuration != null
+                    && cxnet.configuration.backendSet != null
+                    && cxnet.configuration.backendSet.contains(getOwnID())) {
+                signAndPublishNetworkSeed("CXNET");
+            }
         } catch (Exception e) {
             log.error("[NETEPOCH] importTrustedNetworkSeed failed: {}", e.getMessage());
         }

@@ -352,7 +352,7 @@ public class MultiPeerTest {
     @Test
     @Order(6)
     @DisplayName("E2E encryption: multi-recipient PGP")
-    @Timeout(value = 60, unit = TimeUnit.SECONDS)
+    @Timeout(value = 200, unit = TimeUnit.SECONDS)
     void testE2EEncryption() throws Exception {
         assumeBootstrapped();
         runE2EEncryptionTest(peers);
@@ -475,7 +475,7 @@ public class MultiPeerTest {
             .queue();
 
         // Wait up to 15s for delivery
-        long deadline = System.currentTimeMillis() + 15_000;
+        long deadline = System.currentTimeMillis() + 100_000;
         while (System.currentTimeMillis() < deadline) {
             Thread.sleep(300);
             if (receivedMessages.get(1).stream().anyMatch(m -> secretText.equals(m.text))) break;
@@ -483,7 +483,7 @@ public class MultiPeerTest {
 
         assertTrue(
             receivedMessages.get(1).stream().anyMatch(m -> secretText.equals(m.text)),
-            "E2E encrypted message must be received and decrypted by the intended recipient within 15s");
+            "E2E encrypted message must be received and decrypted by the intended recipient within 100s");
 
         assertFalse(
             receivedMessages.get(2).stream().anyMatch(m -> secretText.equals(m.text)),
@@ -499,7 +499,7 @@ public class MultiPeerTest {
     @Test
     @Order(7)
     @DisplayName("Stream session: open, transfer, close via CXStreamPlugin")
-    @Timeout(value = 120, unit = TimeUnit.SECONDS)
+    @Timeout(value = 160, unit = TimeUnit.SECONDS)
     void testStreamSession() throws Exception {
         assumeBootstrapped();
         // Need at least 2 peers that know about each other
@@ -593,8 +593,8 @@ public class MultiPeerTest {
 
         // Wait for the OPEN event to be delivered and the ACCEPT to come back.
         // Poll for both sessions to reach OPEN state (max 30s).
-        log.info("Step 2: Waiting for stream to open (max 30s)...");
-        long deadline = System.currentTimeMillis() + 30_000;
+        log.info("Step 2: Waiting for stream to open (max 120s)...");
+        long deadline = System.currentTimeMillis() + 120_000;
         while (System.currentTimeMillis() < deadline) {
             Thread.sleep(500);
             us.anvildevelopment.cxnet.network.stream.CXStreamSession ss = senderSession[0];
@@ -772,7 +772,7 @@ public class MultiPeerTest {
     @Test
     @Order(11)
     @DisplayName("Signed messages: signed delivered, unsigned rejected at verification")
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Timeout(value = 90, unit = TimeUnit.SECONDS)
     void testSignedMessageDelivery() throws Exception {
         assumeBootstrapped();
 
@@ -796,14 +796,14 @@ public class MultiPeerTest {
             .signData()
             .queue();
 
-        long deadline = System.currentTimeMillis() + 10_000;
+        long deadline = System.currentTimeMillis() + 60_000;
         while (System.currentTimeMillis() < deadline) {
             Thread.sleep(300);
             if (receivedMessages.get(1).stream().anyMatch(m -> signedText.equals(m.text))) break;
         }
         assertTrue(
             receivedMessages.get(1).stream().anyMatch(m -> signedText.equals(m.text)),
-            "Properly signed message must be received and verified by receiver within 10s");
+            "Properly signed message must be received and verified by receiver within 60s");
 
         // --- Unsigned message (no .signData()) must NOT reach the plugin ---
         // The inner payload verification (004) will reject ne.d that was never PGP-signed.

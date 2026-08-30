@@ -220,6 +220,14 @@ public class BootstrapServerTest {
         server.connect(P2P_PORT);
         log.info("  ✓ P2P mesh started on port " + P2P_PORT);
 
+        // ONE-TIME: purge stale CXChat state and seed CXIK for fresh registration.
+        //server.dataContainer.watchedNetworks.remove("CXChat");
+        //server.dataContainer.cxikStore.put(
+        //        "f3a9c2e147b806d5f9e234a17c5b0d82-b6e4f10a293d75c8e1f047b25a9c3d6e-c7d2a934f06b18e5d3c9a47b20f6e815-e5b308f19a2c64d7b0e3f92a18c5d047",
+        //        "CXChat");
+        //server.saveDataContainer();
+        //log.warn("  [Setup] CXChat watchedNetworks cleared, CXIK in store: {}", server.dataContainer.cxikStore.containsKey("f3a9c2e147b806d5f9e234a17c5b0d82-b6e4f10a293d75c8e1f047b25a9c3d6e-c7d2a934f06b18e5d3c9a47b20f6e815-e5b308f19a2c64d7b0e3f92a18c5d047"));
+
         // Start HTTP bridge server (for RProx/HTTP clients)
         log.info("\nStep 5: Starting cxHTTP1 bridge server...");
         httpBridge.startServer(HTTP_PORT);

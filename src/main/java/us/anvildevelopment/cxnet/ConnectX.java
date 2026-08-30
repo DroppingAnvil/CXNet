@@ -2345,6 +2345,17 @@ public class ConnectX {
                     Seed seed = (Seed) deserialize("cxJSON1", seedJson, Seed.class);
                     if (seed != null) {
                         applySeed(seed);
+                        // A verified signature only proves the blob is authentic, not that it
+                        // carries the network we asked for: a stale bootstrap signed before the
+                        // target was registered verifies perfectly and contains nothing useful.
+                        // Report success only if the target actually landed in networkMap, so
+                        // callers fall through to consensus and peer lookup instead of treating
+                        // an irrelevant seed as a completed join.
+                        if (!networkMap.containsKey(targetNetworkID)) {
+                            log.warn("[SeedVerify] Seed verified by {} did not contain network {} -- not treating as applied",
+                                    trustedID.substring(0, 8), targetNetworkID);
+                            return false;
+                        }
                         log.info("[SeedVerify] Applied seed for {} verified by backendSet member {}",
                                 targetNetworkID, trustedID.substring(0, 8));
                         return true;
@@ -2433,6 +2444,54 @@ public class ConnectX {
             }
         } catch (Exception e) {
             log.error("[NETEPOCH] importTrustedNetworkSeed failed: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Read the stored cosigned blob for a network, or null if this node holds none.
+     * Only cosigned.cxnb qualifies: a single-layer blob from seed.cxn is signed by the
+     * network's own NMI and cannot be verified by a requester that has never held the
+     * network, so it is useless for serving a SEED_REQUEST.
+     */
+    public byte[] readCosignedNetworkBlob(String networkID) {
+        if (networkID == null) return null;
+        File cosignedFile = new File(new File(cxRoot, "networks"), networkID + File.separator + "cosigned.cxnb");
+        if (!cosignedFile.exists()) return null;
+        try {
+            return java.nio.file.Files.readAllBytes(cosignedFile.toPath());
+        } catch (Exception e) {
+            log.warn("[NetworkSeed] Could not read cosigned blob for {}: {}", networkID, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Verify a cosigned network blob received in a SEED_RESPONSE and register the network it
+     * carries. Both signature layers are checked by verifyNetworkBlob, so the identity of the
+     * peer that supplied the blob carries no weight; the blob is only accepted if it is for
+     * the network that was actually requested.
+     *
+     * @return true if the network was verified and registered
+     */
+    public boolean applyCosignedNetworkBlob(byte[] cosignedBlob, String expectedNetworkID) {
+        if (cosignedBlob == null || expectedNetworkID == null) return false;
+        try {
+            CXNetwork network = verifyNetworkBlob(cosignedBlob);
+            if (network == null || network.configuration == null) {
+                log.warn("[SeedVerify] Cosigned blob for {} did not verify", expectedNetworkID);
+                return false;
+            }
+            if (!expectedNetworkID.equals(network.configuration.netID)) {
+                log.warn("[SeedVerify] Cosigned blob claims network {} but {} was requested, rejecting",
+                        network.configuration.netID, expectedNetworkID);
+                return false;
+            }
+            registerNetwork(network);
+            log.info("[SeedVerify] Registered network {} from cosigned blob", expectedNetworkID);
+            return true;
+        } catch (Exception e) {
+            log.warn("[SeedVerify] Could not apply cosigned blob for {}: {}", expectedNetworkID, e.getMessage());
+            return false;
         }
     }
 

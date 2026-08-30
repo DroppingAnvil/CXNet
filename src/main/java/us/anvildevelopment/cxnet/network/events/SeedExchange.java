@@ -23,6 +23,14 @@ public class SeedExchange {
     public Seed dynamicSeed;
     /** Raw PGP-signed epoch seed blob, if available. Response only. Verified by receiver via applySignedSeed(). */
     public byte[] epochSeedBlob;
+    /**
+     * Cosigned network blob {@code COSIGNER{NMI{CXNetwork}}} for {@code network}. Response only.
+     * Set for non-CXNET networks, whose seed cannot be verified by a requester that does not yet
+     * hold the network's keys. The blob carries its own trust: the receiver verifies both
+     * signature layers via ConnectX.applyCosignedNetworkBlob, so the responder's identity is
+     * irrelevant and any peer holding a stored copy can serve it.
+     */
+    public byte[] cosignedNetworkBlob;
     /** True if the responding peer is an authoritative NMI/backend node. Response only. */
     public Boolean authoritative;
     /** ID of the responding peer. Response only. */

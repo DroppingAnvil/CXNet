@@ -1487,6 +1487,14 @@ public class NodeMesh {
                                     }
                                 }
 
+                                // Stored cosigned blob for the requested network, when this node holds
+                                // one. This is what the receiver actually seeds from: it carries the
+                                // cosigner's outer signature over the network NMI's inner one, so it
+                                // proves itself independently of who relays it and any peer with a
+                                // copy can serve it. The dynamic seed below stays informational.
+                                byte[] cosignedNetworkBlob = "*".equals(requestedNetwork)
+                                        ? null : connectX.readCosignedNetworkBlob(requestedNetwork);
+
                                 // Determine if this peer is authoritative (NMI/backend)
                                 boolean isAuthoritative = false;
                                 if (network != null && network.configuration != null && network.configuration.backendSet != null) {
@@ -1499,6 +1507,7 @@ public class NodeMesh {
                                 response.network = requestedNetwork;
                                 response.dynamicSeed = dynamicSeed;
                                 response.epochSeedBlob = epochSeedBlob;
+                                response.cosignedNetworkBlob = cosignedNetworkBlob;
                                 response.authoritative = isAuthoritative;
                                 response.senderID = connectX.getOwnID();
                                 response.c1 = network.c1.current != null ? network.c1.current.block : 0L;
@@ -1567,10 +1576,26 @@ public class NodeMesh {
                                 targetNetwork = responseData.dynamicSeed.networkID;
                             }
 
-                            log.info("[SEED CONSENSUS] Response for {} from {} | authoritative={} epochBlob={} dynamicSeed={}",
+                            log.info("[SEED CONSENSUS] Response for {} from {} | authoritative={} epochBlob={} cosigned={} dynamicSeed={}",
                                 targetNetwork, nc.iD.substring(0, 8), responseData.authoritative,
                                 responseData.epochSeedBlob != null ? responseData.epochSeedBlob.length + "b" : "none",
+                                seedResp.cosignedNetworkBlob != null ? seedResp.cosignedNetworkBlob.length + "b" : "none",
                                 responseData.dynamicSeed != null);
+
+                            // PRIORITY 0: a stored cosigned blob for the requested network. This is
+                            // the trust-bearing form: both signature layers are verified against the
+                            // network's own authorities, so the relaying peer's identity is
+                            // irrelevant and no vote is needed. The dynamic seed carries no
+                            // networkBlobs and can never import a network, so it is informational
+                            // only and is no longer used for seeding.
+                            if (seedResp.cosignedNetworkBlob != null
+                                    && connectX.applyCosignedNetworkBlob(seedResp.cosignedNetworkBlob, targetNetwork)) {
+                                log.info("[SEED CONSENSUS] Seeded {} from cosigned blob supplied by {}",
+                                    targetNetwork, nc.iD.substring(0, 8));
+                                connectX.seedConsensusMap.remove(targetNetwork);
+                                handledLocally = true;
+                                break;
+                            }
 
                             // PRIORITY 1: EPOCH's own signed blob -- apply immediately, no consensus needed
                             if (responseData.epochSeedBlob != null && ConnectX.EPOCH_UUID.equals(nc.iD)) {

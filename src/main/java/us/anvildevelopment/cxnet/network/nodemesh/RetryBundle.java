@@ -5,20 +5,43 @@
 
 package us.anvildevelopment.cxnet.network.nodemesh;
 
+import us.anvildevelopment.cxnet.network.events.EventType;
+
 /**
  * Wrapper for OutputBundle that tracks retry attempts and timing
  * Failed events are moved to retry queue instead of blocking main output queue
+ *
+ * Delivery limits are declared per event in {@link EventType} (maxRetries, ttlMs). They are
+ * resolved once at construction: an event this node knows takes its declared limits, anything
+ * else takes the long-standing MAX_RETRIES / no-expiry defaults. Nothing downstream re-checks
+ * the event type, so adding an event type never adds branches to this class.
  */
 public class RetryBundle {
     public final OutputBundle bundle;
+    /** Delivery attempts allowed for this bundle. Resolved at construction, never null. */
+    public final int maxRetries;
+    /** How long this bundle may sit queued before being dropped; 0 means no expiry. */
+    public final long ttlMs;
     public int retryCount;
     public long nextRetryTime;
     public final long firstAttemptTime;
     public String lastError;
     public boolean convertedToCXN;  // Track if we've converted CXS → CXN fallback
 
+    /** What the retry queue should do with a bundle on this pass. */
+    public enum Disposition {
+        /** Backoff has elapsed; transmit now. */
+        READY,
+        /** Backoff has not elapsed; leave queued. */
+        WAITING,
+        /** Delivery attempts exhausted; discard. */
+        EXPIRED_RETRIES,
+        /** Sat in the queue past its TTL; discard as stale. */
+        EXPIRED_TTL
+    }
+
     // Retry configuration
-    public static final int MAX_RETRIES = 50;  // Never discard events, keep retrying
+    public static final int MAX_RETRIES = 50;  // Default when the event type is unknown to this node
     public static final long INITIAL_RETRY_DELAY_MS = 5000;  // 5 seconds
     public static final double BACKOFF_MULTIPLIER = 4.0;     // Exponential backoff
     public static final long MAX_RETRY_DELAY_MS = 300000;    // 5 minutes max
@@ -28,6 +51,19 @@ public class RetryBundle {
 
     public RetryBundle(OutputBundle bundle) {
         this.bundle = bundle;
+
+        // Resolve the declared limits here and only here; unknown types take the defaults.
+        EventType type = null;
+        if (bundle != null && bundle.ne != null && bundle.ne.eT != null) {
+            try {
+                type = EventType.valueOf(bundle.ne.eT);
+            } catch (IllegalArgumentException ignored) {
+                // Event type not supported by this node; defaults apply.
+            }
+        }
+        this.maxRetries = type != null ? type.maxRetries : MAX_RETRIES;
+        this.ttlMs = type != null ? type.ttlMs : 0;
+
         this.retryCount = 0;
         this.firstAttemptTime = System.currentTimeMillis();
         this.nextRetryTime = System.currentTimeMillis() + INITIAL_RETRY_DELAY_MS;
@@ -48,17 +84,14 @@ public class RetryBundle {
     }
 
     /**
-     * Check if this bundle should be retried
+     * Single verdict for this bundle on the current retry pass.
      */
-    public boolean shouldRetry() {
-        return retryCount < MAX_RETRIES && System.currentTimeMillis() >= nextRetryTime;
-    }
-
-    /**
-     * Check if this bundle has exceeded max retries
-     */
-    public boolean hasExceededMaxRetries() {
-        return retryCount >= MAX_RETRIES;
+    public Disposition disposition() {
+        if (retryCount >= maxRetries) return Disposition.EXPIRED_RETRIES;
+        if (ttlMs > 0 && System.currentTimeMillis() - firstAttemptTime >= ttlMs) {
+            return Disposition.EXPIRED_TTL;
+        }
+        return System.currentTimeMillis() >= nextRetryTime ? Disposition.READY : Disposition.WAITING;
     }
 
     /**

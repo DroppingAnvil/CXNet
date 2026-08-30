@@ -97,7 +97,7 @@ public class OutputProcessor implements Runnable {
                             outController.connectXAPI.retryQueue.add(retryBundle);
                             log.error("[OUT-ERROR] {} to {} failed: {}", eventType, nodeAddr, e.getMessage());
                             log.error("[RETRY-QUEUE] Added to retry queue (retry 1/{} in {}s)",
-                                RetryBundle.MAX_RETRIES, (RetryBundle.INITIAL_RETRY_DELAY_MS / 1000));
+                                retryBundle.maxRetries, (RetryBundle.INITIAL_RETRY_DELAY_MS / 1000));
                         }
                     }
                 }

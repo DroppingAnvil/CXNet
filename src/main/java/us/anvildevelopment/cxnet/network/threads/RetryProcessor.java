@@ -46,19 +46,22 @@ public class RetryProcessor implements Runnable {
                     // Process all bundles in retry queue
                     RetryBundle polled;
                     while ((polled = outController.connectXAPI.retryQueue.poll()) != null) {
-                        if (polled.hasExceededMaxRetries()) {
-                            // Drop after max retries
-                            log.info("[RETRY-DROP] {} to {} dropped after {} retries",
-                                polled.getEventType(), polled.getTargetAddress(), polled.retryCount);
-                            log.info("[RETRY-DROP]   First attempt: {}s ago",
-                                ((System.currentTimeMillis() - polled.firstAttemptTime) / 1000));
-                            log.info("[RETRY-DROP]   Last error: {}", polled.lastError);
-                        } else if (polled.shouldRetry()) {
-                            // Ready for retry
-                            toRetry.add(polled);
-                        } else {
-                            // Not ready yet, requeue
-                            toRequeue.add(polled);
+                        switch (polled.disposition()) {
+                            case EXPIRED_RETRIES:
+                            case EXPIRED_TTL:
+                                log.info("[RETRY-DROP] {} to {} dropped ({}) after {} retries",
+                                    polled.getEventType(), polled.getTargetAddress(),
+                                    polled.disposition(), polled.retryCount);
+                                log.info("[RETRY-DROP]   First attempt: {}s ago",
+                                    ((System.currentTimeMillis() - polled.firstAttemptTime) / 1000));
+                                log.info("[RETRY-DROP]   Last error: {}", polled.lastError);
+                                break;
+                            case READY:
+                                toRetry.add(polled);
+                                break;
+                            default:
+                                toRequeue.add(polled);
+                                break;
                         }
                     }
 
@@ -141,7 +144,7 @@ public class RetryProcessor implements Runnable {
                     }
 
                     log.debug("[RETRY-ATTEMPT] {} to {} (attempt {}/{})",
-                        eventType, nodeAddr, (bundle.retryCount + 1), RetryBundle.MAX_RETRIES);
+                        eventType, nodeAddr, (bundle.retryCount + 1), bundle.maxRetries);
 
                     try {
                         outController.transmitEvent(bundle.bundle);
@@ -155,7 +158,7 @@ public class RetryProcessor implements Runnable {
 
                         long nextRetryDelay = (bundle.nextRetryTime - System.currentTimeMillis()) / 1000;
                         log.debug("[RETRY-FAILED] {} to {} failed again: {}", eventType, nodeAddr, e.getMessage());
-                        log.debug("[RETRY-QUEUE] Retry {}/{} in {}s", bundle.retryCount, RetryBundle.MAX_RETRIES, nextRetryDelay);
+                        log.debug("[RETRY-QUEUE] Retry {}/{} in {}s", bundle.retryCount, bundle.maxRetries, nextRetryDelay);
                     }
                 }
 

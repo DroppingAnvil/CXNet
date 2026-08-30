@@ -1581,9 +1581,22 @@ public class NodeMesh {
                                 break;
                             }
 
-                            // All other responses go into the consensus map. Blobs from non-EPOCH peers
-                            // are forwarded EPOCH-signed blobs; performSeedConsensus will verify the
-                            // embedded signature against the backendSet before applying anything.
+                            // PRIORITY 2: a relayed EPOCH-signed blob carries its full trust with it
+                            // under the cosignment system -- the outer seed signature verifies against
+                            // EPOCH/backendSet keys and bundled network blobs verify via their own
+                            // cosignatures. Sender identity is irrelevant, so apply immediately instead
+                            // of waiting on a 3-peer vote that small networks can never satisfy.
+                            if (responseData.epochSeedBlob != null
+                                    && connectX.applyBackendSignedSeed(responseData.epochSeedBlob, targetNetwork)) {
+                                log.info("[SEED CONSENSUS] Applied relayed EPOCH-signed seed for {} from {} -- no vote needed",
+                                    targetNetwork, nc.iD.substring(0, 8));
+                                connectX.seedConsensusMap.remove(targetNetwork);
+                                handledLocally = true;
+                                break;
+                            }
+
+                            // Unverifiable responses go into the consensus map; performSeedConsensus
+                            // re-verifies embedded signatures against the backendSet before applying.
                             if (!connectX.seedConsensusMap.containsKey(targetNetwork)) {
                                 connectX.seedConsensusMap.put(targetNetwork, new ConcurrentHashMap<>());
                             }

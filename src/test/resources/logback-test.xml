@@ -36,6 +36,12 @@
     <!-- Application-level logs -->
     <logger name="us.anvildevelopment.cxnet" level="INFO"/>
 
+    <!-- Test runners -->
+    <logger name="BootstrapServerTest" level="INFO"/>
+    <logger name="MultiPeerTest" level="INFO"/>
+    <logger name="MigrateEpochCXNET" level="INFO"/>
+    <logger name="MigrateCXChatForEpoch" level="INFO"/>
+
     <root level="WARN">
         <appender-ref ref="CONSOLE"/>
     </root>

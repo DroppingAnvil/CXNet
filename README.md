@@ -1,7 +1,7 @@
 # ConnectX
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=DroppingAnvil_CXNet&metric=alert_status)](https://sonarcloud.io/project/overview?id=DroppingAnvil_CXNet)
-[![Maven](https://img.shields.io/badge/maven-0.4.3--SNAPSHOT-blue)](https://repo.anvildevelopment.us/repository/maven-public/)
+[![Maven](https://img.shields.io/badge/maven-0.6.2--SNAPSHOT-blue)](https://repo.anvildevelopment.us/repository/maven-public/)
 
 > **Early Development.** Core networking, encryption, and event API are functional and tested. Blockchain sync, Zero Trust activation, and remote directory are partially implemented.
 
@@ -58,7 +58,7 @@ Maven:
   <dependency>
     <groupId>us.anvildevelopment</groupId>
     <artifactId>ConnectX</artifactId>
-    <version>0.4.3-SNAPSHOT</version>
+    <version>0.6.2-SNAPSHOT</version>
   </dependency>
 </dependencies>
 ```
@@ -71,7 +71,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'us.anvildevelopment:ConnectX:0.4.3-SNAPSHOT'
+    implementation 'us.anvildevelopment:ConnectX:0.6.2-SNAPSHOT'
 }
 ```
 

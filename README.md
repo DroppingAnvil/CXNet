@@ -7,7 +7,7 @@
 
 A decentralized P2P mesh network framework with pluggable cryptography, serialization, and transports. Every event at every hop is signed or encrypted by the originating node before it leaves the process.
 
-**[CXNexus](https://AnvilDevelopment.us/cxnexus)** is a desktop application built on ConnectX as a proof of concept, featuring a live node dashboard, peer and network management, and CXChat: decentralized E2E encrypted messaging. Coming soon.
+**[CXNexus](https://AnvilDevelopment.us/cxnexus)** is a desktop application built on ConnectX as a proof of concept, featuring a live node dashboard, peer and network management, and CXChat: decentralized E2E encrypted messaging. Available now!
 
 ---
 

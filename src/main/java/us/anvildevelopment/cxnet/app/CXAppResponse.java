@@ -23,7 +23,10 @@ public class CXAppResponse {
     public String appID;
     public boolean success;
     public Map<String, String> fields;
+    /** Stable machine code, normally a {@link CXAppError} name. Branch on this, not on message. */
     public String error;
+    /** Human-readable explanation of error. Free to be reworded; never branch on it. */
+    public String message;
 
     public CXAppResponse() {}
 
@@ -35,6 +38,30 @@ public class CXAppResponse {
         return r;
     }
 
+    public static CXAppResponse fail(String appID, CXAppError error) {
+        CXAppResponse r = new CXAppResponse();
+        r.appID   = appID;
+        r.success = false;
+        r.error   = error.code();
+        r.message = error.message();
+        return r;
+    }
+
+    /**
+     * Failure carrying extra context in the message only. The detail never reaches the wire code,
+     * so it must not be used to describe anything a caller should branch on, and must not be used
+     * with FORBIDDEN, whose whole purpose is to reveal nothing about why it was refused.
+     */
+    public static CXAppResponse fail(String appID, CXAppError error, String detail) {
+        CXAppResponse r = fail(appID, error);
+        if (detail != null && !detail.isEmpty()) r.message = error.message() + ": " + detail;
+        return r;
+    }
+
+    /**
+     * Raw-string failure. Retained for callers not yet migrated to {@link CXAppError}; leaves
+     * message null. Prefer the enum overloads.
+     */
     public static CXAppResponse fail(String appID, String error) {
         CXAppResponse r = new CXAppResponse();
         r.appID   = appID;

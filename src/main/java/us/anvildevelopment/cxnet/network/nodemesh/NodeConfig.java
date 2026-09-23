@@ -21,6 +21,11 @@ public class NodeConfig {
     public static boolean signAllResources = true;
     //
     public static Integer outputProcessorThreads = 6;  // Parallel OutputProcessor threads for CXHELLO/event processing
+    // CXApp handler dispatch. Handler bodies are arbitrary developer code, so they run on their
+    // own pool rather than on EventProcessor, where blocking would stall the whole node.
+    public static Integer appThreads = 4;            // Shared pool draining per-app lanes
+    public static Integer appMaxQueuedPerApp = 32;   // Backlog per app before requests are rejected
+    public static Long appHandlerWarnMs = 1000L;     // Log handlers slower than this; 0 disables
     public static Long IO_THREAD_SLEEP = 1L;
     public static Long ioSocketSleep = 1L;
     public static Integer ioWriteByteBuffer = 20048;

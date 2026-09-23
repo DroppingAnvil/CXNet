@@ -77,6 +77,84 @@ Per-tab session isolation: each `GET /app/{appID}` generates a UUID session toke
 
 `package-info.java` added for `us.anvildevelopment.cxnet.app` covering origin, design rationale, and the security/flexibility tradeoff. `getTemplate()` Javadoc updated with the surface contract and JS-from-file-only restriction. `README.md` and `CX-PROTOCOL.md` updated with the CXApp spec, two-surface security posture, session model, wire protocol table, and app registration policy.
 
+### CXApp handler dispatch: off the EventProcessor thread
+
+App handlers ran inline on `EventProcessor`. `NodeMesh` starts exactly one such thread (`NodeMesh:107`); it loops on `in.processEvent()`, which reaches `fireEvent`, whose `APP_REQUEST` case called `appServer.handle()` directly and only then built and queued the `APP_RESPONSE`. There was no executor anywhere on that path.
+
+`@CXAppMethod` bodies are arbitrary developer code, so any handler that blocked stalled every event on the node, not just its own app: chat, peer discovery, seed consensus and block exchange all stopped until it returned. Nothing in the API surface said so. `CXAppServer` reads like a request handler and every comparable Java framework dispatches on a pool, so the design invited exactly the code it could not tolerate.
+
+**Dispatcher**
+
+`CXAppDispatcher` runs handlers on a shared bounded pool, but each `appID` owns a lane drained one task at a time. Handlers for a given app therefore never run concurrently and existing `CXAppServer` implementations keep the serialization they were written against; no locking is required of app authors. Because a lane runs a single task at a time, one app can never occupy more than one pool thread, so a blocked handler stalls only its own lane.
+
+The drainer re-submits itself to the pool between tasks rather than looping, so an app with a backlog returns its thread between tasks and cannot starve other apps.
+
+Lanes are never removed. `submit` is only reached for a registered app, so the map is bounded by the number of registered apps; removing a lane would race a concurrent submitter holding the same reference and strand that task.
+
+Backpressure is explicit: when a lane's queue is full the submission is rejected and the caller answers `BUSY` on the request's sid, rather than dropping the request and leaving the requester waiting. Handlers exceeding `appHandlerWarnMs` are logged, which turns the "never block" expectation into something observable instead of documentation.
+
+**Configuration**
+
+`NodeConfig.appThreads` (4), `NodeConfig.appMaxQueuedPerApp` (32), `NodeConfig.appHandlerWarnMs` (1000; 0 disables), alongside the existing `ioThreads` and `outputProcessorThreads`.
+
+**Why a dedicated pool**
+
+Neither existing pool could safely take arbitrary code. `IOThread` is the inbound path (socket reads, `stripSignature`, `verifyAndStrip`, `processNetworkInput`), so blocking it stops the node receiving rather than dispatching, a wider blast radius than the original bug. `OutputProcessor` is the send path, and blocking it strands every outbound event including the `APP_RESPONSE` being delivered. Untrusted code sharing a pool with core protocol work makes pool saturation indistinguishable from node failure.
+
+**Correlation and ordering**
+
+No new correlation mechanism was added. The response is queued with `.withSid(ne.sid).toPeer(nc.iD)`, reusing the existing sid echo. Responses for a given app remain ordered because the lane is serialized; across apps they may now complete out of order relative to arrival, which sid correlation already accommodates.
+
+Queueing from a pool thread is safe and introduces no new exposure: `EventBuilder.queue()` performs no crypto, wrapping the builder in an `IOJob` and adding it to `connectX.jobQueue` under `synchronized`. Signing, encryption, the `connectX.self` read and the path mutation all happen later in `execute()` on IOThread, exactly as for every other caller. IOThread, RetryProcessor and job-completion callbacks already queue from non-EventProcessor threads.
+
+**Known gaps, not addressed here**
+
+`DataContainer` remains fully reachable by handlers, which is deliberate: CXNET is embedded in host applications and apps are expected to interact with the JVM. Some of its collections are not thread-safe (`LAN` is a `HashMap`, `waitingAddresses` an `ArrayList`, `watchedNetworks` a `HashSet`) and were safe only because `EventProcessor` was single-threaded. A handler mutating those from a pool thread is a genuine race. This predates the change for plugins but is newly reachable for apps, and is tracked separately.
+
+Also outstanding from the same review and not addressed here: `stringify`/`coerce` asymmetry for non-scalar `@CXAppField` values, `getDeclaredFields`/`getDeclaredMethods` ignoring inherited members, the method cache keying on name so overloads collide, `@CXAppMethod` defaulting to no permission while `@CXAppField.writable` correctly defaults to false, and `coerceArgs` padding missing arguments with null instead of reporting an arity error.
+
+No automated test exercises this path. `CXAppUnitTest` calls `CXAppServer.handle()` directly, so it never reaches `CXAppDispatcher` or the NodeMesh `APP_REQUEST` case. The behaviour that matters (a deliberately blocking handler must not prevent the node from processing other events, and a second request to the same app must queue behind the first rather than run concurrently) is currently unverified.
+
+### CXApp error codes and failure disclosure
+
+`CXAppResponse.error` carried ad-hoc prose (`"Forbidden"`, `"Unknown field: routes"`, `e.getMessage()`), which callers could not branch on and which leaked whatever a handler's exception happened to say.
+
+`CXAppError` replaces those with a stable code plus a rewordable human message. `CXAppResponse` gains a `message` field; `error` continues to carry the machine code so existing consumers keep working, and `BROWSER_NOT_ALLOWED` retains its exact token since CX-PROTOCOL.md documents it and the browser extension branches on it. The raw-string `fail(String, String)` overload is retained for call sites not yet migrated.
+
+**Failure disclosure**
+
+Refusals previously distinguished unknown target, unreadable or unwritable field, and denied permission, and existence was answered before permission was checked. Any peer able to reach an app could therefore enumerate its fields and methods, and learn their readability, by comparing replies, without holding a single permission.
+
+Those cases now collapse to one `FORBIDDEN` answer. The permission is stored on the field or method, so when the target does not exist there is nothing to check; returning a distinct code in that case is what made enumeration possible. The same reasoning merges the unknown-app case, so a peer cannot discover which apps a node has registered.
+
+`CXAppServer.debugPermission()` re-opens the detail for callers that hold it: they receive `UNKNOWN_FIELD`, `UNKNOWN_METHOD`, `PERMISSION_DENIED`, `FIELD_NOT_READABLE` or `FIELD_NOT_WRITABLE` as appropriate. It grants detail only and never access; an operation refused without it is refused with it, only more informatively. All refusals are logged locally at debug level regardless, so the node operator can always diagnose one the caller was told nothing about. `CXAppServer.refuse()` is the single place that decides how much a refusal reveals.
+
+The permission is per app, not global: it is the app's own ID plus `CXAppServer.DEBUG_PERMISSION_SUFFIX`, so an app with ID `RProx` uses `RProx.debug` and holding it says nothing about any other app. This is the framework composing its own permission name, the same way the network layer composes chain scope into names like `Record-3`.
+
+`BasicPermissionContainer` stores a flat action string and has no scope concept, which its javadoc is explicit about ("designed to be embedded in many server applications", and `Actions` notes its constants are unlikely to suffice). Composing scope into the name is therefore the caller's job by design. For annotation permissions the caller is the app author, so `@CXAppField(permission="admin")` collides with any other app on the node using the bare word `admin`, and authors should namespace their own strings (`permission="RProx.admin"`) exactly as core does. No framework change is needed for this; it is a convention to follow, not a defect in the container.
+
+A permitted caller that mistypes a field name now receives `FORBIDDEN` rather than a specific error unless it holds the app's debug permission, which is the intended trade and the reason the permission exists.
+
+The NodeMesh `APP_REQUEST` path uses the same codes. A request naming an unregistered app now receives `FORBIDDEN` rather than no reply at all, so it is answered immediately instead of the caller waiting out `APP_RESPONSE_TIMEOUT_MS` (5000ms) for a response that was never coming, and the code is deliberately the same one an unpermitted or unknown target produces so app presence stays unenumerable. A saturated lane returns `BUSY`, and a handler that throws returns `HANDLER_ERROR` with the throwable logged locally rather than placed on the wire.
+
+Handler exceptions no longer put `e.getMessage()` on the wire. Failures return `HANDLER_ERROR` and the message is logged locally, since handler text is arbitrary developer output and may name internal state.
+
+### CXApp field value encoding
+
+Field values crossing the wire in `CXAppResponse.fields` were written in one form and read in another, so every non-scalar field was silently wrong in both directions. All three conversion sites date from `d42da0f Begin CXApp system`; the scalar cases were written first and the cxJSON1 branch was added only to the one place it was immediately needed, which was POJO arguments for `INVOKE`. CX-PROTOCOL.md describes the map only as `{fieldName -> value}` and states no encoding, so neither side was written against a rule. There was no design intent to preserve here.
+
+On the sending side, `CXAppServer.stringify` was `String.valueOf` for every type. A `Map` field went out as `{a=b}`, which is not cxJSON1 and cannot be parsed by any client, while `coerce` on the same class read that same field back through `ConnectX.deserialize("cxJSON1", ...)`. `READ`, the `WRITE` confirmation and `REFRESH` all returned that unparseable text with `success` set true.
+
+On the receiving side, `CXAppClient.coerce` had no cxJSON1 branch at all. A non-scalar value fell off the end of the method and the field was applied as `null`, inside a path that logs nothing on that route. Correcting only the sender would have left collection and POJO fields still arriving as `null`.
+
+`stringify` now writes scalars as plain text and everything else as cxJSON1, matching what `coerce` reads, and `CXAppClient.coerce` gains the same cxJSON1 fallback the server side already had. A new `CXAppServer.isScalar` is the single definition of which types travel as plain text, so the two halves cannot drift apart again; it lists both the primitive and boxed spelling of each scalar because `coerce` tests a declared type, which may be primitive, while `stringify` tests a runtime class, which never is.
+
+`stringify` now declares `throws Exception` rather than falling back to `toString` on a value it cannot serialize. Emitting an unparseable string under `success` is the failure being fixed, so it is not reintroduced as a fallback; `handle()` converts the throw to `HANDLER_ERROR` and logs it against the app. The client keeps returning `null` on a parse failure, since `applyField` treats one bad field as non-fatal to the rest of a `REFRESH`, but every failure is now logged rather than reached by silent fall-through.
+
+`CXAppClient.buildHTML` is unchanged and still renders with `String.valueOf`. It reads the client's own local fields for display to a person, not for transport, so plain text is correct there.
+
+Known gap, unchanged by this: a field declared as `Object` is still ambiguous, because `stringify` dispatches on the runtime class while `coerce` dispatches on the declared type. An `Object` field holding a `String` goes out as plain text and comes back through the cxJSON1 branch. Declared-`Object` fields should be avoided until the wire format carries its own type tag. An empty string also still round-trips to `null`, since `stringify` writes `""` for null and `coerce` maps `""` back to null; this predates the change.
+
 ### Security: node temp-import verification
 
 Peer nodes are no longer written to disk before signature verification. The old pattern added nodes to `PeerDirectory` and persisted `.cxi` files before the signing key was checked, then called `removeNode` on failure. `CryptProvider` now exposes `hasCert`, `cacheKeyFromString`, and `removeCert`. All three NodeMesh temp-import paths (CXHELLO/NewNode first contact, PeerFinding, relayed NewNode) now do a cert-cache-only provisional load -- no disk write, no PeerDirectory entry -- and only persist via `addNode` once all verifications pass. Rollback calls `removeCert` guarded by `certAlreadyPresent` so a key that was already cached before the import is never evicted.

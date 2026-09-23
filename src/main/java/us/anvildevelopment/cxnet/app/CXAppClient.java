@@ -7,6 +7,7 @@ package us.anvildevelopment.cxnet.app;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.annotations.CXAppField;
 
 import java.lang.reflect.Field;
@@ -231,6 +232,19 @@ public abstract class CXAppClient {
         }
     }
 
+    /**
+     * Parse a wire value into the field's declared type, in the same form
+     * {@code CXAppServer.stringify} wrote it.
+     *
+     * Scalars arrive as plain text; everything else arrives as cxJSON1. The cxJSON1 branch was
+     * previously absent, so a non-scalar value fell off the end of this method and the field was
+     * applied as null, silently, on a response marked successful. That was the receiving half of
+     * the asymmetry fixed in CXAppServer.stringify; correcting only the sender would still have
+     * left every collection and POJO field arriving here as null.
+     *
+     * Returns null on failure rather than throwing, because applyField treats one unparseable
+     * field as non-fatal to the rest of a REFRESH. Every failure is logged.
+     */
     private Object coerce(String value, Class<?> type) {
         if (value == null || value.isEmpty()) return null;
         try {
@@ -240,10 +254,11 @@ public abstract class CXAppClient {
             if (type == boolean.class || type == Boolean.class)       return Boolean.parseBoolean(value);
             if (type == double.class  || type == Double.class)        return Double.parseDouble(value);
             if (type == float.class   || type == Float.class)         return Float.parseFloat(value);
+            return ConnectX.deserialize("cxJSON1", value, type);
         } catch (Exception e) {
             log.warn("[CXApp] Client '{}' type coercion failed for type {}: {}", appID, type.getSimpleName(), e.getMessage());
+            return null;
         }
-        return null;
     }
 
     // -------------------------------------------------------------------------

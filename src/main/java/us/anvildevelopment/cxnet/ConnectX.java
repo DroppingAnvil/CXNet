@@ -3491,6 +3491,29 @@ public class ConnectX {
         log.info("[CXApp] Registered client app '{}'", client.getAppID());
     }
 
+
+    /**
+     * Runs CXApp handlers off EventProcessor. Created lazily so a node that registers no app
+     * server never starts the pool. See CXAppDispatcher for the threading contract.
+     */
+    private volatile us.anvildevelopment.cxnet.app.CXAppDispatcher appDispatcher;
+
+    public us.anvildevelopment.cxnet.app.CXAppDispatcher getAppDispatcher() {
+        us.anvildevelopment.cxnet.app.CXAppDispatcher d = appDispatcher;
+        if (d == null) {
+            synchronized (this) {
+                d = appDispatcher;
+                if (d == null) {
+                    d = new us.anvildevelopment.cxnet.app.CXAppDispatcher(
+                            us.anvildevelopment.cxnet.network.nodemesh.NodeConfig.appThreads,
+                            us.anvildevelopment.cxnet.network.nodemesh.NodeConfig.appMaxQueuedPerApp,
+                            us.anvildevelopment.cxnet.network.nodemesh.NodeConfig.appHandlerWarnMs);
+                    appDispatcher = d;
+                }
+            }
+        }
+        return d;
+    }
     public us.anvildevelopment.cxnet.app.CXAppServer getAppServer(String appID) {
         return appServers.get(appID);
     }

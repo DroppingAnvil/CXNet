@@ -2383,18 +2383,60 @@ public class NodeMesh {
                                     connectX.getAppServer(appReq.appID);
 
                             if (appServer == null) {
+                                // FORBIDDEN, not a distinct "no such app": answering differently here
+                                // would let any peer enumerate which apps a node has registered. Same
+                                // reasoning as CXAppServer.refuse(). Replying at all still beats staying
+                                // silent, which made the caller wait out the full APP_RESPONSE timeout.
                                 log.warn("[CXApp] APP_REQUEST for unknown app '{}' from {}", appReq.appID, senderCXID);
+                                sendAppResponse(connectX,
+                                        us.anvildevelopment.cxnet.app.CXAppResponse.fail(
+                                                appReq.appID, us.anvildevelopment.cxnet.app.CXAppError.FORBIDDEN),
+                                        ib.nc.se, ne.sid, nc.iD);
                             } else {
-                                us.anvildevelopment.cxnet.app.CXAppResponse appResp =
-                                        appServer.handle(appReq, senderCXID, connectX.dataContainer);
-                                String respJson = ConnectX.serialize(ib.nc.se, appResp);
-                                connectX.buildEvent(EventType.APP_RESPONSE, respJson.getBytes(java.nio.charset.StandardCharsets.UTF_8))
-                                        .withSid(ne.sid)
-                                        .toPeer(nc.iD)
-                                        .signData()
-                                        .queue();
-                                log.info("[CXApp] APP_REQUEST op={} app='{}' from {} -> success={}",
-                                        appReq.op, appReq.appID, senderCXID, appResp.success);
+                                // Handler bodies are arbitrary developer code. Running them here would
+                                // put them on EventProcessor, the single thread every inbound event is
+                                // dispatched on, so one blocking handler would stall the whole node.
+                                // Dispatch to the app's lane instead and let the response be queued from
+                                // there; sid correlation already makes the reply order-independent.
+                                final String replySid    = ne.sid;
+                                final String replyPeer   = nc.iD;
+                                final String serializer  = ib.nc.se;
+                                final String appID       = appReq.appID;
+                                final String op          = appReq.op;
+
+                                boolean queued = connectX.getAppDispatcher().submit(appID, () -> {
+                                    try {
+                                        us.anvildevelopment.cxnet.app.CXAppResponse appResp =
+                                                appServer.handle(appReq, senderCXID, connectX.dataContainer);
+                                        sendAppResponse(connectX, appResp, serializer, replySid, replyPeer);
+                                        log.info("[CXApp] APP_REQUEST op={} app='{}' from {} -> success={}",
+                                                op, appID, senderCXID, appResp.success);
+                                    } catch (Throwable t) {
+                                        // Throwable rather than Exception: CXAppDispatcher catches Errors to keep
+                                        // the pool thread and the lane alive, but it holds no sid and cannot reply,
+                                        // so an Error here would leave the requester waiting out the full
+                                        // APP_RESPONSE timeout and receiving null instead of a stated failure.
+                                        // The throwable's message is logged rather than returned: it is arbitrary
+                                        // developer text and may name internal state.
+                                        log.error("[CXApp] APP_REQUEST handler error for '{}': {}", appID, t.toString());
+                                        sendAppResponse(connectX,
+                                                us.anvildevelopment.cxnet.app.CXAppResponse.fail(
+                                                        appID, us.anvildevelopment.cxnet.app.CXAppError.HANDLER_ERROR),
+                                                serializer, replySid, replyPeer);
+                                    }
+                                });
+
+                                if (!queued) {
+                                    // Lane backlog is full, so this app is not keeping up. Answer now
+                                    // rather than dropping the request and making the caller wait out
+                                    // the APP_RESPONSE timeout for a reply that was never coming.
+                                    sendAppResponse(connectX,
+                                            us.anvildevelopment.cxnet.app.CXAppResponse.fail(
+                                                    appID, us.anvildevelopment.cxnet.app.CXAppError.BUSY),
+                                            serializer, replySid, replyPeer);
+                                    log.warn("[CXApp] APP_REQUEST op={} app='{}' from {} rejected: lane full",
+                                            op, appID, senderCXID);
+                                }
                             }
                         } catch (Exception e) {
                             log.error("[CXApp] APP_REQUEST error: {}", e.getMessage());
@@ -3084,6 +3126,26 @@ public class NodeMesh {
         log.info("[PeerLookup] Verified and imported cosigned identity: {} (signedAt={})",
                 verifiedNode.cxID.substring(0, 8), verifiedNode.signedAt);
         return verifiedNode;
+    }
+
+    /**
+     * Queue an APP_RESPONSE back to the requester. Called from CXApp pool threads as well as from
+     * EventProcessor, so it touches only the outbound queue, which is concurrent. Correlation is by
+     * the original request's sid, so replies do not need to preserve arrival order.
+     */
+    private static void sendAppResponse(ConnectX connectX,
+                                        us.anvildevelopment.cxnet.app.CXAppResponse appResp,
+                                        String serializer, String sid, String peerID) {
+        try {
+            String respJson = ConnectX.serialize(serializer, appResp);
+            connectX.buildEvent(EventType.APP_RESPONSE, respJson.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                    .withSid(sid)
+                    .toPeer(peerID)
+                    .signData()
+                    .queue();
+        } catch (Exception e) {
+            log.error("[CXApp] Failed to queue APP_RESPONSE for '{}': {}", appResp.appID, e.getMessage());
+        }
     }
 
     /**

@@ -66,7 +66,12 @@ public class HTTPBridgeProvider implements BridgeProvider {
     private static final ConcurrentHashMap<String, LinkedBlockingQueue<String>> pendingAppHTML
             = new ConcurrentHashMap<>();
 
-    private static final long APP_RESPONSE_TIMEOUT_MS = 5000;
+    // Driven from NodeConfig so the browser and in-process paths cannot disagree about how long a
+    // caller waits. Read per call rather than captured, so changing the config takes effect without
+    // a restart.
+    private static long appResponseTimeoutMs() {
+        return us.anvildevelopment.cxnet.network.nodemesh.NodeConfig.appRequestTimeoutMs;
+    }
 
     // Per-tab session state: sessionToken -> AppSession.
     // Each GET /app/{appID} creates a new session token returned as X-CXApp-Session header.
@@ -476,7 +481,7 @@ public class HTTPBridgeProvider implements BridgeProvider {
                         .toPeer(targetCXID)
                         .signData()
                         .queue();
-                return queue.poll(APP_RESPONSE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                return queue.poll(appResponseTimeoutMs(), TimeUnit.MILLISECONDS);
             } catch (Exception e) {
                 log.error("[CXApp] AppServlet fireAndWait error: {}", e.getMessage());
                 return null;

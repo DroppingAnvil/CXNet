@@ -155,6 +155,44 @@ On the receiving side, `CXAppClient.coerce` had no cxJSON1 branch at all. A non-
 
 Known gap, unchanged by this: a field declared as `Object` is still ambiguous, because `stringify` dispatches on the runtime class while `coerce` dispatches on the declared type. An `Object` field holding a `String` goes out as plain text and comes back through the cxJSON1 branch. Declared-`Object` fields should be avoided until the wire format carries its own type tag. An empty string also still round-trips to `null`, since `stringify` writes `""` for null and `coerce` maps `""` back to null; this predates the change.
 
+### CXApp in-process calling API
+
+CXApps could not be called from Java. The only code path that sent an `APP_REQUEST` was `AppServlet.fireAndWait` inside `HTTPBridgeProvider`, reachable only over loopback HTTP from the browser extension, so an app was callable from a browser and from nowhere else. `CXAppClient` was a render-only half: its entire surface was `loadTemplate`, `getTemplate`, `buildCache`, `applyAndRender` and `buildHTML`, with a `targetCXID` field and no method that sent anything. Nothing on `ConnectX` filled the gap, and CXNexus contains no CXApp references at all, which is consistent with there having been no API to write against.
+
+Two consequences beyond the missing entry point. Every outbound request was hardcoded `fromBrowser = true`, so an app declaring `browserEnabled() == false` was unreachable by everything, because the non-browser path it was reserving itself for did not exist. And the response side was equally browser-bound: the NodeMesh `APP_RESPONSE` handler delivered only to `HTTPBridgeProvider.deliverAppHTML`, so a Java-originated response would have been rendered and then dropped into a bridge map holding no matching sid. `CXAppRequest`'s javadoc has described `fromBrowser = false` as "called in-process from CXNexus" since the framework was introduced, so this was always the intent and simply was never built.
+
+**Correlation registry**
+
+`CXAppRequests` correlates an outbound request with the response answering it, keyed on the event sid. This is the same mechanism as the bridge's `pendingAppHTML` map, lifted out of the bridge and owned by `ConnectX` so both callers can reach it. The two registries stay separate rather than merged: both are sid-keyed, a browser request has no entry in the new one and an in-process request has no bridge queue, so each is a no-op for the other's traffic and the browser path is bit-for-bit unchanged.
+
+**Public API**
+
+`ConnectX.sendAppRequest(appID, targetCXID, op, target, args, ttlMs)` returns a `CompletableFuture<CXAppResponse>`, with an overload using the configured default. `CXAppClient` gains `read`, `write`, `invoke` and `refresh` built on it, using the `appID` and `targetCXID` it already holds. `ConnectX.registerApp(CXAppClient)` now attaches the node to the client, and a client that was never registered fails its future with a stated reason rather than a NullPointerException.
+
+A response with `success == false` completes the future normally: the server answered and the answer was a refusal, described by `CXAppResponse.error`. Only transport-level problems, timeout and lane saturation, complete it exceptionally, so callers branch on `error` rather than catching.
+
+**Threading**
+
+Futures are completed on a `CXAppDispatcher` lane, never on the EventProcessor. Completing inline would run every caller's `thenApply` and callback chain on the single thread serving the whole mesh, which is precisely the stall the dispatcher was added to prevent, reintroduced through the front door of the public API. A timeout completes on the common ForkJoinPool delay scheduler, so the guarantee holds when no response ever arrives. `CXAppRequestsTest` asserts the callback does not run on the delivering thread rather than leaving it to review.
+
+**Declared timeouts**
+
+`@CXAppField` and `@CXAppMethod` gain `ttlMs`, defaulting to zero meaning use `NodeConfig.appRequestTimeoutMs`. A slow operation declares its own wait instead of the node-wide default being raised for every app.
+
+These are read from the CXAppClient's own annotations, not the server's, because the timeout is enforced by the waiting caller and a caller cannot see the server's annotations. For fields this is already natural, since a client mirrors the fields it expects. For methods, a client declares one it intends to call by annotating a same-named stub; the stub is never executed, as INVOKE runs on the server, and exists only to carry the declared wait. `CXAppClient.buildCache` now scans methods for that purpose and reports the declared timeout count alongside the field count. Declaring `ttlMs` on the server side is harmless but has no effect, and both annotations say so.
+
+`HTTPBridgeProvider`'s hardcoded `APP_RESPONSE_TIMEOUT_MS = 5000` is replaced by the same `NodeConfig` value, read per call, so the browser and in-process paths cannot disagree about how long a caller waits.
+
+**Conversion consolidated**
+
+`CXAppServer` and `CXAppClient` each held their own copy of the value conversion, and two copies of a symmetric rule is what let one half be changed without the other in the first place. Both now delegate to `CXAppCodec`, which holds the single definition of `isScalar`, `stringify` and `coerce`. Behaviour is unchanged; the duplication that caused the encoding defect is gone. `CXAppClient.write` and `invoke` encode their arguments through the same codec the server decodes with.
+
+**Tests**
+
+`CXAppRequestsTest` adds 7 tests covering the path that previously had no coverage: correlation on matching sid, completion off the delivering thread, timeout when unanswered, unknown and null sids ignored, pending entries released on both completion and timeout, failure responses completing normally, and concurrent requests answered out of order. Suite is 26 tests with `CXAppUnitTest`.
+
+Not covered: nothing yet exercises `sendAppRequest` against a live peer, so the registry is proven in isolation while the wire path is not.
+
 ### Security: node temp-import verification
 
 Peer nodes are no longer written to disk before signature verification. The old pattern added nodes to `PeerDirectory` and persisted `.cxi` files before the signing key was checked, then called `removeNode` on failure. `CryptProvider` now exposes `hasCert`, `cacheKeyFromString`, and `removeCert`. All three NodeMesh temp-import paths (CXHELLO/NewNode first contact, PeerFinding, relayed NewNode) now do a cert-cache-only provisional load -- no disk write, no PeerDirectory entry -- and only persist via `addNode` once all verifications pass. Rollback calls `removeCert` guarded by `certAlreadyPresent` so a key that was already cached before the import is never evicted.

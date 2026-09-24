@@ -23,4 +23,13 @@ public @interface CXAppField {
     boolean writable() default false;
     /** Required permission string. Empty string means no permission required. */
     String permission() default "";
+    /**
+     * How long a caller waits for the response to a READ or WRITE of this field, in milliseconds.
+     * Zero means use {@code NodeConfig.appRequestTimeoutMs}.
+     *
+     * Read from the CXAppClient's own copy of the field, not from the server's, because the
+     * timeout is enforced by the waiting caller and a caller cannot see the server's annotations.
+     * Declaring it on the server side is harmless but has no effect.
+     */
+    long ttlMs() default 0;
 }

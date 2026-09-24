@@ -3487,6 +3487,7 @@ public class ConnectX {
      */
     public void registerApp(us.anvildevelopment.cxnet.app.CXAppClient client) {
         client.buildCache();
+        client.attach(this);
         appClients.put(client.getAppID(), client);
         log.info("[CXApp] Registered client app '{}'", client.getAppID());
     }
@@ -3514,6 +3515,119 @@ public class ConnectX {
         }
         return d;
     }
+
+    /**
+     * Correlates outbound APP_REQUESTs with their responses. Lazily created alongside the
+     * dispatcher it completes on. See CXAppRequests for the threading contract.
+     */
+    private volatile us.anvildevelopment.cxnet.app.CXAppRequests appRequests;
+
+    public us.anvildevelopment.cxnet.app.CXAppRequests getAppRequests() {
+        us.anvildevelopment.cxnet.app.CXAppRequests r = appRequests;
+        if (r == null) {
+            synchronized (this) {
+                r = appRequests;
+                if (r == null) {
+                    r = new us.anvildevelopment.cxnet.app.CXAppRequests(getAppDispatcher());
+                    appRequests = r;
+                }
+            }
+        }
+        return r;
+    }
+
+    /**
+     * Call a CXApp on a remote node and complete when it answers.
+     *
+     * This is the in-process entry point to the CXApp system. Until it existed the only way to
+     * reach an app was the loopback HTTP bridge, so an app was callable from a browser extension
+     * and from nowhere else, including from the application embedding CXNET.
+     *
+     * The request is marked {@code fromBrowser = false}, which is what makes a server declaring
+     * {@code browserEnabled() == false} reachable at all; previously that setting made an app
+     * unreachable by everything, because the non-browser path it was reserving itself for did not
+     * exist.
+     *
+     * The returned future completes on a CXApp lane, never on the EventProcessor, so attaching
+     * {@code thenApply} or any other callback cannot stall the mesh. It completes exceptionally
+     * with {@link java.util.concurrent.TimeoutException} if no response arrives within ttlMs.
+     * Nothing in the CXApp system blocks a mesh thread waiting on it, so a caller that wants to
+     * block (a servlet thread, a test) may safely call {@code get} on it, but a caller on a UI
+     * thread should chain instead.
+     *
+     * A returned CXAppResponse with {@code success == false} is an answer, not a failure of this
+     * call: the future completes normally and the failure is described by
+     * {@link us.anvildevelopment.cxnet.app.CXAppResponse#error}. Only transport-level problems,
+     * timeout and lane saturation, complete it exceptionally.
+     *
+     * @param appID       the app to call, which must be registered on the target node
+     * @param targetCXID  the node holding the CXAppServer
+     * @param op          READ, WRITE, INVOKE or REFRESH
+     * @param target      field or method name, or null for REFRESH
+     * @param args        arguments, or null
+     * @param ttlMs       how long to wait; zero uses NodeConfig.appRequestTimeoutMs
+     */
+    public java.util.concurrent.CompletableFuture<us.anvildevelopment.cxnet.app.CXAppResponse>
+            sendAppRequest(String appID, String targetCXID, String op, String target,
+                           String[] args, long ttlMs) {
+
+        java.util.concurrent.CompletableFuture<us.anvildevelopment.cxnet.app.CXAppResponse> f =
+                new java.util.concurrent.CompletableFuture<>();
+
+        if (appID == null || op == null) {
+            f.completeExceptionally(new IllegalArgumentException("appID and op are required"));
+            return f;
+        }
+        if (targetCXID == null) {
+            f.completeExceptionally(new IllegalArgumentException(
+                    "targetCXID is required; set CXAppClient.targetCXID before calling"));
+            return f;
+        }
+
+        long ttl = ttlMs > 0 ? ttlMs
+                : us.anvildevelopment.cxnet.network.nodemesh.NodeConfig.appRequestTimeoutMs;
+
+        String sid = java.util.UUID.randomUUID().toString();
+        // Registered before the event is queued. A response cannot arrive before the request is
+        // sent, but registering afterwards would still be a race against a fast local responder.
+        f = getAppRequests().register(sid, appID, ttl);
+
+        try {
+            us.anvildevelopment.cxnet.app.CXAppRequest appReq =
+                    new us.anvildevelopment.cxnet.app.CXAppRequest(appID, op, target, args, false);
+            String json = serialize("cxJSON1", appReq);
+            buildEvent(us.anvildevelopment.cxnet.network.events.EventType.APP_REQUEST,
+                            json.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                    .withSid(sid)
+                    .toPeer(targetCXID)
+                    .signData()
+                    .queue();
+            log.debug("[CXApp] Sent {} to '{}' on {} (sid {}, ttl {}ms)", op, appID, targetCXID, sid, ttl);
+        } catch (Exception e) {
+            log.error("[CXApp] Failed to queue APP_REQUEST for '{}': {}", appID, e.getMessage());
+            // Only completeExceptionally here. Routing it through complete() would hand the
+            // dispatcher a null response and race this line for the outcome; the whenComplete in
+            // register() already removes the pending entry on either result.
+            f.completeExceptionally(e);
+        }
+        return f;
+    }
+
+    /** Overload using NodeConfig.appRequestTimeoutMs. */
+    public java.util.concurrent.CompletableFuture<us.anvildevelopment.cxnet.app.CXAppResponse>
+            sendAppRequest(String appID, String targetCXID, String op, String target, String[] args) {
+        return sendAppRequest(appID, targetCXID, op, target, args, 0);
+    }
+
+    /**
+     * Deliver an APP_RESPONSE to the in-process caller waiting on its sid. Called by the NodeMesh
+     * APP_RESPONSE handler. An sid with no waiter is normal: it belongs to the browser bridge or
+     * to a request that already timed out.
+     */
+    public void completeAppRequest(String sid, us.anvildevelopment.cxnet.app.CXAppResponse response) {
+        if (appRequests != null) appRequests.complete(sid, response);
+    }
+
     public us.anvildevelopment.cxnet.app.CXAppServer getAppServer(String appID) {
         return appServers.get(appID);
     }

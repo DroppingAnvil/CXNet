@@ -9,10 +9,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.annotations.CXAppField;
+import us.anvildevelopment.cxnet.annotations.CXAppMethod;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Abstract base class for client-side CXApp definitions.
@@ -49,6 +52,11 @@ public abstract class CXAppClient {
 
     // Built once at registerApp() time
     private final Map<String, Field> fieldCache = new HashMap<>();
+    // Caller-side timeouts, declared via @CXAppField(ttlMs) and @CXAppMethod(ttlMs). Read from this
+    // client's own annotations because the timeout is enforced here; a caller cannot see the
+    // server's annotations. Absent means use NodeConfig.appRequestTimeoutMs.
+    private final Map<String, Long> fieldTtlCache  = new HashMap<>();
+    private final Map<String, Long> methodTtlCache = new HashMap<>();
 
     // -------------------------------------------------------------------------
     // Developer API
@@ -108,13 +116,24 @@ public abstract class CXAppClient {
         this.appID = getAppID();
 
         for (Field f : getClass().getDeclaredFields()) {
-            if (f.getAnnotation(CXAppField.class) != null) {
+            CXAppField ann = f.getAnnotation(CXAppField.class);
+            if (ann != null) {
                 f.setAccessible(true);
                 fieldCache.put(f.getName(), f);
+                if (ann.ttlMs() > 0) fieldTtlCache.put(f.getName(), ann.ttlMs());
             }
         }
 
-        log.info("[CXApp] Client '{}' cached {} field(s)", appID, fieldCache.size());
+        // Methods are cached for their declared timeout only. The stub is never invoked locally:
+        // INVOKE runs on the server. Annotating one here is how a caller states how long that call
+        // is expected to take, instead of raising the node-wide default for every app.
+        for (Method m : getClass().getDeclaredMethods()) {
+            CXAppMethod ann = m.getAnnotation(CXAppMethod.class);
+            if (ann != null && ann.ttlMs() > 0) methodTtlCache.put(m.getName(), ann.ttlMs());
+        }
+
+        log.info("[CXApp] Client '{}' cached {} field(s), {} declared timeout(s)",
+                appID, fieldCache.size(), fieldTtlCache.size() + methodTtlCache.size());
     }
 
     /**
@@ -218,6 +237,105 @@ public abstract class CXAppClient {
     }
 
     // -------------------------------------------------------------------------
+    // Calling the server
+    // -------------------------------------------------------------------------
+
+    /**
+     * Set by ConnectX.registerApp. A client that was never registered cannot send, and says so
+     * rather than throwing a NullPointerException out of a future.
+     */
+    private volatile ConnectX connectX;
+
+    /** Called by ConnectX.registerApp. Not part of the developer API. */
+    public final void attach(ConnectX cx) {
+        this.connectX = cx;
+    }
+
+    /**
+     * Read one field from the server.
+     *
+     * The returned future completes on a CXApp lane, never on the EventProcessor, so chaining
+     * {@code thenApply} or {@code thenAccept} onto it cannot stall the mesh. It completes
+     * exceptionally with {@link java.util.concurrent.TimeoutException} if the server does not
+     * answer within this field's {@code @CXAppField(ttlMs=...)}, or
+     * {@code NodeConfig.appRequestTimeoutMs} when the field declares none.
+     *
+     * A response with {@code success == false} completes the future normally: the server answered,
+     * and the answer was a refusal. Inspect {@link CXAppResponse#error}.
+     *
+     * Field values on this client are applied by the APP_RESPONSE handler before the future
+     * completes, so {@link #buildHTML()} already reflects the response by the time a callback runs.
+     */
+    public final CompletableFuture<CXAppResponse> read(String field) {
+        return send("READ", field, null, fieldTtl(field));
+    }
+
+    /**
+     * Write one field on the server. The value is encoded exactly as the server will decode it;
+     * see CXAppCodec.
+     */
+    public final CompletableFuture<CXAppResponse> write(String field, Object value) {
+        String encoded;
+        try {
+            encoded = CXAppCodec.stringify(value);
+        } catch (Exception e) {
+            CompletableFuture<CXAppResponse> f = new CompletableFuture<>();
+            f.completeExceptionally(e);
+            return f;
+        }
+        return send("WRITE", field, new String[]{ encoded }, fieldTtl(field));
+    }
+
+    /**
+     * Invoke a method on the server.
+     *
+     * The timeout comes from {@code @CXAppMethod(ttlMs=...)} on this client's own declaration of
+     * the method, falling back to {@code NodeConfig.appRequestTimeoutMs}. A client declares a
+     * method it intends to call by annotating a same-named stub; the stub is never executed, it
+     * exists so the caller can state how long that call is expected to take. See buildCache.
+     */
+    public final CompletableFuture<CXAppResponse> invoke(String method, Object... args) {
+        String[] encoded = null;
+        if (args != null && args.length > 0) {
+            encoded = new String[args.length];
+            try {
+                for (int i = 0; i < args.length; i++) encoded[i] = CXAppCodec.stringify(args[i]);
+            } catch (Exception e) {
+                CompletableFuture<CXAppResponse> f = new CompletableFuture<>();
+                f.completeExceptionally(e);
+                return f;
+            }
+        }
+        return send("INVOKE", method, encoded, methodTtl(method));
+    }
+
+    /** Read every readable field the caller is permitted to see, in one request. */
+    public final CompletableFuture<CXAppResponse> refresh() {
+        return send("REFRESH", null, null, 0);
+    }
+
+    private CompletableFuture<CXAppResponse> send(String op, String target, String[] args, long ttlMs) {
+        ConnectX cx = connectX;
+        if (cx == null) {
+            CompletableFuture<CXAppResponse> f = new CompletableFuture<>();
+            f.completeExceptionally(new IllegalStateException(
+                    "CXAppClient '" + appID + "' is not registered; call ConnectX.registerApp first"));
+            return f;
+        }
+        return cx.sendAppRequest(appID, targetCXID, op, target, args, ttlMs);
+    }
+
+    private long fieldTtl(String name) {
+        Long ttl = fieldTtlCache.get(name);
+        return ttl == null ? 0 : ttl;
+    }
+
+    private long methodTtl(String name) {
+        Long ttl = methodTtlCache.get(name);
+        return ttl == null ? 0 : ttl;
+    }
+
+    // -------------------------------------------------------------------------
     // Field update
     // -------------------------------------------------------------------------
 
@@ -233,14 +351,8 @@ public abstract class CXAppClient {
     }
 
     /**
-     * Parse a wire value into the field's declared type, in the same form
-     * {@code CXAppServer.stringify} wrote it.
-     *
-     * Scalars arrive as plain text; everything else arrives as cxJSON1. The cxJSON1 branch was
-     * previously absent, so a non-scalar value fell off the end of this method and the field was
-     * applied as null, silently, on a response marked successful. That was the receiving half of
-     * the asymmetry fixed in CXAppServer.stringify; correcting only the sender would still have
-     * left every collection and POJO field arriving here as null.
+     * Parse a wire value into the field's declared type. The conversion itself lives in
+     * CXAppCodec, shared with CXAppServer so the two halves cannot drift apart again.
      *
      * Returns null on failure rather than throwing, because applyField treats one unparseable
      * field as non-fatal to the rest of a REFRESH. Every failure is logged.
@@ -248,13 +360,7 @@ public abstract class CXAppClient {
     private Object coerce(String value, Class<?> type) {
         if (value == null || value.isEmpty()) return null;
         try {
-            if (type == String.class)                                 return value;
-            if (type == int.class     || type == Integer.class)       return Integer.parseInt(value);
-            if (type == long.class    || type == Long.class)          return Long.parseLong(value);
-            if (type == boolean.class || type == Boolean.class)       return Boolean.parseBoolean(value);
-            if (type == double.class  || type == Double.class)        return Double.parseDouble(value);
-            if (type == float.class   || type == Float.class)         return Float.parseFloat(value);
-            return ConnectX.deserialize("cxJSON1", value, type);
+            return CXAppCodec.coerce(value, type);
         } catch (Exception e) {
             log.warn("[CXApp] Client '{}' type coercion failed for type {}: {}", appID, type.getSimpleName(), e.getMessage());
             return null;

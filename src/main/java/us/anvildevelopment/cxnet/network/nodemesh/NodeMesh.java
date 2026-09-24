@@ -2459,6 +2459,13 @@ public class NodeMesh {
                                 String html = appClient.applyAndRender(appResp);
                                 log.info("[CXApp] APP_RESPONSE app='{}' success={} html={} chars",
                                         appResp.appID, appResp.success, html.length());
+                                // Both deliveries are keyed on sid and are independent: an
+                                // in-process request has no bridge queue and a browser request has
+                                // no pending future, so each is a no-op for the other's traffic.
+                                // Fields are applied above, before either fires, so a caller's
+                                // callback already sees the new state. completeAppRequest hands the
+                                // completion to a CXApp lane and never runs caller code here.
+                                connectX.completeAppRequest(ne.sid, appResp);
                                 us.anvildevelopment.cxnet.network.nodemesh.bridge.http.HTTPBridgeProvider
                                         .deliverAppHTML(ne.sid, html);
                                 connectX.eventQueue.add(ib);

@@ -25,7 +25,14 @@ public class NodeConfig {
     // own pool rather than on EventProcessor, where blocking would stall the whole node.
     public static Integer appThreads = 4;            // Shared pool draining per-app lanes
     public static Integer appMaxQueuedPerApp = 32;   // Backlog per app before requests are rejected
-    public static Long appHandlerWarnMs = 1000L;     // Log handlers slower than this; 0 disables
+    public static Long appHandlerWarnMs = 1000L;
+    /**
+     * Default wait for an APP_RESPONSE, in milliseconds, used when neither @CXAppField.ttlMs nor
+     * @CXAppMethod.ttlMs declares one. Previously hardcoded as APP_RESPONSE_TIMEOUT_MS in
+     * HTTPBridgeProvider, which is now driven from here so the browser and in-process paths cannot
+     * disagree about how long a caller waits.
+     */
+    public static Long appRequestTimeoutMs = 5000L;     // Log handlers slower than this; 0 disables
     public static Long IO_THREAD_SLEEP = 1L;
     public static Long ioSocketSleep = 1L;
     public static Integer ioWriteByteBuffer = 20048;

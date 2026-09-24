@@ -262,53 +262,15 @@ public abstract class CXAppServer {
         return out;
     }
 
-    /**
-     * Types carried on the wire as their plain text form rather than as cxJSON1. This is the single
-     * definition of that set: {@link #coerce} parses exactly these and {@link #stringify} prints
-     * exactly these, so the two cannot drift into an asymmetry where a value goes out in one form
-     * and is read back as another.
-     *
-     * Tested against a declared parameter or field type in coerce, which may be primitive, and
-     * against a runtime class in stringify, which never is, so both spellings of each scalar are
-     * listed.
-     */
-    private static boolean isScalar(Class<?> type) {
-        return type == String.class
-            || type == int.class     || type == Integer.class
-            || type == long.class    || type == Long.class
-            || type == boolean.class || type == Boolean.class
-            || type == double.class  || type == Double.class
-            || type == float.class   || type == Float.class;
-    }
+    // Conversion lives in CXAppCodec so the server and client cannot drift apart again; see that
+    // class for why. These thin wrappers keep the call sites here unchanged.
 
     private Object coerce(String value, Class<?> type) throws Exception {
-        if (value == null)                                        return null;
-        if (type == String.class)                                 return value;
-        if (type == int.class     || type == Integer.class)       return Integer.parseInt(value);
-        if (type == long.class    || type == Long.class)          return Long.parseLong(value);
-        if (type == boolean.class || type == Boolean.class)       return Boolean.parseBoolean(value);
-        if (type == double.class  || type == Double.class)        return Double.parseDouble(value);
-        if (type == float.class   || type == Float.class)         return Float.parseFloat(value);
-        // Everything else is cxJSON1, which is the form stringify writes it in; see isScalar.
-        return ConnectX.deserialize("cxJSON1", value, type);
+        return CXAppCodec.coerce(value, type);
     }
 
-    /**
-     * Render a value for the response fields map, in the same form {@link #coerce} reads it back.
-     *
-     * Scalars go out as plain text; everything else goes out as cxJSON1. This previously used
-     * String.valueOf for every type, so a collection or POJO field was sent as its toString -- a
-     * Map as {@code {a=b}}, which is not cxJSON1 and cannot be parsed back by any client. READ,
-     * WRITE confirmation and REFRESH all returned that silently, with success set.
-     *
-     * A value that cannot be serialized throws rather than falling back to toString. Emitting an
-     * unparseable string on success is the failure being fixed here, so it is not reintroduced as a
-     * fallback; handle() turns the throw into HANDLER_ERROR and logs it against the app.
-     */
     private String stringify(Object value) throws Exception {
-        if (value == null) return "";
-        if (isScalar(value.getClass())) return String.valueOf(value);
-        return ConnectX.serialize("cxJSON1", value);
+        return CXAppCodec.stringify(value);
     }
 
     // -------------------------------------------------------------------------

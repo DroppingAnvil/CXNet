@@ -1,5 +1,81 @@
 # Changelog
 
+## v0.4 - v0.4.2
+
+### Security: node temp-import verification
+
+Peer nodes are no longer written to disk before signature verification. The old pattern added nodes to `PeerDirectory` and persisted `.cxi` files before the signing key was checked, then called `removeNode` on failure. `CryptProvider` now exposes `hasCert`, `cacheKeyFromString`, and `removeCert`. All three NodeMesh temp-import paths (CXHELLO/NewNode first contact, PeerFinding, relayed NewNode) now do a cert-cache-only provisional load -- no disk write, no PeerDirectory entry -- and only persist via `addNode` once all verifications pass. Rollback calls `removeCert` guarded by `certAlreadyPresent` so a key that was already cached before the import is never evicted.
+
+### Bug fixes
+
+**CXST stream mux header parsing** -- when SocketWatcher buffered exactly the 4 magic bytes, IOThread read `idLen` from the socket but never stored it in `header[4]`. `readNBytes` then requested one extra byte that never arrived and blocked for 1 second. Fixed by writing the socket-read `idLen` into `header[4]` and advancing `have` to 5 before `readNBytes`. CXST detection also moved fully into IOThread.
+
+**RetryProcessor CXN fallback for discovery events** -- `NewNode`, `CXHELLO`, and `CXHELLO_RESPONSE` were being converted to E2E-encrypted CXN broadcasts on retry. These carry the public key so encrypting them is circular, and `stripSignature` on the receiver can't process an encrypted blob. Discovery events now fall back to a signed-only CXN broadcast. The already-signed `ne.d` is forwarded as-is -- the old code re-applied `.signData()` which double-signed the payload and caused JSON parse failures on the receiver.
+
+**Non-clean startup NPE** -- after a PGPainless update, `secretKeyRing()` returns `null` instead of throwing when handed an encrypted key file. The existing try/catch only caught exceptions so `secretKey` stayed null and `new OpenPGPKey(null)` NPE'd. Fixed with an explicit null check that falls through to the passphrase-decryption path in both cases.
+
+### LAN scanner and peer discovery backoff
+
+LAN scanner changed from a fixed 5-minute cycle to run-once on startup then every 15 minutes. Hook point left for Global Scanner (not yet implemented).
+
+Persistence thread peer-discovery replaced with configurable time-based backoff: 30s, 60s, then 10-minute steady-state. Values in `NodeConfig` (`peerDiscoveryBackoff1Ms`, `peerDiscoveryBackoff2Ms`, `peerDiscoverySteadyMs`). Removes the `cycleCount >= 1` test hack.
+
+### Integration tests
+
+`MultiPeerTest` rewritten as JUnit 5 integration tests: E2E encryption, permission enforcement, spoofed-sender rejection at 003, and signed/unsigned message delivery/rejection at 004.
+
+---
+
+Note: the `CXST` mux header and several routing changes in this release are part of a larger ongoing repackage.
+
+### Stream sessions
+
+Full bidirectional stream sessions between peers are now operational (`CXStreamPlugin`). Open a session with `openStream(targetCxID, localHost)`, accept with `acceptStream(session)`, write chunks with `session.write(data)`, and close with `session.close(cx)`. Sessions use direct TCP by default (main-port mux via `CXST` header on the existing P2P port) and upgrade to WebSocket when both sides have a working HTTP bridge.
+
+Bridge transport is negotiated by the receiver. Before advertising a WebSocket address in ACCEPT, the receiver probes its own health endpoint and verifies the response identity matches its own node ID. If the external URL routes to a different server (common in test environments with placeholder bridge addresses), it falls back to TCP. `NodeConfig.streamBridgeOnly = true` disables TCP entirely for nodes behind reverse proxies where exposing a direct IP would defeat the point.
+
+### Retry and routing fixes
+
+**CXS to CXN fallback** now excludes only low-level discovery events (`CXHELLO`, `CXHELLO_RESPONSE`, `PeerFinding`), which cannot be converted because they target unknown peers and E2E CXN broadcast requires a known target cert. All other CXS events (MESSAGE, STREAM, NewNode, etc.) fall back to CXN broadcast with E2E encryption after the retry threshold. **BridgeHealthMonitor** removed from routing. It was marking entire bridge protocols as degraded based on per-peer failures, blocking all bridge-addressed peers when the seed node was unreachable.
+
+### Bootstrap and verification fixes
+
+**NewNode relayed verification** now uses `ib.ne.d` (original signed bytes) instead of already-stripped `eventData`. For nodes not yet in peerDirectory, a memory-only entry is added before cert lookup and rolled back on failure. **`cacheCert` NPE** (`log.info(n.toString())` before null check) fixed. It was silently returning false for every EPOCH event until bootstrap completed. **EPOCH key pre-cached** at `initializeCrypto()` time so seed node events can be verified immediately, before the async bootstrap file load finishes.
+
+### Security hardening: seed and peer ingestion
+
+**Seed peer blobs** (`Seed.hvPeers`/`peerFindingNodes` as raw `Node` objects) replaced with signed blobs (`hvPeerBlobs`/`peerFindingNodeBlobs` as `List<byte[]>`). Each blob is a node signed by its own key, the same format used in CXHELLO. Seeds built via `signAndPublishNetworkSeed` and `initEpochBootstrap` now call `signSelfNode()` to produce the blob. `Seed.fromCurrentPeers` pulls from `PeerDirectory.signedNodeCache` so only nodes with verified signed entries are relayed.
+
+On ingestion (`applySeed`, `applySeedConsensus`) each blob is verified: strip signature, deserialize node, cache key via `cacheKeyFromString` (never replaces existing), verify signature, then `addNode(node, blob, cxRoot)`. Blobs that fail verification are dropped.
+
+**`cacheKeyFromString`** added to `PainlessCryptProvider`. Parses a base64 PGP key and caches it with `putIfAbsent`. `cacheEpochKeyFromFile` also fixed to use `putIfAbsent` (was `put`, could silently overwrite a trusted key).
+
+**PeerDirectory node replacement policy:** `PeerDirectory.addNode` allows replacing an existing entry when the incoming node's public key matches the stored key. A node can re-announce itself with updated address or port data and that update is valid because it is signed by the same identity. Replacing a node with a different public key throws `SecurityException`. Key and cert cache entries in `CryptProvider` are always `putIfAbsent`. Node entries in `PeerDirectory` are mutable by their own signer.
+
+**`NetworkDictionary.dynamicSeed`** flag added. `false` (default): seed must be NMI/backendSet signed. `true`: any known peer can sign and distribute the seed. The flag is embedded in the signed seed so relayers cannot forge it.
+
+### Plugin system: sender identity at all data levels
+
+`CXPlugin` now has `handleEvent(Object data, String senderCxID)` alongside the existing `handleEvent(Object data)`. The default implementation delegates to the single-arg overload so existing plugins are unaffected. `sendPluginEvent` resolves the origin sender from `ne.p.oCXID` (survives relay) with fallback to `nc.iD`, and calls the sender-aware overload at all three data levels (`NETWORK_EVENT`, `INPUT_BUNDLE`, `OBJECT`).
+
+### `CXMessagePlugin` and `CXMessage`
+
+`CXMessage` is the typed payload for `MESSAGE` events (`text` + `timestamp`, serialized as cxJSON1). `CXMessagePlugin` switched from `DataLevel.NETWORK_EVENT` to `DataLevel.OBJECT` with `type = CXMessage.class`. The `onMessage(String senderID, CXMessage message)` callback receives both the typed object and the verified origin sender cxID.
+
+This also fixes a silent delivery failure. NodeMesh always calls `verifyAndStrip(ne.d)` and events sent without `.signData()` or `.encrypt()` were being rejected before reaching any plugin. The `CXMessage` + `.signData()` path goes through proper signature verification and sets `verifiedObjectBytes` for `readyObject()`.
+
+### Network join API
+
+`ConnectX.joinNetworkFromPeers(String networkID)` sends `SEED_REQUEST` to EPOCH first (authoritative), then to all other HV peers. Used for joining non-CXNET networks without NMI-level bootstrap.
+
+`Seed.fetchOfficial(ConnectX)` tries `joinNetworkFromPeers("CXNET")` first, falls back to `https://anvildevelopment.us/downloads/cxnet-bootstrap.cxn` via OkHttp.
+
+### Bootstrap stability
+
+`AtomicBoolean bootstrapStarted` guards `attemptCXNETBootstrap`. Prevents concurrent duplicate bootstrap calls that previously caused BouncyCastle `LongDigest` (SHA-512) thread-safety crashes. Reset on failure so retries work.
+
+`PeerDirectory.addNode` changed from throwing `IllegalStateException` on invalid nodes to logging a warning and returning. Prevents bootstrap failures from propagating as uncaught exceptions.
+
 ## v0.4.3
 
 ### Network state persistence fixes
@@ -22,7 +98,7 @@ Dynamic seeds in `SEED_RESPONSE` consensus are now verified against EPOCH + CXNE
 
 `NetworkEvent.sid` -- a UUID set automatically by `EventBuilder`. Response handlers in NodeMesh echo the request's `sid` back via `EventBuilder.withSid()`. Correlates request-response pairs in logs. Dispatch logic not yet implemented.
 
-## Unreleased
+## v0.6.0
 
 ### CXApp system
 
@@ -76,6 +152,98 @@ Per-tab session isolation: each `GET /app/{appID}` generates a UUID session toke
 **Documentation**
 
 `package-info.java` added for `us.anvildevelopment.cxnet.app` covering origin, design rationale, and the security/flexibility tradeoff. `getTemplate()` Javadoc updated with the surface contract and JS-from-file-only restriction. `README.md` and `CX-PROTOCOL.md` updated with the CXApp spec, two-surface security posture, session model, wire protocol table, and app registration policy.
+
+### Independently signed network blobs
+
+Seed network distribution moved from the informational `networks` field to independently signed per-network blobs in `Seed.networkBlobs`. Each blob is verified against that network's own trust keys rather than relying on the outer seed signature alone, so a seed can carry a network without the seed's signer becoming that network's authority.
+
+`ConnectX.verifyNetworkBlob` handles both forms: a single-layer blob (`signedByTrusted{CXNetwork}`) and a two-layer cosigned blob (`signedByEPOCH{signedByNMI{CXNetwork}}`).
+
+`importTrustedNetworkSeed`, the NETEPOCH handler, cosigns each incoming network blob with EPOCH's key, stores it as `cosigned.cxnb` for redistribution, then calls `applySeed`. `storeCosignedNetworkBlob` and `readExistingNetworkBlob` prefer `cosigned.cxnb` over `seed.cxn` where both exist.
+
+`requestPeerLookupAsync` gained an `epochOnly = false` path so cosigned blobs can be sourced from any high-value peer rather than only EPOCH. The `IOJob` `CALLBACK` type was wired for async completion dispatch to support it.
+
+`Seed.networkBlobs` carries javadoc distinguishing it from the informational `networks` field, alongside an `addNetworkBlob` helper.
+
+### Cosigned peer identities
+
+`PeerDirectory` gained cosigned identity storage as `.cxic` files, mirroring the existing `.cxi` pattern, plus `PendingPeerLookup` retry and registration state. `PeerDirectory.lookup()` falls back to a `.cxic` cosigned identity when no `.cxi` exists, using local disk and crypto verification only so it remains safe to call from any thread.
+
+Cosign production was added at the three existing import sites (CXHELLO, NewNode, PeerFinding), gated to EPOCH and the CXNET `backendSet`. `verifyAndImportCosignedIdentity` verifies the `{signedByTrusted{signedByPeer{Node}}}` chain. `PEER_LOOKUP_REQUEST` and `PEER_LOOKUP_RESPONSE` handlers were wired.
+
+`performSeedConsensus` resolves a claimed NMI through peer lookup, across EPOCH and all known high-value peers, and retries verification once resolved. Trust rests in the signature rather than in the responder. While AnvilDevelopment manages the global network through EPOCH, core trust remains each peer's own cryptographic contract: a peer's node data stays signed by that peer and is not modifiable by anyone else, consistent with the rest of CXNET where a signed entry from a source can only be superseded by new data signed by that same origin.
+
+`ConnectX.requestPeerLookupAsync` and `sweepPendingPeerLookups` provide non-blocking registration with a 15 second, 5 attempt retry sweep on the persistence thread.
+
+### CXNET seed distribution completeness
+
+`signAndPublishNetworkSeed("CXNET")` now refreshes each non-CXNET network from its persisted `networks/<id>/seed.cxn` before bundling, so the distributed seed always reflects the latest on-disk configuration. It also updates `signedBootstrapSeed` in memory, so `SEED_REQUEST` responses are current without a restart.
+
+After `restoreJoinedNetworks`, authoritative nodes republish the CXNET seed to fold restored networks such as CXChat into the distribution seed at startup. The async bootstrap `doAfter` path does the same for nodes where CXNET loads after the IOJob.
+
+EPOCH's `SEED_REQUEST` handler includes every `networkMap` network in `dynamicSeed.networks` when answering a CXNET request, keeping it consistent with `epochSeedBlob`.
+
+### File corruption and power-loss hardening
+
+Reading a core file that fails now generates a `recovery.txt` within scope and locks the system out of writing that file through normal paths. `recovery.txt` must be deleted at runtime before the files are regenerated, so a corrupted or truncated file is never silently overwritten with fresh state.
+
+## v0.6.1
+
+### Trust chain: NETEPOCH scope and cosigned blob authority
+
+NETEPOCH held far more authority than intended and could in principle rewrite itself as an independent CX network without authorization. Verification and the inner and outer signature processing are now split properly so the subject network's backend set is verified in depth. This breaks the originally specced trust model, but the exposure existed only from NETEPOCH and from data signed by the NETEPOCH or CXNET NMI; no other path was affected.
+
+Cosigned blobs also held too much authority. They were trusted to supply the CXID and network set even when the network already existed on disk, violating the rule that data on disk is always trusted and that historical data outranks new network input. Resolved.
+
+`ConnectX.verifyNetworkBlob` used the result of `deserialize` in a later null check for cosigned data. A binary deserialize would error and fall silently into the catch block, returning null, instead of running the cosigned logic.
+
+Keys for the inner and outer signatures were grouped into one set. The two layers exist to provide plane separation, and grouping them introduced a potential trust issue. They are now separate.
+
+Major: CXNET EPOCH could sign a seed for any network and `verifyNetworkBlob` would accept it.
+
+`MultiPeerTest` was adjusted to be realistic for a fresh network start. It is not a performance test, and giving individual tests ten seconds while a network is bootstrapping from cold was not practical. A dedicated performance test is still to come.
+
+## v0.6.2
+
+### Seed join consensus
+
+A network could not be joined unless three distinct peers answered the seed request. Only responses arriving directly from EPOCH were applied on sight; every other response, including ones carrying a valid EPOCH-signed blob, was parked in the consensus map behind a hard threshold of three responders. On a network with fewer than three reachable peers holding the subject network the map sat at 2/3 indefinitely, with no timeout, and the join never completed. Reproducible on CXChat, where only EPOCH and the CXChat node itself could answer.
+
+Under the cosignment system the relaying peer's identity carries no weight: the outer seed signature verifies against EPOCH and the CXNET backend set, and each bundled network blob verifies independently through its own cosignature chain. A relayed blob proves itself, so it is applied as soon as `applyBackendSignedSeed` accepts it regardless of who forwarded it. Consensus is unchanged and still handles every response that fails verification or arrives without a blob, including the claimed-NMI peer lookup recovery path. Nothing is trusted that was not trusted before; the vote is skipped only where the signature chain already gives a stronger guarantee than a peer count.
+
+### Cosigned seed distribution for non-CXNET networks
+
+`applyBackendSignedSeed` reported success as soon as the outer signature verified and the seed deserialized, without confirming the requested network was present in what it applied. A bootstrap seed signed before a network was registered verifies perfectly and contains nothing relevant, so a join could be reported complete while the network was never registered. Combined with the relayed-seed path this silently ended the join: the response was consumed, the consensus map cleared, and no warning written anywhere, which is why CXChat joins appeared to do nothing in either log. Success now additionally requires the target network to be present in `networkMap` afterwards.
+
+Seeding a network other than CXNET had no correct source. The `SEED_REQUEST` handler answered every request with `signedBootstrapSeed`, which is always the CXNET bootstrap regardless of the network asked for, and worked only because that bootstrap happens to bundle the cosigned blob of every registered network. A responder whose bootstrap copy predates the requested network answers with a blob that does not contain it. The dynamic seed cannot cover the gap either: `Seed.fromCurrentPeers` populates only `hvPeerBlobs`, and `applySeed` imports exclusively from `networkBlobs`, so a dynamic seed can never import a network at all.
+
+`SeedExchange` now carries `cosignedNetworkBlob`. A responder attaches the stored `networks/<id>/cosigned.cxnb` when it holds one, and the receiver seeds from that in preference to any seed blob. This is the form the cosignment system exists to distribute: the outer cosignature over the network NMI's inner signature makes the blob self-proving, so the identity of the supplying peer is irrelevant and any peer holding a stored copy can serve it, the network's own NMI included but not required. A new field was required rather than reusing `epochSeedBlob`, which is stripped and deserialized as a `Seed` and would fail on a network blob.
+
+`readCosignedNetworkBlob` reads only `cosigned.cxnb`, deliberately not `readExistingNetworkBlob`, whose fallback returns a single-layer blob signed by the network's own NMI that a requester who has never held the network cannot verify. `applyCosignedNetworkBlob` verifies both signature layers through `verifyNetworkBlob`, rejects a blob whose netID is not the network requested, and only then registers it. The dynamic seed and chain heights are still sent and are now informational only.
+
+### Self-verification and seed request correctness
+
+A node could not verify a signature it had produced itself. `cacheCert` resolves an unknown cxID through the peer directory, which never contains the node's own entry, and nothing placed the node's own public key into the cert cache at startup, so every `verifyAndStrip` against our own cxID failed with "cacheCert returned false". This broke a network master identity serving its own network: the inner layer of a cosigned blob is signed by the network's NMI, so on the NMI itself that inner signature is its own. `restoreJoinedNetworks` rejected its own `cosigned.cxnb` and fell through to a `seed.cxn` that no longer existed, `verifyAndStoreCosignedBlob` failed on every inbound copy and never wrote `cosigned.cxnb`, and `readCosignedNetworkBlob` consequently had nothing to serve, so the NMI answered every seed request for its own network with `cosigned=none`. Confirmed on CXChat, where the blob was valid and correctly structured and verified without issue on every other node.
+
+The node's own public key is now cached under its own cxID immediately after crypto setup. This lives in `ConnectX` rather than in the provider and uses only `CryptProvider.cacheKeyFromString` and `CryptProvider.getPublicKey`, so it applies to any provider implementation and the crypto layer stays pluggable. `cacheKeyFromString` only ever does `putIfAbsent`, so a key learned from the network is never overwritten, and only the node's own cxID is affected.
+
+`SEED_REQUEST` and `SEED_RESPONSE` both silently defaulted an unreadable network to CXNET. On the request side `requestedNetwork` was initialised to `"CXNET"`, so a request whose payload failed to deserialize, or carried no network field, was answered with a CXNET seed; the requester consumed that response, applied a seed that could never contain the network it asked for, and waited indefinitely with nothing logged. The response side defaulted the same way, which would apply a mislabelled response to CXNET and strand whatever join was actually pending. Neither side defaults now. A request that cannot be read is malformed rather than a CXNET request, and is logged and ignored. A response falls back only to its own dynamic seed's networkID and is otherwise logged and dropped.
+
+Seed requests and responses now name the network on both sides, and the responder reports the cosigned blob size, so a peer holding none is visible as `cosigned=none` rather than being indistinguishable from one that attached a blob. This is what identified the failure above.
+
+### Event delivery limits
+
+`EventType` had declared `ttlMs`, `maxPayloadBytes` and `maxRetries` per event for some time, but nothing read them. Every queued event used a flat `MAX_RETRIES` of 50 with exponential backoff to a five minute ceiling, so a request could be retransmitted for hours after it stopped being relevant. EPOCH was observed re-broadcasting `SEED_REQUEST` events for CXChat long after the network had been imported through NETEPOCH, because the retry queue tracks delivery failure and has no visibility into the intent being satisfied elsewhere.
+
+`RetryBundle` resolves `maxRetries` and `ttlMs` once in its constructor. A recognized event type contributes its declared limits; anything unresolvable takes the existing default and no expiry, exactly as before. Both are final primitives, so no caller re-resolves a type or handles a null, and adding an event type never adds state or branches to `RetryBundle`.
+
+`shouldRetry` and `hasExceededMaxRetries` are replaced by a single `disposition()` returning `READY`, `WAITING`, `EXPIRED_RETRIES` or `EXPIRED_TTL`, which `RetryProcessor` switches on. TTL expiry is newly enforced, giving stale events a bounded lifetime instead of relying on the retry ceiling alone. Retry logs report the bundle's real cap rather than the flat constant. `SEED_REQUEST` now honors its declared 60 second TTL and 10 attempts instead of 50, so an unanswered seed request is dropped in about a minute and the join logic reissues a fresh one rather than the mesh carrying a stale broadcast.
+
+`ttlMs` is enforced in the retry queue only. Extending it to the main output queue, and enforcing `maxPayloadBytes`, remain outstanding.
+
+Explicit INFO loggers were added for the test runners in `logback-test.xml`. Root is WARN, so `BootstrapServerTest` and `MultiPeerTest` output was being suppressed entirely during bootstrap debugging.
+
+## v0.6.3
 
 ### CXApp handler dispatch: off the EventProcessor thread
 
@@ -245,6 +413,8 @@ The comparison is against the response's origin, `ne.p.oCXID` with an `nc.iD` fa
 
 `processJob` catches its own exceptions, calls `doAfter(false)`, sets `success = false` and returns `false`, so a failure almost never reaches the `catch` in `run()`. `run()` discarded that result, forced `success = true` and called `doAfter(true)`, so a failed job ran its completion hook twice, the second time claiming success. `run()` now only completes the job when `processJob` returns true. On success the root job's `doAfter` remains this loop's responsibility, which is why `processJob` skips it when `root` is true.
 
+This is the second time this defect has been addressed. Commit `43809a6` in the 0.6.0 line reported it fixed, "by restructuring so success path is inside try block", and that did remove the duplicate call from the catch path. It did not address the discarded return value, so the same double invocation remained reachable through the ordinary failure path where `processJob` handles its own exception and reports failure by return rather than by throwing.
+
 **assert used for a runtime null check**
 
 `NodeMesh` guarded `originPub` with `assert originPub != null` before dereferencing it. Assertions are disabled unless the JVM is started with `-ea`, so a null threw an NPE out of the following line and destroyed the diagnostic the branch existed to produce. A missing cached key is a likely reason verification failed in the first place, so it is now reported instead of treated as impossible.
@@ -332,77 +502,3 @@ Five identical guards plus one static helper in NodeMesh, and one comparison cha
 **Not covered**
 
 No test exercises these handlers. `oCXID` is now load-bearing for six of them, so an admin path that somehow built an event without it would be refused where it previously succeeded, surfacing as a `Rejected:` warning rather than anything louder. Needs a live run with an NMI issuing a grant, a relayed grant, and an unauthorized grant to confirm the rule admits and refuses the right events.
-
-### Security: node temp-import verification
-
-Peer nodes are no longer written to disk before signature verification. The old pattern added nodes to `PeerDirectory` and persisted `.cxi` files before the signing key was checked, then called `removeNode` on failure. `CryptProvider` now exposes `hasCert`, `cacheKeyFromString`, and `removeCert`. All three NodeMesh temp-import paths (CXHELLO/NewNode first contact, PeerFinding, relayed NewNode) now do a cert-cache-only provisional load -- no disk write, no PeerDirectory entry -- and only persist via `addNode` once all verifications pass. Rollback calls `removeCert` guarded by `certAlreadyPresent` so a key that was already cached before the import is never evicted.
-
-### Bug fixes
-
-**CXST stream mux header parsing** -- when SocketWatcher buffered exactly the 4 magic bytes, IOThread read `idLen` from the socket but never stored it in `header[4]`. `readNBytes` then requested one extra byte that never arrived and blocked for 1 second. Fixed by writing the socket-read `idLen` into `header[4]` and advancing `have` to 5 before `readNBytes`. CXST detection also moved fully into IOThread.
-
-**RetryProcessor CXN fallback for discovery events** -- `NewNode`, `CXHELLO`, and `CXHELLO_RESPONSE` were being converted to E2E-encrypted CXN broadcasts on retry. These carry the public key so encrypting them is circular, and `stripSignature` on the receiver can't process an encrypted blob. Discovery events now fall back to a signed-only CXN broadcast. The already-signed `ne.d` is forwarded as-is -- the old code re-applied `.signData()` which double-signed the payload and caused JSON parse failures on the receiver.
-
-**Non-clean startup NPE** -- after a PGPainless update, `secretKeyRing()` returns `null` instead of throwing when handed an encrypted key file. The existing try/catch only caught exceptions so `secretKey` stayed null and `new OpenPGPKey(null)` NPE'd. Fixed with an explicit null check that falls through to the passphrase-decryption path in both cases.
-
-### LAN scanner and peer discovery backoff
-
-LAN scanner changed from a fixed 5-minute cycle to run-once on startup then every 15 minutes. Hook point left for Global Scanner (not yet implemented).
-
-Persistence thread peer-discovery replaced with configurable time-based backoff: 30s, 60s, then 10-minute steady-state. Values in `NodeConfig` (`peerDiscoveryBackoff1Ms`, `peerDiscoveryBackoff2Ms`, `peerDiscoverySteadyMs`). Removes the `cycleCount >= 1` test hack.
-
-### Integration tests
-
-`MultiPeerTest` rewritten as JUnit 5 integration tests: E2E encryption, permission enforcement, spoofed-sender rejection at 003, and signed/unsigned message delivery/rejection at 004.
-
----
-
-Note: the `CXST` mux header and several routing changes in this release are part of a larger ongoing repackage.
-
-### Stream sessions
-
-Full bidirectional stream sessions between peers are now operational (`CXStreamPlugin`). Open a session with `openStream(targetCxID, localHost)`, accept with `acceptStream(session)`, write chunks with `session.write(data)`, and close with `session.close(cx)`. Sessions use direct TCP by default (main-port mux via `CXST` header on the existing P2P port) and upgrade to WebSocket when both sides have a working HTTP bridge.
-
-Bridge transport is negotiated by the receiver. Before advertising a WebSocket address in ACCEPT, the receiver probes its own health endpoint and verifies the response identity matches its own node ID. If the external URL routes to a different server (common in test environments with placeholder bridge addresses), it falls back to TCP. `NodeConfig.streamBridgeOnly = true` disables TCP entirely for nodes behind reverse proxies where exposing a direct IP would defeat the point.
-
-### Retry and routing fixes
-
-**CXS to CXN fallback** now excludes only low-level discovery events (`CXHELLO`, `CXHELLO_RESPONSE`, `PeerFinding`), which cannot be converted because they target unknown peers and E2E CXN broadcast requires a known target cert. All other CXS events (MESSAGE, STREAM, NewNode, etc.) fall back to CXN broadcast with E2E encryption after the retry threshold. **BridgeHealthMonitor** removed from routing. It was marking entire bridge protocols as degraded based on per-peer failures, blocking all bridge-addressed peers when the seed node was unreachable.
-
-### Bootstrap and verification fixes
-
-**NewNode relayed verification** now uses `ib.ne.d` (original signed bytes) instead of already-stripped `eventData`. For nodes not yet in peerDirectory, a memory-only entry is added before cert lookup and rolled back on failure. **`cacheCert` NPE** (`log.info(n.toString())` before null check) fixed. It was silently returning false for every EPOCH event until bootstrap completed. **EPOCH key pre-cached** at `initializeCrypto()` time so seed node events can be verified immediately, before the async bootstrap file load finishes.
-
-### Security hardening: seed and peer ingestion
-
-**Seed peer blobs** (`Seed.hvPeers`/`peerFindingNodes` as raw `Node` objects) replaced with signed blobs (`hvPeerBlobs`/`peerFindingNodeBlobs` as `List<byte[]>`). Each blob is a node signed by its own key, the same format used in CXHELLO. Seeds built via `signAndPublishNetworkSeed` and `initEpochBootstrap` now call `signSelfNode()` to produce the blob. `Seed.fromCurrentPeers` pulls from `PeerDirectory.signedNodeCache` so only nodes with verified signed entries are relayed.
-
-On ingestion (`applySeed`, `applySeedConsensus`) each blob is verified: strip signature, deserialize node, cache key via `cacheKeyFromString` (never replaces existing), verify signature, then `addNode(node, blob, cxRoot)`. Blobs that fail verification are dropped.
-
-**`cacheKeyFromString`** added to `PainlessCryptProvider`. Parses a base64 PGP key and caches it with `putIfAbsent`. `cacheEpochKeyFromFile` also fixed to use `putIfAbsent` (was `put`, could silently overwrite a trusted key).
-
-**PeerDirectory node replacement policy:** `PeerDirectory.addNode` allows replacing an existing entry when the incoming node's public key matches the stored key. A node can re-announce itself with updated address or port data and that update is valid because it is signed by the same identity. Replacing a node with a different public key throws `SecurityException`. Key and cert cache entries in `CryptProvider` are always `putIfAbsent`. Node entries in `PeerDirectory` are mutable by their own signer.
-
-**`NetworkDictionary.dynamicSeed`** flag added. `false` (default): seed must be NMI/backendSet signed. `true`: any known peer can sign and distribute the seed. The flag is embedded in the signed seed so relayers cannot forge it.
-
-### Plugin system: sender identity at all data levels
-
-`CXPlugin` now has `handleEvent(Object data, String senderCxID)` alongside the existing `handleEvent(Object data)`. The default implementation delegates to the single-arg overload so existing plugins are unaffected. `sendPluginEvent` resolves the origin sender from `ne.p.oCXID` (survives relay) with fallback to `nc.iD`, and calls the sender-aware overload at all three data levels (`NETWORK_EVENT`, `INPUT_BUNDLE`, `OBJECT`).
-
-### `CXMessagePlugin` and `CXMessage`
-
-`CXMessage` is the typed payload for `MESSAGE` events (`text` + `timestamp`, serialized as cxJSON1). `CXMessagePlugin` switched from `DataLevel.NETWORK_EVENT` to `DataLevel.OBJECT` with `type = CXMessage.class`. The `onMessage(String senderID, CXMessage message)` callback receives both the typed object and the verified origin sender cxID.
-
-This also fixes a silent delivery failure. NodeMesh always calls `verifyAndStrip(ne.d)` and events sent without `.signData()` or `.encrypt()` were being rejected before reaching any plugin. The `CXMessage` + `.signData()` path goes through proper signature verification and sets `verifiedObjectBytes` for `readyObject()`.
-
-### Network join API
-
-`ConnectX.joinNetworkFromPeers(String networkID)` sends `SEED_REQUEST` to EPOCH first (authoritative), then to all other HV peers. Used for joining non-CXNET networks without NMI-level bootstrap.
-
-`Seed.fetchOfficial(ConnectX)` tries `joinNetworkFromPeers("CXNET")` first, falls back to `https://anvildevelopment.us/downloads/cxnet-bootstrap.cxn` via OkHttp.
-
-### Bootstrap stability
-
-`AtomicBoolean bootstrapStarted` guards `attemptCXNETBootstrap`. Prevents concurrent duplicate bootstrap calls that previously caused BouncyCastle `LongDigest` (SHA-512) thread-safety crashes. Reset on failure so retries work.
-
-`PeerDirectory.addNode` changed from throwing `IllegalStateException` on invalid nodes to logging a warning and returning. Prevents bootstrap failures from propagating as uncaught exceptions.

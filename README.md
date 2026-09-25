@@ -1,7 +1,7 @@
 # ConnectX
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=DroppingAnvil_CXNet&metric=alert_status)](https://sonarcloud.io/project/overview?id=DroppingAnvil_CXNet)
-[![Maven](https://img.shields.io/badge/maven-0.6.2--SNAPSHOT-blue)](https://repo.anvildevelopment.us/repository/maven-public/)
+[![Maven](https://img.shields.io/badge/maven-0.6.3--SNAPSHOT-blue)](https://repo.anvildevelopment.us/repository/maven-public/)
 
 > **Early Development.** Core networking, encryption, and event API are functional and tested. Blockchain sync, Zero Trust activation, and remote directory are partially implemented.
 
@@ -58,7 +58,7 @@ Maven:
   <dependency>
     <groupId>us.anvildevelopment</groupId>
     <artifactId>ConnectX</artifactId>
-    <version>0.6.2-SNAPSHOT</version>
+    <version>0.6.3-SNAPSHOT</version>
   </dependency>
 </dependencies>
 ```
@@ -71,7 +71,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'us.anvildevelopment:ConnectX:0.6.2-SNAPSHOT'
+    implementation 'us.anvildevelopment:ConnectX:0.6.3-SNAPSHOT'
 }
 ```
 
@@ -152,9 +152,34 @@ All core functionality must work through the structured placeholder and invoke s
 
 Each browser tab receives an independent session token (`X-CXApp-Session` header) on first load. Multiple tabs for the same app, even pointing at different server peers, are fully isolated.
 
-### Wire protocol
+### Calling an app
 
 Four operations are supported: `READ`, `WRITE`, `INVOKE`, `REFRESH`. All travel as signed CX events (`APP_REQUEST` / `APP_RESPONSE`) through the standard NodeMesh pipeline.
+
+Apps are callable from Java, not only from a rendering surface, which is what makes them usable from an application embedding ConnectX:
+
+```java
+// From a registered CXAppClient, which already knows its appID and target peer
+CompletableFuture<CXAppResponse> f = client.read("nodeCount");
+client.write("threshold", 12);
+client.invoke("restart");
+client.refresh();
+
+// Or without a client
+connectX.sendAppRequest(appID, targetCXID, "READ", "nodeCount", null, 0);
+```
+
+A response with `success == false` completes the future **normally**: the server answered and refused, described by `CXAppResponse.error`. Only timeout and overload complete it exceptionally, so branch on `error` rather than catching.
+
+Per-operation timeouts are declared on the annotation, `@CXAppField(ttlMs = ...)` or `@CXAppMethod(ttlMs = ...)`, falling back to `NodeConfig.appRequestTimeoutMs`.
+
+### Threading
+
+App handlers do not run on the mesh event thread. Each app gets its own ordered lane on a shared bounded pool, so a slow handler delays only its own app and cannot stall the node. Futures complete on that pool, never on the event thread, so callbacks chained onto them are equally safe. Requests to a single app stay ordered with respect to each other, since a `READ` reordered ahead of its `WRITE` would report a value that was never observable.
+
+A handler should still not block indefinitely. A lane is a bounded queue, and a saturated one answers `BUSY`.
+
+Annotated fields and methods are inherited, so a shared base class can declare members that concrete apps pick up.
 
 ```java
 // Register a server-side app
@@ -166,8 +191,10 @@ connectX.registerApp(new MyAppClient());
 // Start the internal loopback HTTP server for the Chrome extension
 connectX.startAppServer(8079);
 
-// Grant a peer permission to invoke protected operations
-connectX.grantCXIDPermission(peerCXID, "admin", 100);
+// Grant a peer permission to invoke protected operations.
+// Namespace app permissions by appID: the permission store holds a flat action name,
+// so a bare "admin" collides with every other app on the node using that word.
+connectX.grantCXIDPermission(peerCXID, "MyApp.admin", 100);
 ```
 
 See `src/main/java/us/anvildevelopment/cxnet/app/` and [`CX-PROTOCOL.md`](CX-PROTOCOL.md#cxapps) for the full specification.
@@ -231,12 +258,16 @@ src/main/java/us/anvildevelopment/cxnet/
   network/nodemesh/         NodeMesh, PeerDirectory, bridges
   network/events/           Typed event payloads (CXMessage, CXHello, PeerFinding, ...)
   crypt/                    CryptProvider abstraction + PGPainless implementation
-  app/                      CXAppServer, CXAppClient, CXAppRequest, CXAppResponse
+  app/                      CXAppServer, CXAppClient, CXAppDispatcher, CXAppRequests,
+                            CXAppCodec, CXAppError, CXAppRequest, CXAppResponse, bundle/
   annotations/              @CXAppField, @CXAppMethod
   edge/                     DataContainer, ConnectXClient
 src/test/java/
   MultiPeerTest.java        Full multi-peer integration test
   BootstrapServerTest.java  EPOCH bootstrap + CXNET seed test
+  CXAppUnitTest.java        Ops, permissions, template rendering
+  CXAppRequestsTest.java    Request/response correlation and attribution
+  CXAppHierarchyTest.java   Inherited members and argument arity
 ```
 
 ---

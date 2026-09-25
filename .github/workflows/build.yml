@@ -30,7 +30,38 @@ jobs:
           path: ~/.m2
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2
-      - name: Build and analyze
+
+      # Tests are allowed to fail without aborting the build so that analysis still has
+      # something to read. This is not only about reaching the Sonar step: the jacoco
+      # report goal is bound to the test phase, so a hard test failure aborts the build
+      # mid-phase and no coverage report is ever written. Surefire records the failures
+      # either way, and the Test results step below fails the job on them.
+      - name: Build and test
+        run: mvn -B verify -Dmaven.test.failure.ignore=true
+
+      - name: SonarQube analysis
+        # Unconditional. Runs whether the build passed, failed, or the run was cancelled,
+        # so SonarCloud always receives an analysis. always() is used rather than
+        # !cancelled() specifically so a cancelled run still uploads.
+        if: always()
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=DroppingAnvil_CXNet
+        run: mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=DroppingAnvil_CXNet
+
+      # Restores the red status that -Dmaven.test.failure.ignore=true suppressed, after
+      # analysis has been uploaded. Without this the job would report green with failing
+      # tests.
+      - name: Test results
+        if: ${{ !cancelled() }}
+        run: |
+          shopt -s nullglob
+          reports=(target/surefire-reports/*.xml)
+          if [ ${#reports[@]} -eq 0 ]; then
+            echo "::warning::No surefire reports found; no tests ran."
+            exit 0
+          fi
+          if grep -lE 'failures="[1-9]|errors="[1-9]' "${reports[@]}"; then
+            echo "::error::Unit tests failed. Sonar analysis was still uploaded."
+            exit 1
+          fi
+          echo "All tests passed."

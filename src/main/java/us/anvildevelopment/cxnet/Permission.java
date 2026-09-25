@@ -31,5 +31,15 @@ public enum Permission {
      * Typically NMI-only or designated approvers
      */
     RegisterNode,
+    /**
+     * Permission to grant chain or network permissions to another node
+     * Typically NMI-only or designated administrators
+     */
+    GrantPermission,
+    /**
+     * Permission to revoke chain or network permissions from another node
+     * Typically NMI-only or designated administrators
+     */
+    RevokePermission,
 
 }

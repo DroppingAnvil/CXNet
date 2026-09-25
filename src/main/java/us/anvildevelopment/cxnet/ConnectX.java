@@ -3590,7 +3590,7 @@ public class ConnectX {
         String sid = java.util.UUID.randomUUID().toString();
         // Registered before the event is queued. A response cannot arrive before the request is
         // sent, but registering afterwards would still be a race against a fast local responder.
-        f = getAppRequests().register(sid, appID, ttl);
+        f = getAppRequests().register(sid, appID, targetCXID, ttl);
 
         try {
             us.anvildevelopment.cxnet.app.CXAppRequest appReq =
@@ -3626,6 +3626,26 @@ public class ConnectX {
      */
     public void completeAppRequest(String sid, us.anvildevelopment.cxnet.app.CXAppResponse response) {
         if (appRequests != null) appRequests.complete(sid, response);
+    }
+
+    /**
+     * Whether this node issued the APP_REQUEST that an inbound APP_RESPONSE claims to answer.
+     *
+     * Checks both places a request can originate: the in-process registry and the loopback HTTP
+     * bridge. Both are keyed by sid and record which peer was asked, so a response is accepted
+     * only if its sid, app and originating peer all match a request this node actually sent.
+     *
+     * An APP_RESPONSE used to be applied on the strength of its own payload, so any reachable peer
+     * could send an unsolicited one naming a registered app and have applyAndRender write its
+     * values into that client's fields.
+     *
+     * @param peerCXID the response's origin rather than its transmitter, so a relayed response
+     *                 from the peer that was asked still matches
+     */
+    public boolean isExpectedAppResponse(String sid, String appID, String peerCXID) {
+        if (appRequests != null && appRequests.expects(sid, appID, peerCXID)) return true;
+        return us.anvildevelopment.cxnet.network.nodemesh.bridge.http.HTTPBridgeProvider
+                .expectsAppResponse(sid, appID, peerCXID);
     }
 
     public us.anvildevelopment.cxnet.app.CXAppServer getAppServer(String appID) {

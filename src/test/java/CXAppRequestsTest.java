@@ -22,6 +22,8 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 public class CXAppRequestsTest {
 
+    private static final String PEER = "peer-target-001";
+
     private CXAppDispatcher dispatcher;
     private CXAppRequests requests;
 
@@ -45,7 +47,7 @@ public class CXAppRequestsTest {
     @Test
     @DisplayName("A response delivered for a registered sid completes that future")
     void completesOnMatchingSid() throws Exception {
-        CompletableFuture<CXAppResponse> f = requests.register("sid-1", "test-app", 5000);
+        CompletableFuture<CXAppResponse> f = requests.register("sid-1", "test-app", PEER, 5000);
         assertFalse(f.isDone(), "future should not complete before a response arrives");
 
         requests.complete("sid-1", okResponse("test-app", "count", "7"));
@@ -61,7 +63,7 @@ public class CXAppRequestsTest {
         // The caller of complete() is the EventProcessor in production. If the future completed
         // inline, every caller's callback chain would run on that single mesh thread, which is the
         // stall CXAppDispatcher exists to prevent.
-        CompletableFuture<CXAppResponse> f = requests.register("sid-thread", "test-app", 5000);
+        CompletableFuture<CXAppResponse> f = requests.register("sid-thread", "test-app", PEER, 5000);
 
         AtomicReference<String> callbackThread = new AtomicReference<>();
         CompletableFuture<Void> observed = f.thenAccept(
@@ -79,7 +81,7 @@ public class CXAppRequestsTest {
     @Test
     @DisplayName("A request that is never answered times out")
     void timesOutWhenNoResponseArrives() {
-        CompletableFuture<CXAppResponse> f = requests.register("sid-timeout", "test-app", 150);
+        CompletableFuture<CXAppResponse> f = requests.register("sid-timeout", "test-app", PEER, 150);
 
         ExecutionException ex = assertThrows(ExecutionException.class,
                 () -> f.get(3, TimeUnit.SECONDS));
@@ -99,8 +101,8 @@ public class CXAppRequestsTest {
     @Test
     @DisplayName("Pending entries are released on both completion and timeout")
     void pendingIsReleasedOnBothOutcomes() throws Exception {
-        CompletableFuture<CXAppResponse> answered = requests.register("sid-a", "test-app", 5000);
-        CompletableFuture<CXAppResponse> abandoned = requests.register("sid-b", "test-app", 150);
+        CompletableFuture<CXAppResponse> answered = requests.register("sid-a", "test-app", PEER, 5000);
+        CompletableFuture<CXAppResponse> abandoned = requests.register("sid-b", "test-app", PEER, 150);
         assertEquals(2, requests.pendingCount());
 
         requests.complete("sid-a", okResponse("test-app", "x", "1"));
@@ -118,7 +120,7 @@ public class CXAppRequestsTest {
     void failureResponseCompletesNormally() throws Exception {
         // success == false means the server answered and refused. Only transport problems complete
         // the future exceptionally, so callers branch on error rather than catching.
-        CompletableFuture<CXAppResponse> f = requests.register("sid-fail", "test-app", 5000);
+        CompletableFuture<CXAppResponse> f = requests.register("sid-fail", "test-app", PEER, 5000);
         requests.complete("sid-fail",
                 CXAppResponse.fail("test-app", us.anvildevelopment.cxnet.app.CXAppError.FORBIDDEN));
 
@@ -131,8 +133,8 @@ public class CXAppRequestsTest {
     @Test
     @DisplayName("Concurrent requests are correlated to their own sids")
     void correlatesConcurrentRequests() throws Exception {
-        CompletableFuture<CXAppResponse> a = requests.register("sid-x", "app-one", 5000);
-        CompletableFuture<CXAppResponse> b = requests.register("sid-y", "app-two", 5000);
+        CompletableFuture<CXAppResponse> a = requests.register("sid-x", "app-one", PEER, 5000);
+        CompletableFuture<CXAppResponse> b = requests.register("sid-y", "app-two", PEER, 5000);
 
         // Answered out of order, which is the normal case across different peers.
         requests.complete("sid-y", okResponse("app-two", "v", "bee"));
@@ -140,5 +142,51 @@ public class CXAppRequestsTest {
 
         assertEquals("ay",  a.get(2, TimeUnit.SECONDS).fields.get("v"));
         assertEquals("bee", b.get(2, TimeUnit.SECONDS).fields.get("v"));
+    }
+
+    // ---------------------------------------------------------------------
+    // Response attribution: only the peer that was asked may answer
+    // ---------------------------------------------------------------------
+
+    @Test
+    @DisplayName("expects() accepts the sid, app and peer the request was sent to")
+    void expectsMatchingResponse() {
+        requests.register("sid-ok", "test-app", PEER, 5000);
+        assertTrue(requests.expects("sid-ok", "test-app", PEER));
+    }
+
+    @Test
+    @DisplayName("expects() rejects a response from a peer that was not asked")
+    void rejectsWrongPeer() {
+        // The attack this guards: an unsolicited APP_RESPONSE naming a registered app, which used
+        // to reach applyAndRender and overwrite the client's fields.
+        requests.register("sid-peer", "test-app", PEER, 5000);
+        assertFalse(requests.expects("sid-peer", "test-app", "attacker-cxid"));
+    }
+
+    @Test
+    @DisplayName("expects() rejects a response naming a different app")
+    void rejectsWrongApp() {
+        requests.register("sid-app", "test-app", PEER, 5000);
+        assertFalse(requests.expects("sid-app", "other-app", PEER));
+    }
+
+    @Test
+    @DisplayName("expects() rejects an sid that was never issued, and nulls")
+    void rejectsUnknownSid() {
+        assertFalse(requests.expects("never-issued", "test-app", PEER));
+        assertFalse(requests.expects(null, "test-app", PEER));
+        assertFalse(requests.expects("sid-x", null, PEER));
+        assertFalse(requests.expects("sid-x", "test-app", null));
+    }
+
+    @Test
+    @DisplayName("expects() stops matching once the request is answered or times out")
+    void stopsExpectingAfterCompletion() throws Exception {
+        CompletableFuture<CXAppResponse> f = requests.register("sid-done", "test-app", PEER, 5000);
+        requests.complete("sid-done", okResponse("test-app", "a", "b"));
+        f.get(2, TimeUnit.SECONDS);
+        assertFalse(requests.expects("sid-done", "test-app", PEER),
+                "a satisfied sid must not accept a second response");
     }
 }

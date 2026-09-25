@@ -115,21 +115,33 @@ public abstract class CXAppClient {
     public final void buildCache() {
         this.appID = getAppID();
 
-        for (Field f : getClass().getDeclaredFields()) {
-            CXAppField ann = f.getAnnotation(CXAppField.class);
-            if (ann != null) {
+        // The whole hierarchy is scanned so a shared base client can declare inherited fields and
+        // timeouts, matching CXAppServer.buildCache; see that method for why the chain walk is
+        // required. Most-derived first, skipping a name already seen, so a subclass wins.
+        java.util.Set<String> seenMethods = new java.util.HashSet<>();
+
+        for (Class<?> c = getClass(); c != null && c != CXAppClient.class; c = c.getSuperclass()) {
+            for (Field f : c.getDeclaredFields()) {
+                CXAppField ann = f.getAnnotation(CXAppField.class);
+                if (ann == null || fieldCache.containsKey(f.getName())) continue;
                 f.setAccessible(true);
                 fieldCache.put(f.getName(), f);
                 if (ann.ttlMs() > 0) fieldTtlCache.put(f.getName(), ann.ttlMs());
             }
-        }
 
-        // Methods are cached for their declared timeout only. The stub is never invoked locally:
-        // INVOKE runs on the server. Annotating one here is how a caller states how long that call
-        // is expected to take, instead of raising the node-wide default for every app.
-        for (Method m : getClass().getDeclaredMethods()) {
-            CXAppMethod ann = m.getAnnotation(CXAppMethod.class);
-            if (ann != null && ann.ttlMs() > 0) methodTtlCache.put(m.getName(), ann.ttlMs());
+            // Methods are scanned for their declared timeout only. The stub is never invoked
+            // locally: INVOKE runs on the server. Annotating one here is how a caller states how
+            // long that call is expected to take, instead of raising the node-wide default for
+            // every app.
+            //
+            // Presence is tracked separately from the timeout map, because a subclass declaring
+            // ttlMs = 0 means "use the default" and must still shadow a base class that declared a
+            // value. Keying only on the map would let the base value leak through.
+            for (Method m : c.getDeclaredMethods()) {
+                CXAppMethod ann = m.getAnnotation(CXAppMethod.class);
+                if (ann == null || !seenMethods.add(m.getName())) continue;
+                if (ann.ttlMs() > 0) methodTtlCache.put(m.getName(), ann.ttlMs());
+            }
         }
 
         log.info("[CXApp] Client '{}' cached {} field(s), {} declared timeout(s)",
@@ -373,9 +385,22 @@ public abstract class CXAppClient {
     // CXNexus and other surfaces can reuse them without duplicating this logic.
     // -------------------------------------------------------------------------
 
+    /**
+     * Escape a value for insertion anywhere in the developer's template.
+     *
+     * Quotes are escaped as well as angle brackets. This is used for remote field values at the
+     * {@code {{field}}} substitution in buildHTML, and a template decides the surrounding context,
+     * so the same value may land in text or inside a quoted attribute. Escaping only {@code &<>} was
+     * sufficient for text but allowed a remote value to break out of {@code title="{{name}}"} and
+     * add an event handler attribute. Escaping the superset is correct in both contexts.
+     */
     private String escapeHtml(String s) {
         if (s == null) return "";
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 
     private String escapeAttr(String s) {

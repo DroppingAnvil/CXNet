@@ -1,7 +1,7 @@
 # ConnectX (CX) Protocol Documentation
 
 **Version:** 0.4
-**Last Updated:** 2026-06-18 (CXApp system: human-facing app layer, browser surface security split, per-tab session isolation, injection fix)
+**Last Updated:** 2026-09-25 (CXApp: in-process calling API, handler dispatch off EventProcessor, error codes and failure disclosure, value encoding, inherited members, declared timeouts)
 **Status:** Early Development. Core networking and event API are functional; many subsystems are incomplete or in progress.
 
 ---
@@ -26,7 +26,7 @@ Introduces the CXApp system: a human-facing application layer on the CX network.
 
 `HTTPBridgeProvider` gains an `AppServlet` on a second Jetty server bound to `127.0.0.1` only. Each `GET /app/{appID}?cxid=...` creates a UUID session token (`X-CXApp-Session` response header) mapping `{appID, targetCXID}` in `appSessions`. Each `POST /app/{appID}` reads the token to look up its session. Multiple browser tabs for the same app are fully isolated.
 
-`fireAndWait()` fires an `APP_REQUEST`, blocks on a `LinkedBlockingQueue<String>` keyed by `sid`. The NodeMesh `APP_RESPONSE` handler calls `HTTPBridgeProvider.deliverAppHTML(sid, html)` to unblock it after local HTML rendering.
+`fireAndWait()` fires an `APP_REQUEST`, blocks on a `LinkedBlockingQueue<String>` keyed by `sid`. The NodeMesh `APP_RESPONSE` handler calls `HTTPBridgeProvider.deliverAppHTML(sid, html)` to unblock it after local HTML rendering, and `ConnectX.completeAppRequest(sid, response)` alongside it for in-process callers. Both are sid-keyed and independent, so each is a no-op for the other's traffic.
 
 `connectX.startAppServer(int port)` activates the bridge after `connect()`.
 
@@ -5172,7 +5172,39 @@ An app consists of two sides:
 - `CXAppServer`: runs on the node that owns the data. Annotated fields and methods are cached via reflection at registration time. Incoming `APP_REQUEST` events are dispatched here.
 - `CXAppClient`: runs on the user's local node. Holds an HTML template. Receives `APP_RESPONSE` events containing field values, substitutes them into the template locally, and returns rendered HTML. No HTML ever crosses the CX wire.
 
-Both sides are registered with `ConnectX.registerApp()`.
+Both sides are registered with `ConnectX.registerApp()`. Registration builds the reflection cache and, for a client, attaches the node so it can send.
+
+Annotated members are inherited. `buildCache` walks the class hierarchy up to (but excluding) `CXAppServer` / `CXAppClient`, so a shared base app can declare `@CXAppField` and `@CXAppMethod` members that subclasses pick up. Member annotations are never inherited in Java and `getDeclaredFields` sees only one level, so the walk is what makes a base app possible. It runs most-derived first and skips a name already cached, so an override or a shadowing field wins. A subclass that overrides an annotated method without re-annotating it keeps the base annotation, and the cached base `Method` still dispatches virtually, so the subclass body runs under the base permission.
+
+Caches are keyed by member name alone. Overloaded `@CXAppMethod` names therefore collide, and which overload wins is not defined; do not overload a network-invokable method.
+
+### Calling an app
+
+Two entry points reach a `CXAppServer`, and both produce the same `APP_REQUEST` on the wire.
+
+**In-process**, for CXNexus or any application embedding CXNET:
+
+```java
+CompletableFuture<CXAppResponse> f = client.read("count");
+client.write("count", 7);
+client.invoke("reset");
+client.refresh();
+
+// or without a CXAppClient:
+connectX.sendAppRequest(appID, targetCXID, "READ", "count", null, 0);
+```
+
+These set `fromBrowser = false`. The future completes on a `CXAppDispatcher` lane, never on the EventProcessor, so attaching a callback cannot stall the mesh. A response with `success == false` completes it **normally**: the server answered and refused, described by `CXAppResponse.error`. Only transport-level problems, timeout and lane saturation, complete it exceptionally, so callers branch on `error` rather than catching.
+
+**Browser**, via the loopback HTTP bridge, which sets `fromBrowser = true` and blocks the servlet thread in `fireAndWait` until the `APP_RESPONSE` handler delivers rendered HTML.
+
+Request and response are correlated by the event `sid`. The in-process registry (`CXAppRequests`) and the bridge's `pendingAppHTML` are independent and both sid-keyed, so each is a no-op for the other's traffic.
+
+### Threading
+
+`CXAppServer.handle()` does not run on the EventProcessor. Deserialization, app lookup and the `browserEnabled()` check stay there, in the same order as every other event; only the handler call and its reply are submitted to `CXAppDispatcher`, which holds a bounded pool with one lane per appID. Requests for a single app stay strictly ordered with respect to each other, since app fields are mutable state and a `READ` reordered ahead of its `WRITE` would report a value that was never observable. Different apps run concurrently and cannot block one another.
+
+A handler must still not block indefinitely: a lane is a queue, and a saturated lane answers `BUSY`. Sizing lives in `NodeConfig` (`appThreads`, `appMaxQueuedPerApp`, `appHandlerWarnMs`, `appRequestTimeoutMs`). A handler exceeding `appHandlerWarnMs` is logged with its appID.
 
 ### Wire protocol
 
@@ -5180,10 +5212,24 @@ Both sides are registered with `ConnectX.registerApp()`.
 |---|---|---|---|
 | `READ` | field name | null | `{fieldName: value}` |
 | `WRITE` | field name | `[newValue]` | `{fieldName: confirmedValue}` |
-| `INVOKE` | method name | method params as strings | `{_return: value}` or empty if void |
+| `INVOKE` | method name | method params, encoded per Value encoding | `{_return: value}` or empty if void |
 | `REFRESH` | null | null | all readable fields |
 
 Events travel as `APP_REQUEST` / `APP_RESPONSE` through the standard NodeMesh pipeline: signed, verified, routed identically to any other CX event.
+
+#### Value encoding
+
+Every value in `args` and in the response `fields` map is a string. A scalar (`String`, `int`/`Integer`, `long`/`Long`, `boolean`/`Boolean`, `double`/`Double`, `float`/`Float`, in either primitive or boxed form) travels as its plain text form. Everything else travels as cxJSON1.
+
+`CXAppCodec` is the single definition of this rule, shared by `CXAppServer` and `CXAppClient` so the writing and reading halves cannot disagree. A value that cannot be serialized fails the request rather than falling back to `toString`, because emitting an unparseable string alongside a successful response is worse than a stated failure.
+
+Two limits to be aware of. A field declared as `Object` is ambiguous, because writing dispatches on the runtime class and reading on the declared type, so an `Object` holding a `String` goes out as plain text and comes back through the cxJSON1 branch; avoid declaring `Object`. And an empty string reads back as `null`, since `null` is written as `""`.
+
+#### Argument arity
+
+`INVOKE` requires the argument count to match the method's parameter count exactly. A mismatch in either direction is answered with `MISSING_ARGUMENT` naming the expected and received counts. Nothing is padded or truncated.
+
+Varargs are not supported: `getParameterTypes()` reports `String...` as a single `String[]` parameter, so a varargs method appears to take exactly one argument and will reject a spread call. Declare an explicit parameter list, or take a single collection parameter encoded as cxJSON1.
 
 ### Permissions
 
@@ -5194,7 +5240,29 @@ connectX.grantCXIDPermission(peerCXID, "admin", 100);
 connectX.revokeCXIDPermission(peerCXID, "admin", 100);
 ```
 
-REFRESH silently omits fields the caller lacks permission to read.
+`REFRESH` silently omits fields the caller lacks permission to read.
+
+An empty permission string means no permission is required. A `@CXAppMethod` that declares none is therefore invokable by any peer that can reach the node, by design: the annotation is what exposes a method at all, so annotating one is the act of publishing it. Declare a permission on anything that should not be open.
+
+Permission strings should be namespaced by app. `BasicPermissionContainer` stores a flat action name and has no scope concept, which its javadoc is explicit about, so composing scope into the name is the caller's job; the network layer does the same thing with names like `Record-3`. For annotation permissions the caller is the app author, so a bare `permission = "admin"` collides with every other app on the node using that word. Write `permission = "RProx.admin"`.
+
+#### Failure disclosure
+
+`CXAppResponse.error` carries a stable code from `CXAppError`; `CXAppResponse.message` carries a rewordable human sentence. Branch on `error`, never on `message`.
+
+Unknown app, unknown field, unknown method, denied permission, and a field that is not readable or not writable all answer a single `FORBIDDEN`. Reporting them separately would let any peer that can reach the node enumerate which apps are installed and which fields and methods they expose simply by comparing replies, without holding a permission. The permission lives on the field or method, so when the target does not exist there is nothing to check, and a distinct code in that case is exactly what made enumeration possible. The real reason is always logged locally at debug so the operator can diagnose a refusal the caller was told nothing about.
+
+`<appID>.debug` re-opens the detail to a caller holding it, which then receives `UNKNOWN_FIELD`, `UNKNOWN_METHOD`, `PERMISSION_DENIED`, `FIELD_NOT_READABLE` or `FIELD_NOT_WRITABLE`. It grants detail only and never access: an operation refused without it is refused with it, only more informatively. It is per app, so holding `RProx.debug` says nothing about any other app. Grant it to developers working against an app, not as a way to widen what a peer may do.
+
+A handler that throws answers `HANDLER_ERROR`; the throwable is logged locally and never placed on the wire, since handler text is arbitrary developer output and may name internal state.
+
+#### Timeouts
+
+A caller waits `NodeConfig.appRequestTimeoutMs` by default. An individual operation can declare its own via `@CXAppField(ttlMs = ...)` or `@CXAppMethod(ttlMs = ...)`, so a slow operation does not require raising the node-wide default for every app. Zero means use the default.
+
+These are read from the **client's** annotations, not the server's, because the timeout is enforced by the waiting caller and a caller cannot see the server's annotations. For fields this is natural, since a client already mirrors the fields it expects. For a method, a client declares one it intends to call by annotating a same-named stub; the stub is never executed, as `INVOKE` runs on the server, and exists only to carry the declared wait. Declaring `ttlMs` on the server side is harmless but has no effect.
+
+An in-process call that times out completes its future exceptionally with `TimeoutException`. A browser call returns HTTP 504.
 
 ### Rendering surfaces and security posture
 

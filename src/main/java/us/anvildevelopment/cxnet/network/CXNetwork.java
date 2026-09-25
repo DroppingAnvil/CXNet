@@ -108,6 +108,34 @@ public class CXNetwork {
         return networkPermissions.allowed(deviceID, p);
     }
 
+    /**
+     * Whether a peer may perform an administrative action on THIS network.
+     *
+     * Authority comes from this network and only this network: its own NMI, its own
+     * backendSet, or an explicit permission granted on it. CXNET's backendSet confers nothing
+     * here, which matters because the scope check in NodeMesh.processNetworkInput authorises
+     * against CXNET and could otherwise be mistaken for the authority governing an
+     * administrative event aimed at a different network.
+     *
+     * Zero trust is honoured the way the other checks in this class honour it. Once zT is
+     * active the NMI loses its standing entirely, including the backendSet membership it holds
+     * by being the first backend, and must hold the permission like any other node. Other
+     * backends are unaffected, matching the existing scope of zT.
+     *
+     * @param permission action-specific permission name, for example Permission.BlockNode
+     */
+    public boolean checkAdministrativeAuthority(String deviceID, String permission) {
+        if (deviceID == null || permission == null) return false;
+
+        if (!(zT && isCurrentNMI(deviceID)) && configuration != null) {
+            if (deviceID.equals(configuration.nmiPub)) return true;
+            if (configuration.backendSet != null && configuration.backendSet.contains(deviceID)) return true;
+        }
+
+        // Delegated administration, and the only route left to the NMI once zT is active.
+        return checkNetworkPermission(deviceID, permission);
+    }
+
     public boolean checkNetworkPermission(String deviceID, String permission) {
         assert !permission.contains("-");
         assert !deviceID.contains("SYSTEM");

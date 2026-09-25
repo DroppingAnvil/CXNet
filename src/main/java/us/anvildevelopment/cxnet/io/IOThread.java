@@ -41,9 +41,16 @@ public class IOThread implements Runnable {
             }
             if (ioJob != null) {
                 try {
-                    processJob(ioJob, true);
-                    ioJob.success = true;
-                    ioJob.doAfter(true);
+                    // processJob catches its own exceptions, calls doAfter(false) and returns false,
+                    // so a failure almost never reaches the catch below. The result was discarded
+                    // and success forced to true, which ran doAfter a second time with the opposite
+                    // outcome after the failure hook had already run. On success the root job's
+                    // doAfter is this loop's responsibility, which is why processJob skips it when
+                    // root is true.
+                    if (processJob(ioJob, true)) {
+                        ioJob.success = true;
+                        ioJob.doAfter(true);
+                    }
                 } catch (Exception e) {
                     log.error("Unexpected error processing IO job", e);
                     ioJob.success = false;

@@ -66,6 +66,25 @@ public class HTTPBridgeProvider implements BridgeProvider {
     private static final ConcurrentHashMap<String, LinkedBlockingQueue<String>> pendingAppHTML
             = new ConcurrentHashMap<>();
 
+    /**
+     * Which app and peer each pending browser request was addressed to, keyed by the same sid as
+     * pendingAppHTML and maintained in the same places. Consulted by expectsAppResponse so an
+     * inbound APP_RESPONSE can be matched against a request this node actually sent, rather than
+     * being applied on the strength of its own payload.
+     */
+    private static final ConcurrentHashMap<String, String[]> pendingAppTargets
+            = new ConcurrentHashMap<>();
+
+    /**
+     * Whether the loopback bridge issued the request an APP_RESPONSE claims to answer. Static
+     * because the NodeMesh handler reaches it without a provider instance, matching deliverAppHTML.
+     */
+    public static boolean expectsAppResponse(String sid, String appID, String peerCXID) {
+        if (sid == null || appID == null || peerCXID == null) return false;
+        String[] want = pendingAppTargets.get(sid);
+        return want != null && appID.equals(want[0]) && peerCXID.equals(want[1]);
+    }
+
     // Driven from NodeConfig so the browser and in-process paths cannot disagree about how long a
     // caller waits. Read per call rather than captured, so changing the config takes effect without
     // a restart.
@@ -83,10 +102,27 @@ public class HTTPBridgeProvider implements BridgeProvider {
     private static class AppSession {
         final String appID;
         final String targetCXID;
+        final long   createdAt;
         AppSession(String appID, String targetCXID) {
             this.appID       = appID;
             this.targetCXID  = targetCXID;
+            this.createdAt   = System.currentTimeMillis();
         }
+    }
+
+    /**
+     * Drop expired sessions. Called on each AppServlet GET, so the map is bounded by the sessions
+     * opened within one TTL window rather than by the lifetime of the process. Previously nothing
+     * removed entries, unlike pendingAppHTML which is cleaned in a finally block.
+     *
+     * Swept lazily rather than on a timer: a session is only meaningful to a request that presents
+     * it, so there is nothing to reclaim between requests and no reason to hold a thread for it.
+     */
+    private static void sweepExpiredAppSessions() {
+        long ttl = us.anvildevelopment.cxnet.network.nodemesh.NodeConfig.appSessionTtlMs;
+        if (ttl <= 0) return;
+        long cutoff = System.currentTimeMillis() - ttl;
+        appSessions.entrySet().removeIf(e -> e.getValue().createdAt < cutoff);
     }
 
     // Response queues for synchronous HTTP handling (request ID -> response queue)
@@ -419,8 +455,18 @@ public class HTTPBridgeProvider implements BridgeProvider {
 
             if (connectX.getAppClient(appID) == null) { resp.sendError(404, "Unknown app: " + appID); return; }
 
-            if (addr != null && !addr.isEmpty()) registerPeerHint(cxid, addr);
+            // An addr hint is deliberately not applied to the peer directory. A browser request is
+            // not an authenticated source of peer identity, and every other import path verifies a
+            // signature before a node reaches the directory. This previously called addNode with a
+            // Node carrying only cxID and addr, which Node.validate rejects for having no
+            // publicKey, so nothing was ever stored; the call was a no-op that logged success.
+            // Left unapplied rather than made to work: honouring it for a known peer would let a
+            // loopback request repoint that peer's address.
+            if (addr != null && !addr.isEmpty()) {
+                log.debug("[CXApp] Ignoring addr hint {} for {}: peer identity must be verified", addr, cxid);
+            }
 
+            sweepExpiredAppSessions();
             String sessionToken = java.util.UUID.randomUUID().toString();
             appSessions.put(sessionToken, new AppSession(appID, cxid));
 
@@ -449,7 +495,18 @@ public class HTTPBridgeProvider implements BridgeProvider {
                 return;
             }
 
-            byte[] body = req.getInputStream().readAllBytes();
+            // Same cap and idiom as CXServlet.doPost above; this path had no limit at all.
+            int contentLength = req.getContentLength();
+            if (contentLength > us.anvildevelopment.cxnet.network.nodemesh.NodeConfig.IO_MAX_INPUT) {
+                resp.sendError(413, "Payload too large");
+                return;
+            }
+            byte[] body = req.getInputStream()
+                    .readNBytes(us.anvildevelopment.cxnet.network.nodemesh.NodeConfig.IO_MAX_INPUT + 1);
+            if (body.length > us.anvildevelopment.cxnet.network.nodemesh.NodeConfig.IO_MAX_INPUT) {
+                resp.sendError(413, "Payload too large");
+                return;
+            }
             us.anvildevelopment.cxnet.app.CXAppRequest appReq;
             try {
                 appReq = (us.anvildevelopment.cxnet.app.CXAppRequest)
@@ -471,6 +528,7 @@ public class HTTPBridgeProvider implements BridgeProvider {
             String sid = java.util.UUID.randomUUID().toString();
             LinkedBlockingQueue<String> queue = new LinkedBlockingQueue<>();
             pendingAppHTML.put(sid, queue);
+            pendingAppTargets.put(sid, new String[]{ appID, targetCXID });
             try {
                 us.anvildevelopment.cxnet.app.CXAppRequest appReq =
                         new us.anvildevelopment.cxnet.app.CXAppRequest(appID, op, target, args, true);
@@ -487,19 +545,7 @@ public class HTTPBridgeProvider implements BridgeProvider {
                 return null;
             } finally {
                 pendingAppHTML.remove(sid);
-            }
-        }
-
-        private void registerPeerHint(String cxid, String addr) {
-            try {
-                us.anvildevelopment.cxnet.network.nodemesh.Node hint =
-                        new us.anvildevelopment.cxnet.network.nodemesh.Node();
-                hint.cxID = cxid;
-                hint.addr = addr;
-                connectX.nodeMesh.peerDirectory.addNode(hint);
-                log.info("[CXApp] Registered peer hint: {} -> {}", cxid, addr);
-            } catch (Exception e) {
-                log.warn("[CXApp] Could not register peer hint for {}: {}", cxid, e.getMessage());
+                pendingAppTargets.remove(sid);
             }
         }
 

@@ -32,7 +32,13 @@ public class NodeConfig {
      * HTTPBridgeProvider, which is now driven from here so the browser and in-process paths cannot
      * disagree about how long a caller waits.
      */
-    public static Long appRequestTimeoutMs = 5000L;     // Log handlers slower than this; 0 disables
+    public static Long appRequestTimeoutMs = 5000L;
+    /**
+     * How long a browser CXApp session token stays valid, in milliseconds. Sessions were previously
+     * created on every AppServlet GET and never removed, so the map grew for the lifetime of the
+     * process. Expired entries are swept lazily on the next GET.
+     */
+    public static Long appSessionTtlMs = 3_600_000L;     // Log handlers slower than this; 0 disables
     public static Long IO_THREAD_SLEEP = 1L;
     public static Long ioSocketSleep = 1L;
     public static Integer ioWriteByteBuffer = 20048;

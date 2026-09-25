@@ -572,9 +572,16 @@ public class NodeMesh {
                         } else {
                             log.info("[NodeMesh] E2E Decryption validation failure, 005");
                             log.info(senderCXID);
-                            assert originPub != null;
-                            log.info(originPub.getPublicKey().toString());
-                            log.info(String.valueOf(o3.isVerifiedInlineSignedBy(originPub)));
+                            // assert is a no-op without -ea, so a null originPub threw an NPE out of
+                            // the next line and lost this diagnostic entirely. A missing cert is the
+                            // likely reason verification failed, so it is reported rather than
+                            // treated as impossible.
+                            if (originPub == null) {
+                                log.info("[NodeMesh] No cached public key for {}, cannot report signature detail", senderCXID);
+                            } else {
+                                log.info(originPub.getPublicKey().toString());
+                                log.info(String.valueOf(o3.isVerifiedInlineSignedBy(originPub)));
+                            }
                         }
                     } else {
                         log.info("[NodeMesh] Internal event data verification failure, rejecting event. 006");
@@ -767,6 +774,40 @@ public class NodeMesh {
         }
 
         connectX.eventQueue.add(ib);
+    }
+
+    /**
+     * Authorize an administrative event against the network it names in its own payload.
+     *
+     * These handlers previously applied their change with no authorization at all. Signature
+     * verification upstream establishes who sent the event but not what they may do, and the scope
+     * check in processNetworkInput authorizes only against CXNET and only when ne.p.scope is
+     * literally "CXNET" or "CX", which EventBuilder never sets. GRANT_PERMISSION was the sharpest
+     * case: it wrote the permission key that ConnectX.Event() checks before recording to a chain, so
+     * an unauthorized grant handed the sender durable write access to that chain.
+     *
+     * Authority is the target network's own, resolved from the payload's network field rather than
+     * from the transport, since the two are independent and both sender-supplied.
+     *
+     * @param senderCXID the event's origin rather than its transmitter, so a relayed administrative
+     *                   event issued by a legitimate authority is still honoured
+     */
+    private static boolean adminAuthorized(ConnectX connectX, String networkID, String senderCXID,
+                                           us.anvildevelopment.cxnet.Permission permission, String eventName) {
+        if (networkID == null || senderCXID == null) {
+            log.warn("[{}] Rejected: missing network or sender", eventName);
+            return false;
+        }
+        CXNetwork network = connectX.getNetwork(networkID);
+        if (network == null) {
+            log.info("[{}] Network not found: {}", eventName, networkID);
+            return false;
+        }
+        if (network.checkAdministrativeAuthority(senderCXID, permission.name())) return true;
+
+        log.warn("[{}] Rejected: {} has no {} authority on network {}",
+                eventName, senderCXID, permission.name(), networkID);
+        return false;
     }
 
     private static boolean isAuthorized(CXNetwork cxnet, NetworkContainer nc) {
@@ -1915,6 +1956,19 @@ public class NodeMesh {
                             NodeModeration blockData =
                                 (NodeModeration) ib.object;
 
+                            // Origin only, with no fallback to nc.iD. nc.iD is whoever handed us
+                            // the bytes, so falling back to it would authorize an administrative
+                            // event on the identity of a relaying peer rather than its author,
+                            // letting an attacker launder one through any authoritative relay.
+                            // oCXID is what the payload signature is verified against above, so
+                            // it is authenticated; a legitimate event always carries it because
+                            // EventBuilder sets it at build time.
+                            String adminSender = ne.p != null ? ne.p.oCXID : null;
+                            if (!adminAuthorized(connectX, blockData.network, adminSender,
+                                    us.anvildevelopment.cxnet.Permission.BlockNode, "BLOCK_NODE")) {
+                                handledLocally = true;
+                                break;
+                            }
                             log.info("[BLOCK_NODE] Blocking node " + blockData.nodeID + " on network " + blockData.network + " (reason: " + blockData.reason + ")");
 
                             if ("CXNET".equals(blockData.network)) {
@@ -1942,6 +1996,19 @@ public class NodeMesh {
                             NodeModeration unblockData =
                                 (NodeModeration) ib.object;
 
+                            // Origin only, with no fallback to nc.iD. nc.iD is whoever handed us
+                            // the bytes, so falling back to it would authorize an administrative
+                            // event on the identity of a relaying peer rather than its author,
+                            // letting an attacker launder one through any authoritative relay.
+                            // oCXID is what the payload signature is verified against above, so
+                            // it is authenticated; a legitimate event always carries it because
+                            // EventBuilder sets it at build time.
+                            String adminSender = ne.p != null ? ne.p.oCXID : null;
+                            if (!adminAuthorized(connectX, unblockData.network, adminSender,
+                                    us.anvildevelopment.cxnet.Permission.UnblockNode, "UNBLOCK_NODE")) {
+                                handledLocally = true;
+                                break;
+                            }
                             log.info("[UNBLOCK_NODE] Unblocking node {} from network {}", unblockData.nodeID, unblockData.network);
 
                             if ("CXNET".equals(unblockData.network)) {
@@ -1970,6 +2037,19 @@ public class NodeMesh {
                             NodeRegistration registerData =
                                 (NodeRegistration) ib.object;
 
+                            // Origin only, with no fallback to nc.iD. nc.iD is whoever handed us
+                            // the bytes, so falling back to it would authorize an administrative
+                            // event on the identity of a relaying peer rather than its author,
+                            // letting an attacker launder one through any authoritative relay.
+                            // oCXID is what the payload signature is verified against above, so
+                            // it is authenticated; a legitimate event always carries it because
+                            // EventBuilder sets it at build time.
+                            String adminSender = ne.p != null ? ne.p.oCXID : null;
+                            if (!adminAuthorized(connectX, registerData.network, adminSender,
+                                    us.anvildevelopment.cxnet.Permission.RegisterNode, "REGISTER_NODE")) {
+                                handledLocally = true;
+                                break;
+                            }
                             log.info("[REGISTER_NODE] Registering node " + registerData.nodeID + " to network " + registerData.network +
                                              " (approved by " + registerData.approver + ")");
 
@@ -1995,6 +2075,19 @@ public class NodeMesh {
                             PermissionChange grantData =
                                 (PermissionChange) ib.object;
 
+                            // Origin only, with no fallback to nc.iD. nc.iD is whoever handed us
+                            // the bytes, so falling back to it would authorize an administrative
+                            // event on the identity of a relaying peer rather than its author,
+                            // letting an attacker launder one through any authoritative relay.
+                            // oCXID is what the payload signature is verified against above, so
+                            // it is authenticated; a legitimate event always carries it because
+                            // EventBuilder sets it at build time.
+                            String adminSender = ne.p != null ? ne.p.oCXID : null;
+                            if (!adminAuthorized(connectX, grantData.network, adminSender,
+                                    us.anvildevelopment.cxnet.Permission.GrantPermission, "GRANT_PERMISSION")) {
+                                handledLocally = true;
+                                break;
+                            }
                             int priority = grantData.priority != null ? grantData.priority : 10;
                             log.info("[GRANT_PERMISSION] Granting {} permission to node {} on network {} chain {} (priority: {})", grantData.permission, grantData.nodeID, grantData.network, grantData.chain, priority);
 
@@ -2025,6 +2118,19 @@ public class NodeMesh {
                             PermissionChange revokeData =
                                 (PermissionChange) ib.object;
 
+                            // Origin only, with no fallback to nc.iD. nc.iD is whoever handed us
+                            // the bytes, so falling back to it would authorize an administrative
+                            // event on the identity of a relaying peer rather than its author,
+                            // letting an attacker launder one through any authoritative relay.
+                            // oCXID is what the payload signature is verified against above, so
+                            // it is authenticated; a legitimate event always carries it because
+                            // EventBuilder sets it at build time.
+                            String adminSender = ne.p != null ? ne.p.oCXID : null;
+                            if (!adminAuthorized(connectX, revokeData.network, adminSender,
+                                    us.anvildevelopment.cxnet.Permission.RevokePermission, "REVOKE_PERMISSION")) {
+                                handledLocally = true;
+                                break;
+                            }
                             log.info("[REVOKE_PERMISSION] Revoking {} permission from node {} on network {} chain {}", revokeData.permission, revokeData.nodeID, revokeData.network, revokeData.chain);
 
                             CXNetwork network = connectX.getNetwork(revokeData.network);
@@ -2066,13 +2172,22 @@ public class NodeMesh {
                             CXNetwork network = connectX.getNetwork(ztData.network);
                             if (network != null) {
                                 // Verify sender is NMI (first backend)
-                                boolean isNMI = network.configuration != null &&
+                                // Origin, not transmitter. This previously compared against nc.iD,
+                                // so an activation authored by anyone and relayed by the network's
+                                // first backend authorized on the relayer's identity. Zero trust is
+                                // irreversible, so that was the worst place to trust a forwarder.
+                                // The NMI-only rule is deliberately kept rather than widened to
+                                // checkAdministrativeAuthority: activation is the NMI's own act.
+                                String ztSender = ne.p != null ? ne.p.oCXID : null;
+                                boolean isNMI = ztSender != null &&
+                                               network.configuration != null &&
                                                network.configuration.backendSet != null &&
                                                !network.configuration.backendSet.isEmpty() &&
-                                               network.configuration.backendSet.get(0).equals(nc.iD);
+                                               network.configuration.backendSet.get(0).equals(ztSender);
 
                                 if (!isNMI) {
-                                    log.info("[ZERO_TRUST_ACTIVATION] Rejected: sender {} is not NMI", nc.iD.substring(0, 8));
+                                    log.info("[ZERO_TRUST_ACTIVATION] Rejected: origin {} is not NMI of {}",
+                                            ztSender, ztData.network);
                                     handledLocally = true;
                                     break;
                                 }
@@ -2453,8 +2568,21 @@ public class NodeMesh {
                             us.anvildevelopment.cxnet.app.CXAppClient appClient =
                                     connectX.getAppClient(appResp.appID);
 
+                            // Origin, not transmitter, so a relayed response from the peer that was
+                            // actually asked still matches. Same derivation as APP_REQUEST above.
+                            String responderCXID = (ne.p != null && ne.p.oCXID != null) ? ne.p.oCXID : nc.iD;
+
                             if (appClient == null) {
-                                log.warn("[CXApp] APP_RESPONSE for unknown app '{}' from {}", appResp.appID, nc.iD);
+                                log.warn("[CXApp] APP_RESPONSE for unknown app '{}' from {}", appResp.appID, responderCXID);
+                            } else if (!connectX.isExpectedAppResponse(ne.sid, appResp.appID, responderCXID)) {
+                                // Dropped before applyAndRender, which writes response values into
+                                // the client's fields. Without this the handler resolved the client
+                                // from the payload's own appID and applied it, so any reachable peer
+                                // could inject state into a registered CXAppClient with an
+                                // unsolicited response, or answer a request addressed to someone
+                                // else. Nothing is applied, completed or rendered.
+                                log.warn("[CXApp] Dropped unsolicited APP_RESPONSE for '{}' from {} (sid {})",
+                                        appResp.appID, responderCXID, ne.sid);
                             } else {
                                 String html = appClient.applyAndRender(appResp);
                                 log.info("[CXApp] APP_RESPONSE app='{}' success={} html={} chars",
@@ -2947,9 +3075,22 @@ public class NodeMesh {
 
                     java.io.ByteArrayInputStream verifyIn = new java.io.ByteArrayInputStream(blob);
                     java.io.ByteArrayOutputStream verifyOut = new java.io.ByteArrayOutputStream();
-                    connectX.encryptionProvider.verifyAndStrip(verifyIn, verifyOut, peer.cxID);
+                    boolean verified =
+                        connectX.encryptionProvider.verifyAndStrip(verifyIn, verifyOut, peer.cxID);
                     verifyIn.close();
                     verifyOut.close();
+
+                    // The result was previously discarded and addNode ran unconditionally, so a
+                    // blob whose signature did not verify was stored anyway. Every other
+                    // verifyAndStrip call site in this class gates on the boolean; this one did
+                    // not. Matters most for a cxID already in the cert cache: cacheKeyFromString
+                    // is putIfAbsent, so a blob claiming a known identity is checked against that
+                    // identity's real key, fails here, and was still added, overwriting a verified
+                    // peer record with an attacker-supplied one.
+                    if (!verified) {
+                        log.warn("[SEED CONSENSUS] Rejected peer blob for {} -- signature did not verify", peer.cxID);
+                        continue;
+                    }
 
                     peerDirectory.addNode(peer, blob, connectX.cxRoot);
                     peersAdded++;

@@ -26,7 +26,12 @@ public class JacksonProvider implements SerializationProvider {
         PolymorphicTypeValidator ptv = BasicPolymorphicTypeValidator.builder()
                 .allowIfSubType("us.anvildevelopment.cxnet.")
                 .allowIfSubType("us.anvildevelopment.util.tools.permissions.")
-                .allowIfSubType("us.anvildevelopment.")
+                // The bare "us.anvildevelopment." prefix was removed. It subsumed both entries
+                // above and widened the reachable set to the entire organisation namespace,
+                // including all of the Util dependency, which is a binary artifact outside this
+                // source tree. Every Util class this project actually serializes lives under
+                // tools.permissions, which is still allowed. A type outside these prefixes now
+                // fails to deserialize rather than being instantiated on a remote peer's say-so.
                 .allowIfSubType("java.util.")
                 .allowIfSubType("java.lang.")
                 .build();

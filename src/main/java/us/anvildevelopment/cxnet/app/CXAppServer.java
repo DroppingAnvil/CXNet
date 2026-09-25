@@ -89,13 +89,32 @@ public abstract class CXAppServer {
     // Framework internals
     // -------------------------------------------------------------------------
 
-    /** Called once by ConnectX.registerApp() to build reflection caches. */
+    /**
+     * Called once by ConnectX.registerApp() to build reflection caches.
+     *
+     * The whole class hierarchy is scanned, not only the concrete class, so a shared base app may
+     * declare {@code @CXAppField} and {@code @CXAppMethod} members that its subclasses inherit.
+     * getDeclaredFields and getDeclaredMethods see only what is declared on the class they are
+     * called on, and member annotations are never inherited, so walking the chain is the only way
+     * to reach them. Previously an inherited annotated member was simply absent from the cache, and
+     * because an unknown target answers FORBIDDEN it presented as a permission problem rather than
+     * as a missing field.
+     *
+     * The walk runs most-derived first and skips a name already cached, so an override or a
+     * shadowing field wins over the base declaration. CXAppServer itself is not scanned.
+     *
+     * Two consequences worth knowing. A subclass that overrides an annotated method without
+     * re-annotating it keeps the base annotation, and the cached base Method still dispatches
+     * virtually to the override, so the subclass body runs under the base permission. And a name
+     * declared at two levels resolves to one entry, because the cache is keyed by name alone.
+     */
     public final void buildCache() {
         this.appID = getAppID();
 
-        for (Field f : getClass().getDeclaredFields()) {
-            CXAppField ann = f.getAnnotation(CXAppField.class);
-            if (ann != null) {
+        for (Class<?> c = getClass(); c != null && c != CXAppServer.class; c = c.getSuperclass()) {
+            for (Field f : c.getDeclaredFields()) {
+                CXAppField ann = f.getAnnotation(CXAppField.class);
+                if (ann == null || fieldCache.containsKey(f.getName())) continue;
                 f.setAccessible(true);
                 CachedField cf = new CachedField();
                 cf.field      = f;
@@ -104,11 +123,10 @@ public abstract class CXAppServer {
                 cf.writable   = ann.writable();
                 fieldCache.put(f.getName(), cf);
             }
-        }
 
-        for (Method m : getClass().getDeclaredMethods()) {
-            CXAppMethod ann = m.getAnnotation(CXAppMethod.class);
-            if (ann != null) {
+            for (Method m : c.getDeclaredMethods()) {
+                CXAppMethod ann = m.getAnnotation(CXAppMethod.class);
+                if (ann == null || methodCache.containsKey(m.getName())) continue;
                 m.setAccessible(true);
                 CachedMethod cm = new CachedMethod();
                 cm.method     = m;
@@ -204,7 +222,17 @@ public abstract class CXAppServer {
         if (!checkPermission(cm.permission, senderCXID, dc))
             return refuse("INVOKE", senderCXID, dc, CXAppError.PERMISSION_DENIED, req.target);
 
-        Object[] coercedArgs = coerceArgs(req.args, cm.method.getParameterTypes());
+        Class<?>[] types = cm.method.getParameterTypes();
+        int argc = req.args == null ? 0 : req.args.length;
+        // Past this point the caller is permitted, so a malformed call may be reported plainly.
+        // Arity must match exactly. coerceArgs used to pad a short call with nulls, which turned a
+        // caller's mistake into either an IllegalArgumentException out of Method.invoke, reported as
+        // HANDLER_ERROR, or a null handed quietly to the method. Neither said what was wrong.
+        if (argc != types.length)
+            return CXAppResponse.fail(appID, CXAppError.MISSING_ARGUMENT,
+                    "'" + req.target + "' takes " + types.length + " argument(s), got " + argc);
+
+        Object[] coercedArgs = coerceArgs(req.args, types);
         Object returnVal = cm.method.invoke(this, coercedArgs);
 
         Map<String, String> result = new HashMap<>();
@@ -253,12 +281,14 @@ public abstract class CXAppServer {
     // Type coercion
     // -------------------------------------------------------------------------
 
+    /**
+     * Coerce an argument list whose length already matches {@code types}, which handleInvoke
+     * enforces before calling this. Nothing is padded or truncated: a mismatch is a caller error
+     * that has already been answered with MISSING_ARGUMENT, not something to paper over here.
+     */
     private Object[] coerceArgs(String[] args, Class<?>[] types) throws Exception {
-        if (types.length == 0) return new Object[0];
         Object[] out = new Object[types.length];
-        for (int i = 0; i < types.length; i++) {
-            out[i] = coerce(args != null && i < args.length ? args[i] : null, types[i]);
-        }
+        for (int i = 0; i < types.length; i++) out[i] = coerce(args[i], types[i]);
         return out;
     }
 

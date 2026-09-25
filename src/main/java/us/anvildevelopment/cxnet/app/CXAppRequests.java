@@ -51,24 +51,28 @@ public final class CXAppRequests {
     private static final class Pending {
         final CompletableFuture<CXAppResponse> future;
         final String appID;
+        /** Peer this request was addressed to. Only that peer may answer it; see expects(). */
+        final String targetCXID;
 
-        Pending(CompletableFuture<CXAppResponse> future, String appID) {
-            this.future = future;
-            this.appID  = appID;
+        Pending(CompletableFuture<CXAppResponse> future, String appID, String targetCXID) {
+            this.future     = future;
+            this.appID      = appID;
+            this.targetCXID = targetCXID;
         }
     }
 
     /**
      * Register a request awaiting its response.
      *
-     * @param sid   the event sid, which the responder echoes back
-     * @param appID the app being called, used to pick the lane the completion runs on
-     * @param ttlMs how long to wait before failing with {@link TimeoutException}
+     * @param sid        the event sid, which the responder echoes back
+     * @param appID      the app being called, used to pick the lane the completion runs on
+     * @param targetCXID the peer being asked; recorded so only that peer can answer
+     * @param ttlMs      how long to wait before failing with {@link TimeoutException}
      * @return a future completed with the response, or completed exceptionally on timeout
      */
-    public CompletableFuture<CXAppResponse> register(String sid, String appID, long ttlMs) {
+    public CompletableFuture<CXAppResponse> register(String sid, String appID, String targetCXID, long ttlMs) {
         CompletableFuture<CXAppResponse> f = new CompletableFuture<>();
-        pending.put(sid, new Pending(f, appID));
+        pending.put(sid, new Pending(f, appID, targetCXID));
         // Removal is attached before the timeout so it runs on either outcome. Without this the map
         // would retain an entry for every request that was never answered.
         f.whenComplete((r, t) -> pending.remove(sid));
@@ -97,6 +101,23 @@ public final class CXAppRequests {
             p.future.completeExceptionally(
                     new IllegalStateException("CXApp lane saturated, response discarded"));
         }
+    }
+
+    /**
+     * Whether this node actually issued the request a response claims to answer.
+     *
+     * All three must match a pending entry: the sid, the app named in the response payload, and
+     * the peer the request was sent to. Without this an APP_RESPONSE was applied on the strength
+     * of its own payload alone, so any reachable peer could send an unsolicited response naming a
+     * registered app and have applyAndRender write its values into that client's fields.
+     *
+     * @param peerCXID the response's origin, not its transmitter, so a relayed response from the
+     *                 peer that was asked still matches
+     */
+    public boolean expects(String sid, String appID, String peerCXID) {
+        if (sid == null || appID == null || peerCXID == null) return false;
+        Pending p = pending.get(sid);
+        return p != null && appID.equals(p.appID) && peerCXID.equals(p.targetCXID);
     }
 
     /** Number of requests currently awaiting a response. Diagnostics only. */

@@ -6,7 +6,7 @@
 
     <groupId>us.anvildevelopment</groupId>
     <artifactId>ConnectX</artifactId>
-    <version>0.6.2-SNAPSHOT</version>
+    <version>0.6.3-SNAPSHOT</version>
 
 
     <properties>

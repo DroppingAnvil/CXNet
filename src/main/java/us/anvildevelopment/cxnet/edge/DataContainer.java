@@ -287,9 +287,9 @@ public class DataContainer implements Serializable {
             // Add failed routes to the end (lowest priority)
             addresses.addAll(failedRoutes);
 
-            System.out.println("[Route Reprioritize] " + peerID.substring(0, 8) +
-                ": Moved " + failedRoutes.size() + " failed routes to end, " +
-                successfulAddress + " now prioritized");
+            org.slf4j.LoggerFactory.getLogger(DataContainer.class).info(
+                "[Route Reprioritize] {}: Moved {} failed routes to end, {} now prioritized",
+                peerID.substring(0, 8), failedRoutes.size(), successfulAddress);
         }
     }
 

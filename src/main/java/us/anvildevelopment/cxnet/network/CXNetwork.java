@@ -158,7 +158,7 @@ public class CXNetwork {
     public Integer getVariableNetworkPermission(String deviceID, String permission) {
         // Zero Trust Mode: Block NMI from using permissions
         if (zT && isCurrentNMI(deviceID)) {
-            System.out.println("[ZT-Blocked] NMI " + deviceID.substring(0, 8) + " blocked from variable permission: " + permission);
+            LoggerFactory.getLogger(CXNetwork.class).info("[ZT-Blocked] NMI {} blocked from variable permission: {}", deviceID.substring(0, 8), permission);
             return null;
         }
 

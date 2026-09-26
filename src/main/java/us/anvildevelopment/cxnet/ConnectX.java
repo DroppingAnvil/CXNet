@@ -222,7 +222,7 @@ public class ConnectX {
                 addBridgeProvider(httpBridge);
             } catch (Exception e) {
                 // Bridge registration failed - not critical for initialization
-                System.err.println("[ConnectX] Failed to register default HTTP bridge: " + e.getMessage());
+                log.error("[ConnectX] Failed to register default HTTP bridge: {}", e.getMessage());
             }
         }
         encryptionProvider = new PainlessCryptProvider(this);
@@ -1110,7 +1110,7 @@ public class ConnectX {
     public void registerHVPeer(Node node) {
         if (nodeMesh == null || node == null || node.cxID == null) return;
         if (isSelfNode(node)) {
-            System.err.println("[registerHVPeer] Rejected attempt to register self as HV peer");
+            log.warn("[registerHVPeer] Rejected attempt to register self as HV peer");
             return;
         }
         if (nodeMesh.peerDirectory.hv == null) {

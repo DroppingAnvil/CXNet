@@ -81,7 +81,7 @@ public class NetworkBlock implements Serializable {
             // Peek sender cxID
             String senderID = peekSenderID(signedBlob, connectX);
             if (senderID == null) {
-                System.err.println("[NetworkBlock] Failed to peek sender ID");
+                LoggerFactory.getLogger(NetworkBlock.class).warn("[NetworkBlock] Failed to peek sender ID");
                 return false;
             }
 
@@ -92,8 +92,8 @@ public class NetworkBlock implements Serializable {
             verifyStream.close();
 
             if (!verified) {
-                System.err.println("[NetworkBlock] Signature verification FAILED for " +
-                    (senderID.length() >= 8 ? senderID.substring(0, 8) : senderID));
+                LoggerFactory.getLogger(NetworkBlock.class).warn("[NetworkBlock] Signature verification FAILED for {}",
+                    senderID.length() >= 8 ? senderID.substring(0, 8) : senderID);
                 return false;
             }
 
@@ -102,7 +102,7 @@ public class NetworkBlock implements Serializable {
             NetworkEvent event = (NetworkEvent) ConnectX.deserialize("cxJSON1", verifiedJson, NetworkEvent.class);
 
             if (event == null) {
-                System.err.println("[NetworkBlock] Deserialization failed");
+                LoggerFactory.getLogger(NetworkBlock.class).warn("[NetworkBlock] Deserialization failed");
                 return false;
             }
 
@@ -112,7 +112,7 @@ public class NetworkBlock implements Serializable {
 
             return true;
         } catch (Exception e) {
-            System.err.println("[NetworkBlock] Error adding event: " + e.getMessage());
+            LoggerFactory.getLogger(NetworkBlock.class).error("[NetworkBlock] Error adding event: {}", e.getMessage());
             return false;
         }
     }

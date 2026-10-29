@@ -92,6 +92,49 @@ public class NodeConfig {
      */
     public static int maxSeenQd = 500;
 
+    /**
+     * Threads for endpoint verification probes. Dialing an advertised address blocks, so this
+     * never runs on the EventProcessor.
+     */
+    public static Integer endpointVerifyThreads = 2;
+
+    // Broadcast permissions.
+    /**
+     * Whether a failed broadcast or relay permission check actually drops the event.
+     *
+     * Defaults to false: CXN broadcast has been unrestricted fanout until now, and bootstrap
+     * traffic rides it, so enforcing default-deny on first run could leave a mesh that cannot
+     * bootstrap. With this off every decision that WOULD have dropped is logged instead
+     * (see broadcastPermissionAudit), which is what produces the real grant set from a live
+     * bootstrap run. Flip to true once that run is clean.
+     */
+    public static boolean enforceBroadcastPermissions = false;
+
+    /**
+     * Log every broadcast/relay permission decision that would have dropped an event.
+     *
+     * The log line carries the ORIGIN identity as well as the event type, because that pairing is
+     * what decides whether cosigned events are needed: an event type broadcast only by backends
+     * needs nothing further, whereas a legitimate non-backend author would.
+     */
+    public static boolean broadcastPermissionAudit = true;
+
+    // CXN broadcast fanout bounds.
+    /**
+     * Highest-priscore peers a CXN broadcast fans out to. Previously the fanout went to every
+     * entry in hv plus every entry in seen, in hash order, so a node holding a few hundred dead
+     * entries spent its whole send budget on them.
+     * Default: 12
+     */
+    public static int fanoutTopK = 12;
+    /**
+     * Extra peers drawn at random from outside the top K on each broadcast. Without these the
+     * target set is static, so a peer that never reaches the top K is never contacted and never
+     * earns a score that would get it there.
+     * Default: 3
+     */
+    public static int fanoutRandom = 3;
+
     // Peer discovery backoff schedule (persistence thread)
     /** Delay after the first discovery cycle (ms). Default: 30s */
     public static long peerDiscoveryBackoff1Ms = 30_000L;

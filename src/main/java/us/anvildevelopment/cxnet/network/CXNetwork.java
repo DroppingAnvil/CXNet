@@ -10,6 +10,7 @@ import us.anvildevelopment.cxnet.Configuration;
 import us.anvildevelopment.cxnet.ConnectX;
 import us.anvildevelopment.cxnet.State;
 import us.anvildevelopment.cxnet.edge.NetworkRecord;
+import us.anvildevelopment.util.tools.database.annotations.MemoryOnly;
 import us.anvildevelopment.util.tools.permissions.BasicPermissionContainer;
 
 public class CXNetwork {
@@ -158,13 +159,106 @@ public class CXNetwork {
     public Integer getVariableNetworkPermission(String deviceID, String permission) {
         // Zero Trust Mode: Block NMI from using permissions
         if (zT && isCurrentNMI(deviceID)) {
-            System.out.println("[ZT-Blocked] NMI " + deviceID.substring(0, 8) + " blocked from variable permission: " + permission);
+            LoggerFactory.getLogger(CXNetwork.class).info("[ZT-Blocked] NMI {} blocked from variable permission: {}", deviceID.substring(0, 8), permission);
             return null;
         }
 
         if (checkNetworkPermission(deviceID,permission)) {
             return networkPermissions.getEntryWeight(deviceID,permission);
         } else return null;
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Broadcast and relay permissions
+    // ---------------------------------------------------------------------------------------
+
+    /**
+     * Resolved permission cache, keyed "identity\u0000node".
+     *
+     * Resolution walks a handful of candidate keys per check and the relay path runs it on every
+     * inbound broadcast, so results are memoised. Cleared wholesale on any governance change --
+     * grant, revoke, seed application or zero-trust activation -- because a stale allow outlives
+     * a revocation, which is the one direction that must never happen.
+     */
+    @MemoryOnly
+    private java.util.concurrent.ConcurrentHashMap<String, Boolean> permissionCache;
+
+    /**
+     * Not final, and null-checked on every use: this class is deserialized when a network arrives
+     * in a seed, and a field initializer is not something to rely on across every deserialization
+     * path. v0.4.3 records a persisted object silently failing to load because Jackson picked up
+     * members it should not have.
+     */
+    private java.util.concurrent.ConcurrentHashMap<String, Boolean> cache() {
+        java.util.concurrent.ConcurrentHashMap<String, Boolean> c = permissionCache;
+        if (c == null) {
+            synchronized (this) {
+                c = permissionCache;
+                if (c == null) {
+                    c = new java.util.concurrent.ConcurrentHashMap<>();
+                    permissionCache = c;
+                }
+            }
+        }
+        return c;
+    }
+
+    /** Drop every memoised permission result. Call after any change to governance state. */
+    public void invalidatePermissionCache() {
+        java.util.concurrent.ConcurrentHashMap<String, Boolean> c = permissionCache;
+        if (c != null) c.clear();
+    }
+
+    private boolean cachedResolve(String identity, String node) {
+        if (identity == null || node == null) return false;
+        String key = identity + '\u0000' + node;
+        java.util.concurrent.ConcurrentHashMap<String, Boolean> c = cache();
+        Boolean hit = c.get(key);
+        if (hit != null) return hit;
+        boolean verdict = us.anvildevelopment.cxnet.network.permissions.PermissionResolver
+                .allowed(networkPermissions, identity, node);
+        c.put(key, verdict);
+        return verdict;
+    }
+
+    /** This network's scope string for permission nodes. */
+    private String scopeName() {
+        return configuration != null && configuration.netID != null ? configuration.netID : "CXNET";
+    }
+
+    /**
+     * May this identity originate a broadcast of this event type into this network's scope?
+     *
+     * Checked against the event's verified ORIGIN, never its transmitter. Authorizing authorship
+     * on the transmitter is the laundering bug the v0.6.2 administrative handlers were hardened
+     * against: an attacker's event relayed by any granted backend would pass.
+     */
+    public boolean checkBroadcastPermission(String originID, String eventType) {
+        if (originID == null) return false;
+        if (zT && isCurrentNMI(originID)) return false;
+        return cachedResolve(originID,
+                us.anvildevelopment.cxnet.network.permissions.PermissionResolver
+                        .node(scopeName(), "broadcast", eventType));
+    }
+
+    /**
+     * May this identity forward a broadcast it received?
+     *
+     * Checked against the authenticated TRANSMITTER, and deliberately a different permission from
+     * broadcast. One permission checked against one identity cannot work: against the origin, a
+     * backend relaying a new peer's event is dropped; against the transmitter, propagation dies at
+     * the second hop because the next relay holds no grant. Splitting them lets origination stay
+     * closed while forwarding stays open to members, with no identity ever being rewritten.
+     *
+     * Safe to grant broadly: a relay can only forward something already authorized at its origin,
+     * and the event dedup map bounds amplification. Revoking it for one identity is the lever for
+     * killing a misbehaving relay.
+     */
+    public boolean checkRelayPermission(String transmitterID, String eventType) {
+        if (transmitterID == null) return false;
+        return cachedResolve(transmitterID,
+                us.anvildevelopment.cxnet.network.permissions.PermissionResolver
+                        .node(scopeName(), "relay", eventType));
     }
 
     public CXNetwork() {}

@@ -108,12 +108,12 @@ public class OutConnectionController {
                 try {
                     log.info("[OutController] [LL] Direct transmit to {} ({} bytes)", out.n.addr, cryptNetworkContainer.length);
                     String[] addr = out.n.addr.split(":");
-                    Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
-                    java.io.OutputStream os = s.getOutputStream();
-                    os.write(cryptNetworkContainer);
-                    os.flush();
-                    Thread.sleep(500);
-                    s.close();
+                    try (Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
+                         java.io.OutputStream os = s.getOutputStream()) {
+                        os.write(cryptNetworkContainer);
+                        os.flush();
+                        Thread.sleep(500);
+                    }
                     log.info("[OutController] [LL] Direct transmit SUCCESS to {}", out.n.addr);
                 } catch (Exception e) {
                     log.info("[OutController] [LL] Direct transmit FAILED to {}: {}", out.n.addr, e.getMessage());
@@ -190,9 +190,9 @@ public class OutConnectionController {
                                 out.ne.p.cxID.substring(0, 8) + " via LAN-Direct: " + address);
 
                             String[] addr = address.split(":");
-                            Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
-                            s.getOutputStream().write(cryptNetworkContainer);
-                            s.close();
+                            try (Socket s = new Socket(addr[0], Integer.parseInt(addr[1]))) {
+                                s.getOutputStream().write(cryptNetworkContainer);
+                            }
                             sentViaAnyRoute = true;
                             routesUsed.append("LAN-Direct+");
                             log.info("[ROUTE-SUCCESS] " + out.ne.p.cxID.substring(0, 8) +
@@ -200,7 +200,7 @@ public class OutConnectionController {
 
                             // Deprioritize any failed routes that came before this successful one
                             if (routeAttempts > 1 && connectXAPI.dataContainer != null) {
-                                connectXAPI.dataContainer.deprioritizeFailedRoute(out.ne.p.cxID, address, routeAttempts - 1);
+                                connectXAPI.nodeMesh.peerDirectory.deprioritizeFailedRoute(out.ne.p.cxID, address, routeAttempts - 1);
                             }
 
                             break; // Success - stop trying
@@ -259,9 +259,9 @@ public class OutConnectionController {
                             Node n = connectXAPI.nodeMesh.peerDirectory.lookup(s, true, true);
                             if (n != null && n.addr != null) {
                                 String[] addr = n.addr.split(":");
-                                Socket so = new Socket(addr[0], Integer.parseInt(addr[1]));
-                                so.getOutputStream().write(cryptNetworkContainer);
-                                so.close();
+                                try (Socket so = new Socket(addr[0], Integer.parseInt(addr[1]))) {
+                                    so.getOutputStream().write(cryptNetworkContainer);
+                                }
                             }
                         } catch (Exception e) {
                             // Backend unavailable, continue
@@ -288,9 +288,9 @@ public class OutConnectionController {
                                         }
                                     } else {
                                         String[] addr = address.split(":");
-                                        Socket so = new Socket(addr[0], Integer.parseInt(addr[1]));
-                                        so.getOutputStream().write(cryptNetworkContainer);
-                                        so.close();
+                                        try (Socket so = new Socket(addr[0], Integer.parseInt(addr[1]))) {
+                                            so.getOutputStream().write(cryptNetworkContainer);
+                                        }
                                         log.debug("[CXN-Targeted] Delivered to {} via direct route", targetCxID.substring(0, 8));
                                         return;
                                     }
@@ -307,9 +307,14 @@ public class OutConnectionController {
                     int successfulPeers = 0;
                     int failedPeers = 0;
 
-                    java.util.List<Node> cxnPeers = new java.util.ArrayList<>(connectXAPI.nodeMesh.peerDirectory.hv.values());
-                    for (Node n : connectXAPI.nodeMesh.peerDirectory.seen.values()) {
-                        if (!connectXAPI.nodeMesh.peerDirectory.hv.containsKey(n.cxID)) cxnPeers.add(n);
+                    // Priscore-bounded fanout: the top K reachable peers plus a few random
+                    // others, rather than every entry in hash order. The random tail stops the
+                    // target set going static, which would leave a peer that never cracks the
+                    // top K never contacted and so never able to earn a score that gets it there.
+                    java.util.List<Node> cxnPeers = new java.util.ArrayList<>();
+                    for (PeerEntry pe : connectXAPI.nodeMesh.peerDirectory
+                            .fanoutTargets(NodeConfig.fanoutTopK, NodeConfig.fanoutRandom)) {
+                        if (pe.node != null) cxnPeers.add(pe.node);
                     }
                     for (Node n : cxnPeers) {
                         // Don't send to ourselves
@@ -345,15 +350,15 @@ public class OutConnectionController {
                                     } else {
                                         // Direct/LAN address (IP:port)
                                         String[] addr = address.split(":");
-                                        Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
-                                        s.getOutputStream().write(cryptNetworkContainer);
-                                        s.close();
+                                        try (Socket s = new Socket(addr[0], Integer.parseInt(addr[1]))) {
+                                            s.getOutputStream().write(cryptNetworkContainer);
+                                        }
                                         routes.append("LAN-Direct");
                                         sentToThisPeer = true;
 
                                         // Deprioritize any failed routes that came before this successful one
                                         if (routeAttempts > 1 && connectXAPI.dataContainer != null) {
-                                            connectXAPI.dataContainer.deprioritizeFailedRoute(n.cxID, address, routeAttempts - 1);
+                                            connectXAPI.nodeMesh.peerDirectory.deprioritizeFailedRoute(n.cxID, address, routeAttempts - 1);
                                         }
 
                                         break;  // Successfully sent, no need to try other routes
@@ -409,9 +414,9 @@ public class OutConnectionController {
                                     }
                                 } else {
                                     String[] addr = address.split(":");
-                                    java.net.Socket s = new java.net.Socket(addr[0], Integer.parseInt(addr[1]));
-                                    s.getOutputStream().write(cryptNetworkContainer);
-                                    s.close();
+                                    try (java.net.Socket s = new java.net.Socket(addr[0], Integer.parseInt(addr[1]))) {
+                                        s.getOutputStream().write(cryptNetworkContainer);
+                                    }
                                     sent = true;
                                     break;
                                 }
@@ -436,13 +441,13 @@ public class OutConnectionController {
             try {
                 log.info("[OutController] Attempting direct transmission to " + out.n.addr + " (" + cryptNetworkContainer.length + " bytes)");
                 String[] addr = out.n.addr.split(":");
-                Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
-                java.io.OutputStream os = s.getOutputStream();
-                os.write(cryptNetworkContainer);
-                os.flush();
-                // Wait for receiver to read data before closing (receiver timeout is 400ms)
-                Thread.sleep(500);
-                s.close();
+                try (Socket s = new Socket(addr[0], Integer.parseInt(addr[1]));
+                     java.io.OutputStream os = s.getOutputStream()) {
+                    os.write(cryptNetworkContainer);
+                    os.flush();
+                    // Wait for receiver to read data before closing (receiver timeout is 400ms)
+                    Thread.sleep(500);
+                }
                 log.info("[OutController] Direct transmission SUCCESS to " + out.n.addr);
             } catch (Exception e) {
                 // Failed to send (normal for discovery - host may not be ConnectX peer)

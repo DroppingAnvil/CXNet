@@ -11,6 +11,23 @@ import java.util.List;
 public class Configuration implements Serializable {
     public String SDF_FORMAT = "S-m-H-a-EEE-F-M-y";
     public String netID;
+
+    /**
+     * Whether ordinary members may originate broadcasts on this network.
+     *
+     * True by default, so a pure-p2p mesh (CXChat and the like) behaves exactly as the previous
+     * unrestricted fanout did, with multihop intact and no cosigning needed: DEFAULT_NODE is
+     * seeded with {@code <net>.broadcast.*} at creation. Set false for a restricted network, which
+     * then names its authorized identities explicitly.
+     *
+     * Ignored for CXNET, which is closed by default regardless -- only its backendSet and EPOCH
+     * hold the broadcast grant there. The closed-by-default rule applies to CXNET alone and does
+     * not leak into member networks.
+     *
+     * Per-network governance state, so it stays revocable afterwards through the ordinary
+     * GRANT_PERMISSION / REVOKE_PERMISSION path rather than being frozen at creation.
+     */
+    public boolean openBroadcast = true;
     public String nmiPub;
     /**
      * cxID of this network's Network Master Identity. Set explicitly at creation time

@@ -41,5 +41,30 @@ public enum Permission {
      * Typically NMI-only or designated administrators
      */
     RevokePermission,
+    /**
+     * Permission to originate a broadcast into a network's scope.
+     *
+     * Resolved hierarchically as {@code <network>.broadcast.<eventType>} rather than by this flat
+     * name, so a grant can cover one event type, a plugin namespace, or everything. Checked
+     * against an event's verified ORIGIN.
+     *
+     * CXNET is closed by default: only its backendSet and EPOCH hold it. Every other network
+     * grants it to DEFAULT_NODE by default, so member networks keep an open multihop mesh.
+     */
+    Broadcast,
+    /**
+     * Permission to forward a broadcast received from another peer.
+     *
+     * Resolved as {@code <network>.relay.<eventType>} and checked against the authenticated
+     * TRANSMITTER. Separate from Broadcast because origination and forwarding cannot be the same
+     * check without either dropping legitimate backend relays or dying at the second hop.
+     * Granted to DEFAULT_NODE by default, including on CXNET.
+     */
+    Relay,
+    /**
+     * Permission to grant or revoke broadcast and relay permissions.
+     * Typically NMI-only or designated administrators.
+     */
+    GrantBroadcast,
 
 }

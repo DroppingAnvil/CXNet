@@ -1,10 +1,81 @@
 # ConnectX (CX) Protocol Documentation
 
 **Version:** 0.4
-**Last Updated:** 2026-09-25 (CXApp: in-process calling API, handler dispatch off EventProcessor, error codes and failure disclosure, value encoding, inherited members, declared timeouts)
+**Last Updated:** 2026-10-29 (routing: scored peer directory, endpoint verification, backend map, broadcast and relay permissions)
 **Status:** Early Development. Core networking and event API are functional; many subsystems are incomplete or in progress.
 
 ---
+
+## Recent Updates (routing, peer selection, broadcast permissions)
+
+### Peer directory
+
+`PeerDirectory` is now a single store of `PeerEntry` keyed by cxID, each holding the peer's identity, its known addresses, retry state and endpoint health together. It replaces four overlapping `Map<String,Node>` fields (`seen`, `hv`, `lan`, `peerCache`) plus the separate address map that lived in `DataContainer`. `seen`, `lan` and `peerCache` survive as deprecated projections over the store and will be removed once their call sites migrate; they return snapshots, so a caller cannot mutate the directory through them.
+
+**Priscore** ranks peers, 0 to 6, computed on read:
+
+```
+priscore = 3/(retries + 1) + max(verifiedEndpoint ? 2 : 0, (localSubnet || userLinked) ? 3 : 0)
+```
+
+The availability term never reaches zero, so a long-dead peer still ranks above an unknown one, and a successful contact resets `retries`. The endpoint term is **tiered, not additive**: a local or user-linked peer scores 3 for it and so always outranks a remote peer with a verified endpoint, which scores 2. A peer that is both still scores 3.
+
+The store holds **100 peers**, evicting lowest priscore first with `lastSeen` as tiebreak. `userLinked` and `backendPinned` entries are exempt and do not count toward the cap.
+
+**User-linked peers** are peers the user explicitly binds (`linkPeer`/`unlinkPeer`). This is not local network discovery: they are never evicted and persist until the user removes them. Distinct from the local-subnet bonus, which any peer on an interface subnet earns but which does not exempt it from eviction.
+
+**Local subnet** membership is determined from the node's real interface addresses and prefix lengths, not RFC1918 ranges. CGNAT (100.64.0.0/10), loopback, point-to-point interfaces, `/32` host routes and tunnel-named interfaces are all excluded, so a VPN peer is not treated as local. Being local means cheap to reach, not trusted: a local peer still completes the nonce challenge.
+
+**CXN broadcast fanout** targets the top `fanoutTopK` peers by priscore plus `fanoutRandom` chosen from the remainder, rather than every known peer in hash order. The random tail prevents the target set going static.
+
+### Endpoint verification
+
+`ENDPOINT_CHALLENGE` carries a nonce to a peer's **advertised** tcp4 address or bridge specifically; `ENDPOINT_PROOF` returns the nonce signed. The endpoint earns its priscore bonus only if:
+
+1. the proof echoes the exact nonce issued,
+2. the signature verifies, and
+3. **the signer is the cxID that was being probed.**
+
+Condition 3 is not redundant. An advertised address may be held by a different real CX node, whose proof would verify correctly against its own key, so verifying only that the signature is valid accepts an impostor. The authenticated signer is `ne.p.oCXID`, which sits inside the signed event and is already verified before the handler runs. A completed TCP connect, an HTTP 200 from a bridge, or any reply at all proves nothing on its own.
+
+Nonces are single-use, bound to one `(cxID, address)` pair, and expire after 30 seconds, so a captured proof cannot be replayed and an address that has changed hands does not pass.
+
+**Endpoint health is separate from node health.** When an advertised endpoint fails, the bonus is dropped and `retries` is left untouched, so a dead bridge does not make a peer that is still reachable over a temp socket look dead. Re-verification is lazy: on failure in use, on re-advertisement of a different address, or after 15 minutes. Probes never run on the EventProcessor.
+
+Verification state is memory-only. `Node.addr` is `@MemoryOnly`, so advertised addresses do not survive a restart and a persisted verification flag would outlive the address it described.
+
+### Backend map
+
+Per-network preferred backends: up to 30 networks tracked LRU, each holding 0 to 3 backends chosen from the network's `backendSet` and ranked by priscore. Selected backends are pinned against eviction from the peer directory. This is a routing preference only -- `CXB` scope still fans out over the authoritative `backendSet`.
+
+### Broadcast and relay permissions
+
+Permission nodes are dotted and resolved hierarchically: `<network>.<action>.<eventType>`, for example `CXNET.broadcast.DIRECTORY_UPDATE`, `CXNET.relay.*`, `net1.broadcast.myplugin.SYNC`. Resolution tries candidates most-specific-first (`CXNET.broadcast.DIRECTORY_UPDATE`, `CXNET.broadcast.*`, `CXNET.*`, `*`), so the most specific match wins, an explicit deny beats a broader allow, and anything no grant mentions is denied. Unmatched identities fall back to `DEFAULT_NODE`. Plugin event types are namespaced by plugin ID, so a grant on one plugin's namespace does not reach another's.
+
+Grants live in each network's existing `networkPermissions` and sync in the seed; nothing about storage or distribution changed. Resolution is a matching layer over that container, which already provided explicit deny and default deny natively.
+
+**Two permissions, two identities.** Originating a broadcast and forwarding one are separate privileges:
+
+| node | checked against |
+|---|---|
+| `<net>.broadcast.<type>` | the event's verified **origin** (`ne.p.oCXID`) |
+| `<net>.relay.<type>` | the authenticated **transmitter** (`nc.iD`) |
+
+A single check cannot work. Against the origin alone, a backend relaying a new peer's event is refused. Against the transmitter alone, a broadcast dies at the second hop because the next relay holds no grant -- and authorizing authorship on the transmitter would let an attacker launder an event through any granted relay. Rewriting the origin to satisfy one check is impossible: the inner event is signed by the origin and verified against `oD`.
+
+Origin identity is read from `ne.p.oCXID`, inside the signed event where no relay can alter it, and cross-checked against the container's `oD`; a mismatch, or a missing `oD` on a broadcast, is refused rather than defaulted. There is no "relayed" flag: relaying is derivable as `oD != iD`, and a flag set by the relaying node would be attacker-controlled where that comparison is backed by the container signature.
+
+**Defaults.** CXNET is closed -- only its `backendSet`, NMI and EPOCH may originate broadcasts there. Every other network grants `<net>.broadcast.*` to `DEFAULT_NODE` (`Configuration.openBroadcast`, default true), so an open p2p mesh keeps unrestricted multihop broadcast. `<net>.relay.*` is granted to `DEFAULT_NODE` on every network including CXNET, which is what lets a broadcast propagate past its first hop; revoking it for one identity is how a misbehaving relay is stopped.
+
+**Enforcement is currently off** (`NodeConfig.enforceBroadcastPermissions = false`). Refusals are logged as `[BroadcastPerm] WOULD-DROP` with the origin identity and event type and nothing is dropped. Transport behaviour in this release is therefore identical to the previous one; the logging exists to establish the correct CXNET grant set before enforcement is enabled.
+
+**Old bootstraps will need updating before enforcement can be enabled.** The default grants are seeded by `createNetwork`, so they exist only for networks created by current code. A network received in a seed carries whatever `permissionSet` its original creator built, and a CXNET created before this change has no `broadcast` or `relay` entries at all -- so even EPOCH resolves as holding no relay grant. Enabling enforcement against such a seed would deny all CXNET transport, EPOCH's relays included. The migration is to add `CXNET.broadcast.*` for EPOCH and the backendSet and `CXNET.relay.*` for `DEFAULT_NODE`, by GRANT_PERMISSION from the NMI or by republishing the CXNET seed from current code. This is a future release; nothing is required of existing deployments today.
+
+**Cosigned events are coming in a following release.** A cosigned event will be able to **use the cosigner's transport permissions**: authorship stays with the origin, which signs the inner event as now, while a cosigner that holds `broadcast` lends the event its own standing, resolving as "origin holds broadcast, or a verified cosigner does". The cosignature is carried in sibling `NetworkContainer` fields over `nc.e` rather than as an extra wrapping layer, so inner-event verification is unchanged, and because scope, network and event ID are already inside the signed payload the cosignature is bound to one scope and one event with no further work. This is needed because ordinary members legitimately originate CXNET-scoped broadcasts -- `MESSAGE`, `PeerFinding` and `NewNode` were all observed doing so -- and a backend cannot re-originate a member's own `MESSAGE` without misattributing authorship.
+
+### Event deduplication
+
+Dedup entries are evicted in true arrival order. They are deliberately **not** refreshed when a duplicate arrives: refreshing would let a flood keep its own event IDs resident indefinitely by continuing to resend them. The dedup map remains the only loop protection; hop-limit/TTL is not implemented, because a hop count set by the origin bounds nothing against a hostile sender. A time-based bound, with the timestamp inside the signed event, is deferred to CXPath.
 
 ## Recent Updates (CXApp system)
 

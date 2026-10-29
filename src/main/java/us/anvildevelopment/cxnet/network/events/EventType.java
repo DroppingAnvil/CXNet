@@ -39,6 +39,25 @@ public enum EventType {
      */
     CXHELLO_RESPONSE(30_000, 8_192, 3),
     /**
+     * Endpoint verification challenge: a random nonce sent to a peer's ADVERTISED tcp4 address or
+     * bridge specifically, to establish that the advertised endpoint really reaches that peer.
+     *
+     * Not folded into CXHELLO: its 30s/3 budget and discovery semantics conflict with on-demand
+     * verification, which happens when an endpoint is first advertised, when it is re-advertised
+     * differently, or after it fails in use.
+     */
+    ENDPOINT_CHALLENGE(10_000, 2_048, 10),
+    /**
+     * Response to ENDPOINT_CHALLENGE: the nonce, signed.
+     *
+     * Acceptance is an IDENTITY check, not a reachability check. A completed TCP connect, an HTTP
+     * 200 from a bridge, or any well-formed reply proves nothing. The endpoint earns its score
+     * bonus only if the proof echoes the exact nonce, the signature verifies, AND the signer is
+     * the cxID that was being probed -- an advertised address may be held by a different real CX
+     * node whose proof would verify perfectly well against its own key.
+     */
+    ENDPOINT_PROOF(10_000, 4_096, 10),
+    /**
      * Internal Messaging
      */
     MESSAGE(300_000, 1_048_576, 50),

@@ -200,7 +200,7 @@ public class OutConnectionController {
 
                             // Deprioritize any failed routes that came before this successful one
                             if (routeAttempts > 1 && connectXAPI.dataContainer != null) {
-                                connectXAPI.dataContainer.deprioritizeFailedRoute(out.ne.p.cxID, address, routeAttempts - 1);
+                                connectXAPI.nodeMesh.peerDirectory.deprioritizeFailedRoute(out.ne.p.cxID, address, routeAttempts - 1);
                             }
 
                             break; // Success - stop trying
@@ -307,9 +307,14 @@ public class OutConnectionController {
                     int successfulPeers = 0;
                     int failedPeers = 0;
 
-                    java.util.List<Node> cxnPeers = new java.util.ArrayList<>(connectXAPI.nodeMesh.peerDirectory.hv.values());
-                    for (Node n : connectXAPI.nodeMesh.peerDirectory.seen.values()) {
-                        if (!connectXAPI.nodeMesh.peerDirectory.hv.containsKey(n.cxID)) cxnPeers.add(n);
+                    // Priscore-bounded fanout: the top K reachable peers plus a few random
+                    // others, rather than every entry in hash order. The random tail stops the
+                    // target set going static, which would leave a peer that never cracks the
+                    // top K never contacted and so never able to earn a score that gets it there.
+                    java.util.List<Node> cxnPeers = new java.util.ArrayList<>();
+                    for (PeerEntry pe : connectXAPI.nodeMesh.peerDirectory
+                            .fanoutTargets(NodeConfig.fanoutTopK, NodeConfig.fanoutRandom)) {
+                        if (pe.node != null) cxnPeers.add(pe.node);
                     }
                     for (Node n : cxnPeers) {
                         // Don't send to ourselves
@@ -353,7 +358,7 @@ public class OutConnectionController {
 
                                         // Deprioritize any failed routes that came before this successful one
                                         if (routeAttempts > 1 && connectXAPI.dataContainer != null) {
-                                            connectXAPI.dataContainer.deprioritizeFailedRoute(n.cxID, address, routeAttempts - 1);
+                                            connectXAPI.nodeMesh.peerDirectory.deprioritizeFailedRoute(n.cxID, address, routeAttempts - 1);
                                         }
 
                                         break;  // Successfully sent, no need to try other routes

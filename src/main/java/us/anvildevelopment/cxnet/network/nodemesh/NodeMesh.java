@@ -47,11 +47,39 @@ public class NodeMesh {
     // Instance fields (per-peer)
     public ServerSocket serverSocket;
     public ConcurrentHashMap<String, Set<String>> transmissionIDMap = new ConcurrentHashMap<>();
+
+    /**
+     * Arrival order of the event IDs in {@link #transmissionIDMap}, so eviction is oldest-first.
+     * A ConcurrentHashMap keySet iterates in hash order, which is not arrival order, so the
+     * previous "simple FIFO cleanup" evicted unpredictably.
+     */
+    private final java.util.concurrent.ConcurrentLinkedQueue<String> transmissionOrder =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    /** Event IDs retained for duplicate detection before eviction begins. */
+    private static final int TRANSMISSION_ID_MAX = 10000;
+
+    /** Event IDs dropped per eviction pass. */
+    private static final int TRANSMISSION_ID_EVICT = 1000;
     /** Tracks qd values already processed; drops duplicate CXB fan-out copies after the first. */
     private final ConcurrentHashMap<String, Long> seenQd = new ConcurrentHashMap<>();
     /** Guards against two IOThreads concurrently importing the same unknown peer (NewNode/CXHELLO). */
     private final ConcurrentHashMap<String, Boolean> inFlightImports = new ConcurrentHashMap<>();
     public PeerDirectory peerDirectory = null;
+
+    /**
+     * Preferred backend nodes per network. A routing preference recomputed from live
+     * reachability, not a membership list -- CXB scope still fans out over the authoritative
+     * configuration.backendSet.
+     */
+    public BackendMap backendMap = null;
+
+    /**
+     * Proves advertised endpoints really reach the peer that advertised them. Runs its own pool:
+     * dialing a socket from the EventProcessor is the failure mode CXAppDispatcher was added to
+     * fix in v0.6.2.
+     */
+    public EndpointVerifier endpointVerifier = null;
     public InConnectionManager in;
     public Connections connections = new Connections();
     public ConnectX connectX;
@@ -73,6 +101,8 @@ public class NodeMesh {
     public NodeMesh(ConnectX connectX) {
         this.connectX = connectX;
         this.peerDirectory = new PeerDirectory(connectX);
+        this.backendMap = new BackendMap(this.peerDirectory);
+        this.endpointVerifier = new EndpointVerifier(this.peerDirectory, NodeConfig.endpointVerifyThreads);
     }
 
     /**
@@ -652,20 +682,36 @@ public class NodeMesh {
             if (socket != null) socket.close();
             return; // Duplicate event - drop silently
         } else {
-            // First time seeing this event - already recorded via putIfAbsent above
+            // First time seeing this event. Record its insertion order so the eviction below is
+            // genuinely oldest-first.
+            //
+            // The previous cleanup called itself "simple FIFO" but iterated a ConcurrentHashMap
+            // keySet, whose order is a function of hash and table layout, not arrival. It could
+            // therefore evict an ID seen moments ago while keeping one far older, letting a
+            // just-dropped event be reprocessed and relayed again. Insertion order is tracked
+            // explicitly instead.
+            //
+            // Entries are NOT refreshed on a duplicate hit (see the branch above, which only
+            // records the extra transmitter): refreshing would let a flood keep its own IDs alive
+            // indefinitely by continuing to resend them.
+            transmissionOrder.add(ne.iD);
 
-            // Cleanup old entries to prevent unbounded memory growth
-            // Keep last 10000 event IDs
-            if (transmissionIDMap.size() > 10000) {
-                // Remove oldest 1000 entries (simple FIFO cleanup)
-                Iterator<String> iterator = transmissionIDMap.keySet().iterator();
-                int removeCount = 1000;
-                while (iterator.hasNext() && removeCount > 0) {
-                    iterator.next();
-                    iterator.remove();
+            if (transmissionIDMap.size() > TRANSMISSION_ID_MAX) {
+                int removeCount = TRANSMISSION_ID_EVICT;
+                String oldest;
+                while (removeCount > 0 && (oldest = transmissionOrder.poll()) != null) {
+                    transmissionIDMap.remove(oldest);
                     removeCount--;
                 }
             }
+        }
+
+        // BROADCAST PERMISSIONS: may this origin inject a broadcast into this scope, and may this
+        // transmitter forward it? Evaluated on verified data (container signature at :278, inner
+        // event signature at :542, both already done by this point).
+        if (!broadcastPermitted(nc, ne)) {
+            if (socket != null) socket.close();
+            return;
         }
 
         // QD DEDUPLICATION: Drop duplicate copies from CXB fan-out
@@ -707,7 +753,7 @@ public class NodeMesh {
         // This enables multi-path routing (bridge + direct + LAN)
         if (nc.iD != null && socketAddress != null && socketPort > 0) {
             String peerAddress = socketAddress + ":" + socketPort;
-            connectX.dataContainer.recordLocalPeer(nc.iD, peerAddress, false); // Fallback: socket remote port (ephemeral)
+            peerDirectory.recordLocalPeer(nc.iD, peerAddress, false); // Fallback: socket remote port (ephemeral)
         }
 
         // For CXHELLO events, also record the LISTENING port from payload with priority
@@ -755,14 +801,17 @@ public class NodeMesh {
                     // 1. Record socket-based address (socket IP + listening port from payload)
                     if (socketAddress != null && requestPort > 0) {
                         String socketBasedAddress = socketAddress + ":" + requestPort;
-                        connectX.dataContainer.recordLocalPeer(requestPeerID, socketBasedAddress, true);
+                        peerDirectory.recordLocalPeer(requestPeerID, socketBasedAddress, true);
                         log.info("[processNetworkInput] " + et.name() + ": Recorded socket-based address " +
                                 socketBasedAddress + " for " + requestPeerID.substring(0, 8));
                     }
 
                     // 2. Record peer-provided address (HIGHEST priority - will be at index 0)
                     if (peerProvidedAddress != null && !peerProvidedAddress.isEmpty()) {
-                        connectX.dataContainer.recordLocalPeer(requestPeerID, peerProvidedAddress, true);
+                        peerDirectory.recordLocalPeer(requestPeerID, peerProvidedAddress, true);
+                        // A peer-provided address is a claim. Probe it so the +2 is only awarded
+                        // to an endpoint that actually answers as this identity.
+                        challengeEndpoint(requestPeerID, peerProvidedAddress);
                         log.info("[processNetworkInput] " + et.name() + ": Recorded PEER-PROVIDED address (highest priority) " +
                                 peerProvidedAddress + " for " + requestPeerID.substring(0, 8));
                     }
@@ -1323,8 +1372,10 @@ public class NodeMesh {
                                     response.network = requestedNetwork;
                                     response.signedNodes = new ArrayList<>();
 
-                                    // Collect peers from PeerDirectory
-                                    List<String> peerIDs = new ArrayList<>(peerDirectory.hv.keySet());
+                                    // Collect peers from PeerDirectory. The whole directory, not
+                                    // just the backbone: getSignedNode() below filters to those
+                                    // we can actually re-share.
+                                    List<String> peerIDs = peerDirectory.allCXIDs();
                                     Collections.shuffle(peerIDs); // Randomize
 
                                     int count = 0;
@@ -1482,6 +1533,70 @@ public class NodeMesh {
                         }
                         handledLocally = true;
                         break;
+                    case ENDPOINT_CHALLENGE:
+                        // Someone is validating an address they believe reaches us. Echo the
+                        // nonce and the address under test, signed. Cheap and stateless: the
+                        // challenger holds all the state, and a reply proves nothing on its own
+                        // -- it is the signature plus the identity behind it that counts.
+                        try {
+                            ib.readyObject(EndpointChallenge.class, ib.nc.se, connectX);
+                            if (ib.object == null) {
+                                log.debug("[ENDPOINT_CHALLENGE] Unreadable challenge from {}", nc.iD);
+                                handledLocally = true;
+                                break;
+                            }
+                            EndpointChallenge challenge = (EndpointChallenge) ib.object;
+                            if (challenge.nonce == null) {
+                                handledLocally = true;
+                                break;
+                            }
+
+                            EndpointChallenge proof = new EndpointChallenge(
+                                    challenge.nonce, challenge.address, challenge.target);
+                            proof.responder = connectX.getOwnID();
+                            proof.issuedAt = challenge.issuedAt;
+
+                            connectX.buildEvent(EventType.ENDPOINT_PROOF,
+                                            ConnectX.serialize("cxJSON1", proof).getBytes(StandardCharsets.UTF_8))
+                                    .withSid(ib.ne.sid)
+                                    .toPeer(ib.nc.iD)
+                                    .signData()
+                                    .queue();
+                            log.debug("[ENDPOINT_CHALLENGE] Answered {} for address {}",
+                                    nc.iD, challenge.address);
+                        } catch (Exception e) {
+                            log.debug("[ENDPOINT_CHALLENGE] Failed to answer: {}", e.getMessage());
+                        }
+                        handledLocally = true;
+                        break;
+
+                    case ENDPOINT_PROOF:
+                        // Resolve a challenge we issued.
+                        //
+                        // The authenticated signer is ne.p.oCXID: the event's data payload was
+                        // verified against it at :530 before this handler ran, and oCXID lives
+                        // inside the signed event so a relay cannot alter it. Passing it as the
+                        // actual signer is what makes the identity check real -- resolve()
+                        // requires it to equal the cxID that was probed, so a valid proof from a
+                        // different real node holding that address is refused.
+                        try {
+                            ib.readyObject(EndpointChallenge.class, ib.nc.se, connectX);
+                            if (ib.object == null) {
+                                log.debug("[ENDPOINT_PROOF] Unreadable proof from {}", nc.iD);
+                                handledLocally = true;
+                                break;
+                            }
+                            EndpointChallenge proof = (EndpointChallenge) ib.object;
+                            String authenticatedSigner = ib.ne.p != null ? ib.ne.p.oCXID : null;
+                            if (endpointVerifier != null) {
+                                endpointVerifier.resolve(proof.nonce, proof.responder, authenticatedSigner);
+                            }
+                        } catch (Exception e) {
+                            log.debug("[ENDPOINT_PROOF] Failed to resolve: {}", e.getMessage());
+                        }
+                        handledLocally = true;
+                        break;
+
                     case SEED_REQUEST:
                         log.info("[" + connectX.getOwnID() + "] Seed request received from " + nc.iD);
                         try {
@@ -2099,6 +2214,7 @@ public class NodeMesh {
                                 Map<String, Entry> nodePerms =
                                     network.networkPermissions.permissionSet.computeIfAbsent(grantData.nodeID, k -> new HashMap<>());
                                 nodePerms.put(permKey, entry);
+                                network.invalidatePermissionCache();
                                 log.info("[GRANT_PERMISSION] Permission granted successfully");
                             } else {
                                 log.info("[GRANT_PERMISSION] Network not found: {}", grantData.network);
@@ -2143,6 +2259,10 @@ public class NodeMesh {
                                     if (nodePerms.isEmpty()) {
                                         network.networkPermissions.permissionSet.remove(revokeData.nodeID);
                                     }
+                                    // Before logging success: a stale cached allow would outlive
+                                    // the revocation, which is the one direction that must never
+                                    // happen.
+                                    network.invalidatePermissionCache();
                                     log.info("[REVOKE_PERMISSION] Permission revoked successfully");
                                 } else {
                                     log.info("[REVOKE_PERMISSION] Node had no permissions to revoke");
@@ -2201,6 +2321,9 @@ public class NodeMesh {
 
                                 // Activate zero trust mode
                                 network.zT = true;
+                                // zT demotes the NMI, so any permission resolved before now may
+                                // have been decided on standing the NMI no longer has.
+                                network.invalidatePermissionCache();
                                 log.info("[ZERO_TRUST_ACTIVATION] Set network.zT = true");
                                 log.info("[ZERO_TRUST_ACTIVATION] Seed zT flag: " + ztData.zT);
 
@@ -2252,11 +2375,9 @@ public class NodeMesh {
                             // Record this request for rate limiting
                             recordPeerRequest(requesterIP);
 
-                            // Collect all known peers from PeerDirectory
-                            List<Node> allPeers = new ArrayList<>();
-                            if (peerDirectory.hv != null) allPeers.addAll(peerDirectory.hv.values());
-                            if (peerDirectory.seen != null) allPeers.addAll(peerDirectory.seen.values());
-                            if (peerDirectory.peerCache != null) allPeers.addAll(peerDirectory.peerCache.values());
+                            // Collect all known peers from PeerDirectory. One store now, so no
+                            // union of overlapping maps and no duplicates inflating the count.
+                            List<Node> allPeers = new ArrayList<>(peerDirectory.allNodes());
 
                             // Get peer count (30% of known peers or max 10)
                             int knownPeerCount = allPeers.size();
@@ -2728,7 +2849,7 @@ public class NodeMesh {
             }
 
             // Distribute to all peers for eventual delivery
-            for (Node peer : peerDirectory.hv.values()) {
+            for (Node peer : peerDirectory.allNodes()) {
                 if (!peer.cxID.equals(connectX.getOwnID()) && !peer.cxID.equals(transmitterID)) {
                     try {
                         NetworkContainer relayContainer = new NetworkContainer();
@@ -2749,9 +2870,8 @@ public class NodeMesh {
 
         // Step 4c: Handle peerBroad mode - global cross-network transmission
         if (tP.peerBroad) {
-            //log.info("[RELAY DEBUG] peerBroad=true, broadcasting to " + peerDirectory.hv.size() + " peers");
             // Broadcast to all peers across all networks
-            for (Node peer : peerDirectory.hv.values()) {
+            for (Node peer : peerDirectory.allNodes()) {
                 if (!peer.cxID.equals(connectX.getOwnID()) && !peer.cxID.equals(transmitterID)) {
                     try {
                         NetworkContainer relayContainer = new NetworkContainer();
@@ -2807,8 +2927,7 @@ public class NodeMesh {
                 }
 
                 // Then send to all other peers (not already sent to)
-                // Try hv peers first (high-value/stored), then seen (real-time active connections)
-                for (Node peer : peerDirectory.hv.values()) {
+                for (Node peer : peerDirectory.allNodes()) {
                     if (!peer.cxID.equals(connectX.getOwnID()) &&
                         !peer.cxID.equals(transmitterID) &&
                         !sentTo.contains(peer.cxID)) {
@@ -2828,58 +2947,39 @@ public class NodeMesh {
                     }
                 }
 
-                // Also try seen peers (may have additional real-time connections not in hv)
-                for (Node peer : peerDirectory.seen.values()) {
-                    if (!peer.cxID.equals(connectX.getOwnID()) &&
-                        !peer.cxID.equals(transmitterID) &&
-                        !sentTo.contains(peer.cxID)) {
-                        try {
-                            NetworkContainer relayContainer = new NetworkContainer();
-                            relayContainer.se = "cxJSON1";
-                            relayContainer.s = false;
-                            relayContainer.tP = tP; // Preserve TransmitPref
-                            relayContainer.oD = nc.oD; // Preserve original sender
-                            // Use signedEventBytes to preserve original NetworkEvent signature
-                            OutputBundle relayBundle = new OutputBundle(ne, null, null, signedEventBytes, relayContainer);
-                            connectX.queueEvent(relayBundle);
-                            sentTo.add(peer.cxID);
-                        } catch (Exception e) {
-                            log.error("An error has occurred inside NodeMesh", e);
+                // Then any remaining peer in the directory, including ones known only by address
+                // with no imported identity yet -- those used to live in DataContainer and needed
+                // a third pass of their own. One store, so one pass; sentTo still dedupes.
+                for (String peerID : peerDirectory.allCXIDs()) {
+                    if (peerID.equals(connectX.getOwnID()) ||
+                        peerID.equals(transmitterID) ||
+                        sentTo.contains(peerID)) continue;
+                    try {
+                        NetworkContainer relayContainer = new NetworkContainer();
+                        relayContainer.se = "cxJSON1";
+                        relayContainer.s = false;
+                        relayContainer.tP = tP; // Preserve TransmitPref
+                        relayContainer.oD = nc.oD; // Preserve original sender
+
+                        // For an address-only peer, carry the address on a temporary Node so the
+                        // output path has somewhere to send it.
+                        Node target = peerDirectory.node(peerID);
+                        if (target == null) {
+                            List<String> addresses = peerDirectory.getLocalPeerAddresses(peerID);
+                            if (addresses.isEmpty()) continue;
+                            target = new Node();
+                            target.cxID = peerID;
+                            target.addr = addresses.get(0);
+                        } else {
+                            target = null; // identity known: let the output path resolve routes
                         }
-                    }
-                }
 
-                // CRITICAL: Also check DataContainer for locally discovered peers
-                // These peers may not be in peerDirectory.hv/seen yet, but are locally reachable via LAN
-                if (connectX.dataContainer != null && connectX.dataContainer.localPeerAddresses != null) {
-                    for (String peerID : connectX.dataContainer.localPeerAddresses.keySet()) {
-                        if (!peerID.equals(connectX.getOwnID()) &&
-                            !peerID.equals(transmitterID) &&
-                            !sentTo.contains(peerID)) {
-                            try {
-                                // Try to relay to this LAN peer
-                                NetworkContainer relayContainer = new NetworkContainer();
-                                relayContainer.se = "cxJSON1";
-                                relayContainer.s = false;
-                                relayContainer.tP = tP; // Preserve TransmitPref
-                                relayContainer.oD = nc.oD; // Preserve original sender
-
-                                // Create temporary node with LAN address for transmission
-                                Node tempPeer = new Node();
-                                tempPeer.cxID = peerID;
-                                List<String> addresses = connectX.dataContainer.getLocalPeerAddresses(peerID);
-                                if (!addresses.isEmpty()) {
-                                    tempPeer.addr = addresses.get(0); // Use first known LAN address
-                                }
-
-                                // Use signedEventBytes to preserve original NetworkEvent signature
-                                OutputBundle relayBundle = new OutputBundle(ne, tempPeer, null, signedEventBytes, relayContainer);
-                                connectX.queueEvent(relayBundle);
-                                sentTo.add(peerID);
-                            } catch (Exception e) {
-                                log.error("An error has occurred inside NodeMesh", e);
-                            }
-                        }
+                        // Use signedEventBytes to preserve original NetworkEvent signature
+                        OutputBundle relayBundle = new OutputBundle(ne, target, null, signedEventBytes, relayContainer);
+                        connectX.queueEvent(relayBundle);
+                        sentTo.add(peerID);
+                    } catch (Exception e) {
+                        log.error("An error has occurred inside NodeMesh", e);
                     }
                 }
 
@@ -2898,6 +2998,130 @@ public class NodeMesh {
 
         return handledLocally;
     }
+    /**
+     * Issue an endpoint challenge for an advertised address, if one is due.
+     *
+     * The challenge is queued as an ordinary CXS event to the peer. It deliberately does NOT
+     * fan out over every known route: the point is to establish that this specific advertised
+     * address reaches this specific identity, so a proof arriving by some other path would prove
+     * the wrong thing. Dispatch stays off the mesh threads via the verifier's own pool.
+     */
+    public void challengeEndpoint(String cxID, String address) {
+        if (endpointVerifier == null || cxID == null || address == null) return;
+        if (cxID.equals(connectX.getOwnID())) return;
+
+        String nonce = endpointVerifier.issue(cxID, address);
+        if (nonce == null) return; // already verified, in flight, or nothing to test
+
+        final String target = cxID;
+        final String addr = address;
+        endpointVerifier.submit(() -> {
+            try {
+                EndpointChallenge challenge = new EndpointChallenge(nonce, addr, target);
+                connectX.buildEvent(EventType.ENDPOINT_CHALLENGE,
+                                ConnectX.serialize("cxJSON1", challenge).getBytes(StandardCharsets.UTF_8))
+                        .toPeer(target)
+                        .signData()
+                        .queue();
+            } catch (Exception e) {
+                log.debug("[EndpointVerifier] Could not send challenge to {}: {}", target, e.getMessage());
+                endpointVerifier.fail(target);
+            }
+        });
+    }
+
+    /**
+     * Whether a CXN broadcast may be accepted, relayed and recorded.
+     *
+     * Two checks against two different permission nodes, because one check cannot work. Against
+     * the origin alone, a backend relaying a new peer's event is dropped. Against the transmitter
+     * alone, propagation dies at the second hop because the next relay holds no grant, and
+     * authorizing authorship on the transmitter is the laundering bug the v0.6.2 administrative
+     * handlers were hardened against. Rewriting the origin to make one check pass is not an
+     * option either: nc.e is signed by the origin and verified against oD at :542, so a rewritten
+     * oD fails verification.
+     *
+     *   {@code <net>.broadcast.<type>} on the verified ORIGIN   -- may it inject into the scope
+     *   {@code <net>.relay.<type>}     on the authenticated TRANSMITTER -- may it forward
+     *
+     * Origin identity is taken from {@code ne.p.oCXID}, which lives inside the signed event and
+     * so cannot be touched by a relay at all, and is cross-checked against the container's oD.
+     *
+     * Ordering note: the design called for the cheap transmitter check to run before signature
+     * verification, as a DoS filter. That is not achievable here without restructuring
+     * processNetworkInput, which verifies at :278 and :542 before reaching dedup at :664. Both
+     * checks therefore run on already-verified data. Correct, but without the cheap-first saving.
+     */
+    private boolean broadcastPermitted(NetworkContainer nc, NetworkEvent ne) {
+        if (ne == null || ne.p == null || ne.p.scope == null) return true;
+        if (!ne.p.scope.equalsIgnoreCase("CXN")) return true;
+
+        // A CXN event aimed at one peer is not a broadcast.
+        String target = ne.p.cxID;
+        if (target != null && !"*".equals(target)) return true;
+
+        String networkID = ne.p.network;
+        if (networkID == null) return true;
+        CXNetwork network = connectX.getNetwork(networkID);
+        if (network == null || network.networkPermissions == null) return true;
+
+        String eventType = ne.eT != null ? ne.eT : "UNKNOWN";
+        String origin = ne.p.oCXID;
+        String containerOrigin = nc != null ? nc.oD : null;
+        String transmitter = nc != null ? nc.iD : null;
+
+        // In honest flow oD is always populated: set at origin in OutConnectionController and
+        // preserved in every relay branch. A null oD on a broadcast is anomalous and
+        // attacker-shaped -- default-deny rather than falling back to the transmitter, which
+        // would make this check disagree with what :542 verified against.
+        if (origin == null || containerOrigin == null) {
+            return permissionRefusal(networkID, eventType, origin, transmitter,
+                    "origin identity missing");
+        }
+        if (!origin.equals(containerOrigin)) {
+            return permissionRefusal(networkID, eventType, origin, transmitter,
+                    "signed-event origin disagrees with container origin");
+        }
+
+        boolean relayed = transmitter != null && !containerOrigin.equals(transmitter);
+        if (relayed && !network.checkRelayPermission(transmitter, eventType)) {
+            return permissionRefusal(networkID, eventType, origin, transmitter,
+                    "transmitter holds no relay grant");
+        }
+
+        if (!network.checkBroadcastPermission(origin, eventType)) {
+            return permissionRefusal(networkID, eventType, origin, transmitter,
+                    "origin holds no broadcast grant");
+        }
+
+        return true;
+    }
+
+    /**
+     * Record a refused broadcast and decide whether to actually drop it.
+     *
+     * Returns true (accept anyway) while enforcement is off, which is the default: CXN broadcast
+     * has been unrestricted until now and bootstrap traffic rides it, so enforcing on first run
+     * risks a mesh that cannot bootstrap. The audit line names the ORIGIN as well as the event
+     * type, because that pairing is what decides whether cosigned events are needed.
+     */
+    private boolean permissionRefusal(String networkID, String eventType, String origin,
+                                      String transmitter, String reason) {
+        if (NodeConfig.broadcastPermissionAudit) {
+            log.info("[BroadcastPerm] {} scope={} type={} origin={} transmitter={} -- {}",
+                    NodeConfig.enforceBroadcastPermissions ? "DROP" : "WOULD-DROP",
+                    networkID, eventType,
+                    origin != null ? origin : "null",
+                    transmitter != null ? transmitter : "null",
+                    reason);
+        }
+        if (!NodeConfig.enforceBroadcastPermissions) return true;
+        Analytics.addData(AnalyticData.Tear,
+                "Broadcast refused: " + reason + " scope=" + networkID + " type=" + eventType
+                        + " origin=" + origin);
+        return false;
+    }
+
     public boolean connectNetwork(CXNetwork cxnet) {
         //TODO implement network connection
         return false;

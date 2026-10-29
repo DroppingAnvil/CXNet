@@ -123,9 +123,9 @@ public class MultiPeerTest {
         log.info("\nStep 1b: Waiting " + STARTUP_WAIT_SECONDS + "s for peers to spin up and discover each other...");
         for (int i = STARTUP_WAIT_SECONDS; i > 0; i--) {
             if (i % 30 == 0 || i <= 5) {
-                System.out.print("  " + i + "s remaining -- HV peers:");
+                System.out.print("  " + i + "s remaining -- known peers:");
                 for (int j = 0; j < peers.size(); j++) {
-                    System.out.print(" P" + (j+1) + "=" + peers.get(j).nodeMesh.peerDirectory.hv.size());
+                    System.out.print(" P" + (j+1) + "=" + peers.get(j).nodeMesh.peerDirectory.peers.size());
                 }
                 log.info("\n");
             }
@@ -139,8 +139,9 @@ public class MultiPeerTest {
             ConnectX p = peers.get(i);
             log.info("  P" + (i+1) + " (" + p.getOwnID().substring(0, 8) + ")"
                 + "  state=" + p.state
-                + "  HV=" + p.nodeMesh.peerDirectory.hv.size()
-                + "  LAN-peers=" + p.dataContainer.localPeerCount());
+                + "  peers=" + p.nodeMesh.peerDirectory.peers.size()
+                + "  backbone=" + p.nodeMesh.peerDirectory.hv.size()
+                + "  with-addresses=" + p.nodeMesh.peerDirectory.localPeerCount());
         }
 
         // Optionally send CXN messages during setup
@@ -204,16 +205,21 @@ public class MultiPeerTest {
                 log.info("    Chain c2: " + cxnet.c2.blockMap.size() + " blocks");
                 log.info("    Chain c3: " + cxnet.c3.blockMap.size() + " blocks");
             }
-            int hvPeerCount = peer.nodeMesh.peerDirectory.hv.size();
+            int knownPeerCount = peer.nodeMesh.peerDirectory.peers.size();
             int lanPeerCount = peer.nodeMesh.peerDirectory.lan.size();
-            log.info("  PeerDirectory: HV=" + hvPeerCount + " LAN=" + lanPeerCount
+            log.info("  PeerDirectory: peers=" + knownPeerCount + " LAN=" + lanPeerCount
+                + " backbone=" + peer.nodeMesh.peerDirectory.hv.size()
                 + " cached=" + peer.nodeMesh.peerDirectory.peerCache.size());
-            if (hvPeerCount > 0) {
+            if (knownPeerCount > 0) {
                 int count = 0;
-                for (String peerID : peer.nodeMesh.peerDirectory.hv.keySet()) {
-                    if (count++ >= 3) { log.info("      ... and " + (hvPeerCount - 3) + " more"); break; }
-                    Node node = peer.nodeMesh.peerDirectory.hv.get(peerID);
-                    log.info("      " + peerID.substring(0, 8) + " @ " + node.addr);
+                for (String peerID : peer.nodeMesh.peerDirectory.allCXIDs()) {
+                    if (count++ >= 3) { log.info("      ... and " + (knownPeerCount - 3) + " more"); break; }
+                    // An entry can exist from an address sighting before its identity is
+                    // imported, so node and addr are both nullable here.
+                    Node node = peer.nodeMesh.peerDirectory.node(peerID);
+                    log.info("      " + peerID.substring(0, 8) + " @ "
+                        + (node != null ? node.addr : "(no identity yet)")
+                        + " score=" + peer.nodeMesh.peerDirectory.priscore(peerID));
                 }
             }
             log.info("  Queues: output=" + peer.outputQueue.size() + " event=" + peer.eventQueue.size());
@@ -315,11 +321,14 @@ public class MultiPeerTest {
         log.info("Peer finding event queued");
         Thread.sleep(2000);
 
-        long peersWithHvEntries = peers.stream()
-            .filter(p -> p.nodeMesh.peerDirectory.hv != null && !p.nodeMesh.peerDirectory.hv.isEmpty())
+        // Discovery populates the peer store. hv is no longer written by addNode -- it holds only
+        // the CXNET backbone (EPOCH, seed-declared hv peers, registered backends) -- so asserting
+        // on it here would test backbone membership rather than whether discovery worked.
+        long peersWithDirectoryEntries = peers.stream()
+            .filter(p -> p.nodeMesh.peerDirectory.peers != null && !p.nodeMesh.peerDirectory.peers.isEmpty())
             .count();
-        assertTrue(peersWithHvEntries > 0,
-            "At least one peer must have HV directory entries after CXHELLO exchanges");
+        assertTrue(peersWithDirectoryEntries > 0,
+            "At least one peer must have peer directory entries after CXHELLO exchanges");
     }
 
     @Test
@@ -453,8 +462,8 @@ public class MultiPeerTest {
         String receiverID = receiver.getOwnID();
 
         // Sender must know the receiver's public key (exchanged during CXHELLO)
-        assertNotNull(sender.nodeMesh.peerDirectory.hv.get(receiverID),
-            "Sender must have receiver in HV directory before E2E test");
+        assertNotNull(sender.nodeMesh.peerDirectory.node(receiverID),
+            "Sender must have receiver in the peer directory before E2E test");
 
         receivedMessages.get(1).clear();
         receivedMessages.get(2).clear();
@@ -504,7 +513,7 @@ public class MultiPeerTest {
         assumeBootstrapped();
         // Need at least 2 peers that know about each other
         org.junit.jupiter.api.Assumptions.assumeTrue(
-            peers.size() >= 2 && peers.get(0).nodeMesh.peerDirectory.hv.size() >= 1,
+            peers.size() >= 2 && peers.get(0).nodeMesh.peerDirectory.peers.size() >= 1,
             "Skipping: peers have not discovered each other yet");
         runStreamTest(peers);
     }
@@ -780,8 +789,8 @@ public class MultiPeerTest {
         ConnectX receiver = peers.get(1);
         String receiverID = receiver.getOwnID();
 
-        assertNotNull(sender.nodeMesh.peerDirectory.hv.get(receiverID),
-            "Sender must have receiver in HV directory");
+        assertNotNull(sender.nodeMesh.peerDirectory.node(receiverID),
+            "Sender must have receiver in the peer directory");
 
         receivedMessages.get(1).clear();
 

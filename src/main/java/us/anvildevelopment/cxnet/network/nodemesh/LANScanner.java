@@ -380,7 +380,9 @@ public class LANScanner {
             
             log.info("[LAN Scanner] Scan complete!");
             log.info("[LAN Scanner] Found {} active peers on local network", discovered.get());
-            log.debug("[LAN Scanner] Total peers in DataContainer: {}", connectX.dataContainer.localPeerAddressesCopy().size());
+            log.debug("[LAN Scanner] Total peers with known addresses: {}",
+                    connectX.nodeMesh != null && connectX.nodeMesh.peerDirectory != null
+                            ? connectX.nodeMesh.peerDirectory.localPeerCount() : 0);
 
             // Set ConnectX state to READY - signals that P2P discovery has completed
             connectX.state = State.READY;

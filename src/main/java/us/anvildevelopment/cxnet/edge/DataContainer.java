@@ -18,34 +18,40 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DataContainer implements Serializable {
     public String test = "test";
     /**
-     * Stores nodes that have allowed direct connections
+     * User-linked peers.
+     *
+     * @deprecated Migrated to PeerEntry.userLinked. This field was declared but never read or
+     * written anywhere, so the feature was never actually implemented here; it now lives in
+     * PeerDirectory, which is also where the eviction exemption belongs. Retained only so
+     * DataContainers already on disk still deserialize --
+     * PeerDirectory.importFromDataContainer() drains it on load.
      */
+    @Deprecated
     public Map<String, Node> LAN = new HashMap<>();
 
     /**
-     * Local peer address mapping for LAN discovery
+     * Local peer address mapping for LAN discovery.
      * Map: peerID -> List of local IP:port addresses (in priority order)
      *
-     * Populated by:
-     * - LAN scanner finding peers on local network
-     * - Recording source addresses when events are received
-     * - CXHELLO/CXHELLO_RESPONSE events
+     * @deprecated Migrated to PeerEntry.addresses, so a peer's addresses live on the peer rather
+     * than in a separate object that every send had to join against. Use
+     * PeerDirectory.recordLocalPeer() / getLocalPeerAddresses().
      *
-     * Multiple addresses stored per peer for fallback routing:
-     * - Primary: Listening port from CXHELLO payload
-     * - Fallback: Ephemeral socket ports from passive discovery
-     *
-     * Used for direct local communication to bypass firewalls and improve performance
+     * Retained, rather than removed, because DataContainer is Serializable and persisted:
+     * deleting the field would fail deserialization of containers already on disk, and v0.4.3
+     * records this object silently failing to load once already.
+     * PeerDirectory.importFromDataContainer() drains it on load.
      */
+    @Deprecated
     public Map<String, List<String>> localPeerAddresses = new ConcurrentHashMap<>();
 
     /**
-     * Tracks the last added RECEIVING socket address (non-priority) per peer
-     * Map: peerID -> last receiving socket address
-     * Used to prevent address bloat by removing old receiving socket addresses when new ones arrive
-     * Only tracks addresses added via priority=false (from NodeMesh recording source sockets)
-     * Does NOT track CXHELLO addresses or other priority addresses
+     * Tracks the last added RECEIVING socket address (non-priority) per peer.
+     *
+     * @deprecated Migrated to PeerEntry.lastReceivingSocket. Retained for deserialization
+     * compatibility only.
      */
+    @Deprecated
     private Map<String, String> lastReceivingSocketPerPeer = new ConcurrentHashMap<>();
 
     /**
@@ -193,6 +199,7 @@ public class DataContainer implements Serializable {
      * @param address Local IP:port address (e.g., "192.168.1.100:49152")
      * @param priority If true, add as first address (from CXHELLO payload); if false, append (passive discovery)
      */
+    @Deprecated
     public void recordLocalPeer(String peerID, String address, boolean priority) {
         if (peerID != null && address != null && !address.isEmpty()) {
             List<String> addresses = localPeerAddresses.computeIfAbsent(peerID, k -> new java.util.ArrayList<>());
@@ -224,6 +231,7 @@ public class DataContainer implements Serializable {
     /**
      * Record a local peer address (non-priority fallback)
      */
+    @Deprecated
     public void recordLocalPeer(String peerID, String address) {
         recordLocalPeer(peerID, address, false);
     }
@@ -233,6 +241,7 @@ public class DataContainer implements Serializable {
      * @param peerID Peer UUID
      * @return Local IP:port address, or null if not found
      */
+    @Deprecated
     public String getLocalPeerAddress(String peerID) {
         List<String> addresses = localPeerAddresses.get(peerID);
         return (addresses != null && !addresses.isEmpty()) ? addresses.get(0) : null;
@@ -243,6 +252,7 @@ public class DataContainer implements Serializable {
      * @param peerID Peer UUID
      * @return List of addresses, or empty list if not found
      */
+    @Deprecated
     public List<String> getLocalPeerAddresses(String peerID) {
         List<String> addresses = localPeerAddresses.get(peerID);
         return (addresses != null) ? new java.util.ArrayList<>(addresses) : new java.util.ArrayList<>();
@@ -252,6 +262,7 @@ public class DataContainer implements Serializable {
      * Remove a local peer address
      * @param peerID Peer UUID
      */
+    @Deprecated
     public void removeLocalPeer(String peerID) {
         localPeerAddresses.remove(peerID);
     }
@@ -263,6 +274,7 @@ public class DataContainer implements Serializable {
      * @param successfulAddress The address that succeeded
      * @param numFailedRoutes Number of routes that failed before this one
      */
+    @Deprecated
     public void deprioritizeFailedRoute(String peerID, String successfulAddress, int numFailedRoutes) {
         if (peerID == null || numFailedRoutes <= 0) return;
 
@@ -297,6 +309,7 @@ public class DataContainer implements Serializable {
      * Get count of discovered local peers
      * @return Number of peers discovered via LAN/P2P
      */
+    @Deprecated
     public int localPeerCount() {
         return localPeerAddresses.size();
     }
@@ -304,6 +317,7 @@ public class DataContainer implements Serializable {
     /**
      * Get all local peer addresses (map of peerID -> address list)
      */
+    @Deprecated
     public Map<String, List<String>> localPeerAddressesCopy() {
         return new HashMap<>(localPeerAddresses);
     }

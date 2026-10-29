@@ -81,13 +81,21 @@ public class BootstrapServerTest {
         server.setSelf(serverNode);
         log.info("  ✓ EPOCH identity: " + SERVER_ID);
 
-       // Initialize and add EPOCH to peer directory for signature verification
+        // Register EPOCH's own node for signature verification.
+        //
+        // Deliberately a direct hv write, and deliberately after setSelf(): setSelf() purges self
+        // from the peer directory, and addBackend()/registerHVPeer() either reject self or would
+        // have the entry purged by a later setSelf(). So EPOCH's own identity lives in hv with no
+        // PeerEntry behind it.
+        //
+        // That shape is load-bearing rather than incidental. It is the only place a node is known
+        // through hv alone, and it is what caught the v0.6.4 getAllAddresses regression, where
+        // returning early on a missing PeerEntry resolved EPOCH to zero addresses and made it
+        // unreachable for every targeted send. Keep this as a direct hv write; "tidying" it into
+        // addBackend would remove the only coverage of that path.
         if (addEpoch) {
-            if (server.nodeMesh.peerDirectory.hv == null) {
-                server.nodeMesh.peerDirectory.hv = new java.util.concurrent.ConcurrentHashMap<>();
-            }
             server.nodeMesh.peerDirectory.hv.put(SERVER_ID, serverNode);
-            log.info("  ✓ EPOCH added to peer directory");
+            log.info("  ✓ EPOCH added to peer directory (hv backbone)");
         }
 
         // Get auto-registered cxHTTP1 bridge provider (per-instance)

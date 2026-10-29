@@ -1035,13 +1035,19 @@ public class ConnectX {
         return false;
     }
 
-    /** Remove all self entries from all peer directory maps. Checks both cxID and public key. */
+    /**
+     * Remove all self entries from the peer directory. Checks both cxID and public key.
+     *
+     * Purges the backing stores directly rather than the deprecated seen/lan/peerCache
+     * projections, whose entrySet() is a snapshot and so would absorb the removal.
+     */
     private void purgeFromPeerDirectory(PeerDirectory pd) {
         if (pd == null) return;
         purgeSelfFromMap(pd.hv);
-        purgeSelfFromMap(pd.seen);
-        purgeSelfFromMap(pd.lan);
-        purgeSelfFromMap(pd.peerCache);
+        if (pd.peers != null) {
+            pd.peers.entrySet().removeIf(e ->
+                    e.getValue() != null && isSelfNode(e.getValue().node));
+        }
     }
 
     private void purgeSelfFromMap(java.util.concurrent.ConcurrentHashMap<String, Node> map) {
@@ -1102,6 +1108,25 @@ public class ConnectX {
     }
 
     /**
+     * Recompute which of a network's backends this node prefers to route to, ranked by live
+     * reachability, and pin them so the peer directory cannot evict one the backend map still
+     * points at.
+     *
+     * The authoritative backendSet is untouched: this is a routing preference, and CXB scope
+     * keeps fanning out over the full set.
+     */
+    public void refreshBackendPreferences(String networkID) {
+        if (nodeMesh == null || nodeMesh.backendMap == null || networkID == null) return;
+        CXNetwork network = networkMap.get(networkID);
+        if (network == null) return;
+        try {
+            nodeMesh.backendMap.refresh(network, networkID, getOwnID());
+        } catch (Exception e) {
+            log.debug("[BackendMap] Refresh failed for {}: {}", networkID, e.getMessage());
+        }
+    }
+
+    /**
      * Register a high-value peer (e.g., NMI/EPOCH) in the peer directory.
      * Use this instead of accessing nodeMesh.peerDirectory.hv directly.
      *
@@ -1113,10 +1138,7 @@ public class ConnectX {
             log.warn("[registerHVPeer] Rejected attempt to register self as HV peer");
             return;
         }
-        if (nodeMesh.peerDirectory.hv == null) {
-            nodeMesh.peerDirectory.hv = new java.util.concurrent.ConcurrentHashMap<>();
-        }
-        nodeMesh.peerDirectory.hv.put(node.cxID, node);
+        nodeMesh.peerDirectory.addBackend(node);
     }
 
     /**
@@ -1332,7 +1354,21 @@ public class ConnectX {
      * CXNET is skipped here as it bootstraps independently via cxnet-bootstrap.cxn.
      */
     private void restoreJoinedNetworks() {
-        if (dataContainer == null || dataContainer.watchedNetworks.isEmpty()) return;
+        // Say why nothing was restored. This used to return silently, which is
+        // indistinguishable in the log from "ran and found nothing to do" -- and since CXNET
+        // bootstraps independently of watchedNetworks, a lost DataContainer presents as
+        // "only CXNET came back" with no explanation anywhere.
+        if (dataContainer == null) {
+            log.warn("[NetworkRestore] No DataContainer; cannot restore joined networks");
+            return;
+        }
+        if (dataContainer.watchedNetworks == null || dataContainer.watchedNetworks.isEmpty()) {
+            log.warn("[NetworkRestore] watchedNetworks is empty; no non-CXNET networks to restore."
+                    + " Either none was ever joined on this node, or {} did not load.",
+                    new File(cxRoot, "data.cxd").getAbsolutePath());
+            return;
+        }
+        log.info("[NetworkRestore] watchedNetworks = {}", dataContainer.watchedNetworks);
         for (String networkID : dataContainer.watchedNetworks) {
             if ("CXNET".equals(networkID)) continue;
             if (networkMap.containsKey(networkID)) continue;
@@ -1859,13 +1895,13 @@ public class ConnectX {
             log.warn("[NetworkJoin] Could not send SEED_REQUEST to EPOCH: {}", e.getMessage());
         }
 
-        // Also ask all known HV peers via CXNET mesh as fallback
-        if (nodeMesh == null || nodeMesh.peerDirectory == null
-                || nodeMesh.peerDirectory.hv == null || nodeMesh.peerDirectory.hv.isEmpty()) {
+        // Also ask every known peer via CXNET mesh as fallback. Reads the whole directory rather
+        // than the backbone: any peer may already hold the seed.
+        if (nodeMesh == null || nodeMesh.peerDirectory == null) {
             return;
         }
         int sent = 0;
-        for (Node peer : nodeMesh.peerDirectory.hv.values()) {
+        for (Node peer : nodeMesh.peerDirectory.allNodes()) {
             if (self != null && peer.cxID.equals(self.cxID)) continue;
             if (peer.cxID.equals(EPOCH_UUID)) continue;
             try {
@@ -1941,9 +1977,9 @@ public class ConnectX {
             log.warn("[PeerLookup] Could not send PEER_LOOKUP_REQUEST to EPOCH: {}", e.getMessage());
         }
 
-        if (epochOnly || nodeMesh == null || nodeMesh.peerDirectory.hv == null) return;
+        if (epochOnly || nodeMesh == null || nodeMesh.peerDirectory == null) return;
 
-        for (Node peer : nodeMesh.peerDirectory.hv.values()) {
+        for (Node peer : nodeMesh.peerDirectory.allNodes()) {
             if (self != null && peer.cxID.equals(self.cxID)) continue;
             if (peer.cxID.equals(EPOCH_UUID)) continue;
             try {
@@ -2155,8 +2191,10 @@ public class ConnectX {
                 verifyIn.close();
                 verifyOut.close();
 
-                // Signature valid -- add with signed blob for persistence
-                nodeMesh.peerDirectory.addNode(peer, blob, cxRoot);
+                // Signature valid -- add with signed blob for persistence.
+                // Seed-declared hv peers are the CXNET backbone, so they register as backends:
+                // this is what keeps Seed.fromCurrentPeers() able to re-share them.
+                nodeMesh.peerDirectory.addBackend(peer, blob, cxRoot);
                 peersAdded++;
                 log.info("[Seed] Verified and added peer: {}", peer.cxID.substring(0, 8));
             } catch (Exception e) {
@@ -2531,7 +2569,7 @@ public class ConnectX {
 
             // Add EPOCH to peer directory so we can route to it
             try {
-                nodeMesh.peerDirectory.addNode(epochNode);
+                nodeMesh.peerDirectory.addBackend(epochNode);
                 log.info("[Bootstrap] Added EPOCH to peer directory");
             } catch (SecurityException e) {
                 log.info("[Bootstrap] EPOCH already in peer directory");
@@ -2638,8 +2676,22 @@ public class ConnectX {
         OutConnectionController outController =
             new OutConnectionController(this);
         nodeMesh = NodeMesh.initializeNetwork(this, port, outController);
-        // Initialize nodeMesh.peerDirectory.peers for signed node persistence
-        nodeMesh.peerDirectory.peers = nodemesh;
+        // Initialize nodeMesh.peerDirectory.peersDir for signed node persistence
+        nodeMesh.peerDirectory.peersDir = nodemesh;
+
+        // One-shot migration of addresses and user-linked peers out of the persisted
+        // DataContainer, which held them separately from the peers they belong to.
+        //
+        // Guarded: this sits ahead of CXNET bootstrap and network restoration, so an exception
+        // here would silently skip both and look like a persistence failure rather than a
+        // migration failure. Losing a cached address list is recoverable; failing to bootstrap
+        // is not.
+        try {
+            nodeMesh.peerDirectory.importFromDataContainer(dataContainer);
+        } catch (Exception e) {
+            log.warn("[PeerDirectory] DataContainer address migration failed, continuing: {}",
+                    e.getMessage());
+        }
 
         // Attempt automatic CXNET bootstrap after network layer is ready
         attemptCXNETBootstrap();
@@ -2801,9 +2853,13 @@ public class ConnectX {
                                 int peersSent = 0;
                                 int maxPeersToContact = 5; // Contact up to 5 peers per discovery cycle
 
-                                if (nodeMesh.peerDirectory.hv != null && !nodeMesh.peerDirectory.hv.isEmpty()) {
-                                    for (Node peer : nodeMesh.peerDirectory.hv.values()) {
+                                // Highest-priscore peers first, so a discovery cycle spends its
+                                // five slots on peers that are actually reachable.
+                                if (nodeMesh.peerDirectory != null) {
+                                    for (PeerEntry pe : nodeMesh.peerDirectory.ranked()) {
                                         if (peersSent >= maxPeersToContact) break;
+                                        Node peer = pe.node;
+                                        if (peer == null) continue;
 
                                         if (peer.cxID == null || peer.cxID.equals(getOwnID())) {
                                             continue; // Skip invalid or self
@@ -2972,8 +3028,54 @@ public class ConnectX {
                 new us.anvildevelopment.util.tools.permissions.BasicEntry(Permission.Record.name() + "-" + network.networkDictionary.c3, true, 10));
         }
 
+        // Broadcast and relay defaults.
+        //
+        // relay is granted to every member on every network, CXNET included. A relay can only
+        // forward something already authorized at its origin, and the event dedup map bounds
+        // amplification, so this is the permissive half by design -- it is also what lets a
+        // broadcast survive past the second hop at all. Revoking it for one identity stays the
+        // lever for killing a misbehaving relay.
+        String scope = networkID;
+        defaultPermissions.put(scope + ".relay.*",
+            new us.anvildevelopment.util.tools.permissions.BasicEntry(scope + ".relay.*", true, 10));
+
+        // broadcast is the restrictive half, and only on CXNET. A pure-p2p network like CXChat
+        // needs every member to ORIGINATE, not merely forward, so an open network grants it by
+        // default and behaves exactly as today's unrestricted fanout. CXNET stays closed: its
+        // backendSet and EPOCH are granted below, and a joining peer reaches them
+        // point-to-point rather than broadcasting its own identity.
+        boolean openBroadcast = !"CXNET".equals(networkID) && network.configuration.openBroadcast;
+        if (openBroadcast) {
+            defaultPermissions.put(scope + ".broadcast.*",
+                new us.anvildevelopment.util.tools.permissions.BasicEntry(scope + ".broadcast.*", true, 10));
+        }
+
         // Store default permissions template (used when nodes join)
         network.networkPermissions.permissionSet.put("DEFAULT_NODE", defaultPermissions);
+
+        // The NMI and every declared backend may originate broadcasts on this network. On CXNET
+        // this is the whole of the broadcast grant set, which is what the audit run verifies.
+        nmiPermissions.put(scope + ".broadcast.*",
+            new us.anvildevelopment.util.tools.permissions.BasicEntry(scope + ".broadcast.*", true, 100));
+        if (network.configuration.backendSet != null) {
+            for (String backendID : network.configuration.backendSet) {
+                if (backendID == null || backendID.equals(self.cxID)) continue;
+                java.util.Map<String, us.anvildevelopment.util.tools.permissions.Entry> backendPerms =
+                    network.networkPermissions.permissionSet.computeIfAbsent(backendID, k -> new java.util.HashMap<>());
+                backendPerms.put(scope + ".broadcast.*",
+                    new us.anvildevelopment.util.tools.permissions.BasicEntry(scope + ".broadcast.*", true, 100));
+                backendPerms.put(scope + ".relay.*",
+                    new us.anvildevelopment.util.tools.permissions.BasicEntry(scope + ".relay.*", true, 100));
+            }
+        }
+        if ("CXNET".equals(networkID)) {
+            java.util.Map<String, us.anvildevelopment.util.tools.permissions.Entry> epochPerms =
+                network.networkPermissions.permissionSet.computeIfAbsent(EPOCH_UUID, k -> new java.util.HashMap<>());
+            epochPerms.put("CXNET.broadcast.*",
+                new us.anvildevelopment.util.tools.permissions.BasicEntry("CXNET.broadcast.*", true, 100));
+            epochPerms.put("CXNET.relay.*",
+                new us.anvildevelopment.util.tools.permissions.BasicEntry("CXNET.relay.*", true, 100));
+        }
 
         // Copy permissions to NetworkDictionary
         network.networkDictionary.networkPermissions = network.networkPermissions;
@@ -2982,6 +3084,7 @@ public class ConnectX {
         networkMap.put(networkID, network);
         refreshSelfNetworks();
         trackWatchedNetwork(networkID);
+        refreshBackendPreferences(networkID);
 
         // Persist blockchain to disk
         try {
@@ -3144,6 +3247,8 @@ public class ConnectX {
 
         // Set zT flag in network configuration
         network.zT = true;
+        // zT fully demotes the NMI, so discard permissions resolved under its old standing.
+        network.invalidatePermissionCache();
 
         ZeroTrustActivation payload =
             new ZeroTrustActivation(
@@ -3282,6 +3387,7 @@ public class ConnectX {
         networkMap.put(networkID, network);
         refreshSelfNetworks();
         trackWatchedNetwork(networkID);
+        refreshBackendPreferences(networkID);
 
         // Try to load persisted blockchain data from disk
         try {
